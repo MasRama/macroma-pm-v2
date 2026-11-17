@@ -196,17 +196,23 @@ async function loadImages(id: string, ticket = detailTicket): Promise<void> {
 /* Komentar */
 const commentError = ref<string | undefined>();
 const commenting = ref(false);
+/** Counts task switches (a live refetch is not one), so a late answer can tell whether its task is still open. */
+let taskSwitches = 0;
 async function addComment(body: string, sent: () => void): Promise<void> {
   const id = props.taskId;
   if (!id || commenting.value) return;
+  const switches = taskSwitches;
+  // Once the person has opened another task, the draft and the error line belong to that task.
+  const stillOpen = () => switches === taskSwitches;
   commenting.value = true;
   commentError.value = undefined;
   try {
     const response = await props.client.addComment(id, { content: body });
+    if (!stillOpen()) return;
     if (response.success) {
       sent();
       const added = toTaskComment(response.data.comment);
-      if (id === props.taskId && comments.value && !comments.value.some((comment) => comment.id === added.id)) {
+      if (comments.value && !comments.value.some((comment) => comment.id === added.id)) {
         comments.value = [...comments.value, added];
       }
     } else {
@@ -214,7 +220,7 @@ async function addComment(body: string, sent: () => void): Promise<void> {
     }
   } catch (cause) {
     console.error(cause);
-    commentError.value = 'Komentar belum terkirim. Coba lagi.';
+    if (stillOpen()) commentError.value = 'Komentar belum terkirim. Coba lagi.';
   } finally {
     commenting.value = false;
   }
@@ -302,6 +308,7 @@ watch(batchFilter, () => void loadTasks());
 watch(
   () => props.taskId,
   () => {
+    taskSwitches += 1;
     commentError.value = undefined;
     imageError.value = undefined;
     void loadDetail();

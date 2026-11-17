@@ -1014,6 +1014,40 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(document.querySelector('.td__rail')?.textContent).toContain('On going');
   });
 
+  it("keeps the next task's draft when a comment sent on the previous task lands after switching", async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const first = await createTask(owner, projectId, 'Pairing code');
+    const second = await createTask(owner, projectId, 'Halaman 404');
+    await openTab(owner.cookie, `/projects/${projectId}/tasks/${first}`);
+    await showDetailTab('Komentar');
+
+    // Hold the comment's POST until the person has moved on to the other task.
+    const send = globalThis.fetch;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'POST' && String(input).includes(`/tasks/${first}/comments`) ? held.then(() => send(input, init)) : send(input, init),
+    );
+    typeIn('#task-comment', 'Untuk task pertama');
+    await settle();
+    await submit('.td__reply');
+
+    await router.push(`/projects/${projectId}/tasks/${second}`);
+    await settle();
+    await showDetailTab('Komentar');
+    typeIn('#task-comment', 'Draft task kedua');
+    await settle();
+    release();
+    await settle();
+    await settle();
+
+    expect(comments(first)).toEqual([{ user_id: owner.id, content: 'Untuk task pertama' }]);
+    expect(document.querySelector<HTMLTextAreaElement>('#task-comment')?.value).toBe('Draft task kedua');
+    expect(document.querySelector('.td__pane')?.textContent).not.toContain('Untuk task pertama');
+  });
+
   it('uploads images from the detail, shows them by the API url, and lets only the uploader or owner delete them', async () => {
     const owner = await register('Ren Owner');
     const member = await register('Ayu Member');
