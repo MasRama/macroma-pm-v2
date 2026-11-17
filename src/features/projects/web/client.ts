@@ -12,6 +12,7 @@ import type {
   CreateCommentInput,
   CreateProjectInput,
   CreateTaskInput,
+  DashboardResponse,
   ListProjectsQuery,
   MemberAddedResponse,
   MoveTaskInput,
@@ -32,7 +33,7 @@ import type {
   UpdateTaskInput,
   UpdateTaskResponse,
 } from '../contract';
-import type { createProjectRoutes, createTaskRoutes } from '..';
+import type { createDashboardRoutes, createProjectRoutes, createTaskRoutes } from '..';
 
 /** CSRF provider for state-changing requests; the application binds it to its identity provider. */
 export interface ProjectsWebCsrf {
@@ -54,6 +55,8 @@ export interface ProjectsClient {
   batches(id: string): Promise<BatchesResponse>;
   createBatch(id: string, input: CreateBatchInput): Promise<BatchSavedResponse>;
   activateBatch(id: string, batchId: string): Promise<BatchSavedResponse>;
+  /** The signed-in account's dashboard over the projects it can open. */
+  dashboard(): Promise<DashboardResponse>;
   /** The releases view: the active batch's progress and every other batch, newest first. */
   releases(id: string): Promise<ReleasesResponse>;
   /** One batch's changelog, stats and contributors. */
@@ -84,12 +87,19 @@ export interface ProjectsClientOptions {
   baseUrl?: string;
   tasksBaseUrl?: string;
   attachmentsBaseUrl?: string;
+  dashboardUrl?: string;
   /** Without it, writes reach the server without a CSRF token and fail closed there. */
   csrf?: ProjectsWebCsrf;
 }
 
 export function createProjectsClient(options: ProjectsClientOptions = {}): ProjectsClient {
-  const { baseUrl = '/api/projects', tasksBaseUrl = '/api/tasks', attachmentsBaseUrl = '/api/task-attachments', csrf } = options;
+  const {
+    baseUrl = '/api/projects',
+    tasksBaseUrl = '/api/tasks',
+    attachmentsBaseUrl = '/api/task-attachments',
+    dashboardUrl = '/api/dashboard',
+    csrf,
+  } = options;
   const apiFetch: typeof fetch = async (input, init = {}) => {
     const method = (init.method ?? 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD') await csrf?.ensureToken();
@@ -97,6 +107,7 @@ export function createProjectsClient(options: ProjectsClientOptions = {}): Proje
   };
   const projects = hc<ReturnType<typeof createProjectRoutes>>(baseUrl.replace(/\/$/, ''), { fetch: apiFetch });
   const tasks = hc<ReturnType<typeof createTaskRoutes>>(tasksBaseUrl.replace(/\/$/, ''), { fetch: apiFetch });
+  const dashboard = hc<ReturnType<typeof createDashboardRoutes>>(dashboardUrl.replace(/\/$/, ''), { fetch: apiFetch });
 
   return {
     list: async (query = {}) => (await projects.index.$get({ query })).json(),
@@ -111,6 +122,7 @@ export function createProjectsClient(options: ProjectsClientOptions = {}): Proje
     createBatch: async (id, input) => (await projects[':id'].batches.$post({ param: { id }, json: input })).json(),
     activateBatch: async (id, batchId) =>
       (await projects[':id'].batches[':batchId'].activate.$patch({ param: { id, batchId } })).json(),
+    dashboard: async () => (await dashboard.index.$get()).json(),
     releases: async (id) => (await projects[':id'].releases.$get({ param: { id } })).json(),
     release: async (id, batchId) => (await projects[':id'].releases[':batchId'].$get({ param: { id, batchId } })).json(),
     tasks: async (id, query = {}) => (await projects[':id'].tasks.$get({ param: { id }, query })).json(),

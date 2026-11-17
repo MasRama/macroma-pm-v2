@@ -398,6 +398,103 @@ export function countsByBatch(projectId: string): Map<string, ColumnCounts> {
   return counts;
 }
 
+// --- Dashboard --------------------------------------------------------------
+
+/** Tasks of the batches per column, in one query. */
+export function countsByBatchIds(batchIds: readonly string[]): Map<string, ColumnCounts> {
+  const counts = new Map<string, ColumnCounts>();
+  if (batchIds.length === 0) return counts;
+  const rows = getDatabase()
+    .prepare(`SELECT batch_id, column_id, COUNT(*) AS count FROM tasks WHERE batch_id IN (${placeholders(batchIds)}) GROUP BY batch_id, column_id`)
+    .all(...batchIds) as Array<{ batch_id: string; column_id: TaskColumn; count: number }>;
+  for (const row of rows) {
+    const batchCounts = counts.get(row.batch_id) ?? emptyCounts();
+    batchCounts[row.column_id] = row.count;
+    counts.set(row.batch_id, batchCounts);
+  }
+  return counts;
+}
+
+/** Tasks of the projects now in `done` whose latest move into `done` falls in [from, to). */
+export function doneBetween(projectIds: readonly string[], from: number, to: number): number {
+  if (projectIds.length === 0) return 0;
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT COUNT(*) AS count FROM tasks t
+         WHERE t.project_id IN (${placeholders(projectIds)}) AND t.column_id = 'done'
+           AND (SELECT MAX(l.created_at) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'done') >= ?
+           AND (SELECT MAX(l.created_at) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'done') < ?`,
+      )
+      .get(...projectIds, from, to) as { count: number }
+  ).count;
+}
+
+/** Tasks of the projects in `ongoing` assigned to the account. */
+export function ongoingAssignedTo(projectIds: readonly string[], userId: string): number {
+  if (projectIds.length === 0) return 0;
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT COUNT(*) AS count FROM tasks
+         WHERE project_id IN (${placeholders(projectIds)}) AND column_id = 'ongoing' AND assignee_id = ?`,
+      )
+      .get(...projectIds, userId) as { count: number }
+  ).count;
+}
+
+/** Tasks of the projects in `revisi` that moved to `revisi` more than once. */
+export function revisiRepeatedCount(projectIds: readonly string[]): number {
+  if (projectIds.length === 0) return 0;
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT COUNT(*) AS count FROM tasks t
+         WHERE t.project_id IN (${placeholders(projectIds)}) AND t.column_id = 'revisi'
+           AND (SELECT COUNT(*) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'revisi') > 1`,
+      )
+      .get(...projectIds) as { count: number }
+  ).count;
+}
+
+/**
+ * Where the projects' tasks stood at each moment: per moment, every task
+ * counted once in the column of its latest log at or before it.
+ */
+export function columnCountsAt(projectIds: readonly string[], moments: readonly number[]): Map<number, ColumnCounts> {
+  const counts = new Map<number, ColumnCounts>(moments.map((moment) => [moment, emptyCounts()]));
+  if (projectIds.length === 0 || moments.length === 0) return counts;
+  const rows = getDatabase()
+    .prepare(
+      `WITH moments (moment) AS (VALUES ${moments.map(() => '(?)').join(', ')})
+       SELECT moment, column_to, COUNT(*) AS count FROM (
+         SELECT m.moment, l.column_to,
+           ROW_NUMBER() OVER (PARTITION BY m.moment, l.task_id ORDER BY l.created_at DESC, l.rowid DESC) AS latest
+         FROM moments m
+         JOIN task_logs l ON l.created_at <= m.moment
+         JOIN tasks t ON t.id = l.task_id
+         WHERE t.project_id IN (${placeholders(projectIds)})
+       ) WHERE latest = 1 GROUP BY moment, column_to`,
+    )
+    .all(...moments, ...projectIds) as Array<{ moment: number; column_to: TaskColumn; count: number }>;
+  for (const row of rows) {
+    const momentCounts = counts.get(row.moment);
+    if (momentCounts) momentCounts[row.column_to] = row.count;
+  }
+  return counts;
+}
+
+/** The latest activity across the projects. */
+export function recentActivity(projectIds: readonly string[], limit: number): ActivityRow[] {
+  if (projectIds.length === 0) return [];
+  return getDatabase()
+    .prepare(
+      `SELECT id, project_id, event_type, description, actor_id, task_id, batch_id, meta, created_at
+       FROM project_activity_logs WHERE project_id IN (${placeholders(projectIds)}) ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    )
+    .all(...projectIds, limit) as ActivityRow[];
+}
+
 // --- Releases ---------------------------------------------------------------
 
 /**

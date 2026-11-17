@@ -2,7 +2,7 @@ import { getDatabase } from '../../../shared/database';
 import { WORKSPACE_NOTIFICATION_TYPES } from '../contract';
 import type { WorkspacesServerHost } from './host';
 import { announceWorkspaceChange } from './live';
-import { forgetAccountRows, memberIds, memberRole, workspaceIdsForUser } from './repository';
+import { forgetAccountRows, memberIds, memberRole, workspaceIdsForUser, workspaceOpeningsForUser } from './repository';
 
 /** Whether the account belongs to the workspace, as owner or member. */
 export function isWorkspaceMember(workspaceId: string, userId: string): boolean {
@@ -17,6 +17,11 @@ export function workspaceMemberIds(workspaceId: string): string[] {
 /** The workspaces the account belongs to. */
 export function workspacesOf(userId: string): string[] {
   return workspaceIdsForUser(userId);
+}
+
+/** When each of the account's workspaces was created. */
+export function workspaceOpenings(userId: string): number[] {
+  return workspaceOpeningsForUser(userId);
 }
 
 /** Takes back the notices of invitations that no longer exist, so no dead token is left to answer. */

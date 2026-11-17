@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { Hono } from 'hono';
 import { findAccountByEmail, findAccountsByIds, getCurrentUser, onAccountsDeleted, SESSION_COOKIE_NAME } from '../../features/auth';
 import {
+  createDashboardRoutes,
   createProjectRoutes,
   createTaskAttachmentRoutes,
   createTaskRoutes,
@@ -10,7 +11,7 @@ import {
   type ProjectPerson,
   type ProjectsServerHost,
 } from '../../features/projects';
-import { isWorkspaceMember, workspaceMemberIds, workspacesOf } from '../../features/workspaces';
+import { isWorkspaceMember, workspaceMemberIds, workspaceOpenings, workspacesOf } from '../../features/workspaces';
 import { declareRoutePolicies } from '../../shared/security';
 import { createLocalAssetStorage } from '../../shared/storage';
 
@@ -33,6 +34,7 @@ export const projectsServerHost: ProjectsServerHost = {
   isWorkspaceMember,
   workspaceMemberIds,
   workspacesOf,
+  workspaceOpenings,
   assetStorage: createLocalAssetStorage({ root: resolve(process.cwd(), 'storage') }),
 };
 
@@ -42,6 +44,7 @@ onAccountsDeleted((userIds) => forgetAccounts(projectsServerHost, userIds));
 export default function composeProjectsServer(app: Hono): void {
   app.route('/api/projects', createProjectRoutes(projectsServerHost));
   app.route('/api/tasks', createTaskRoutes(projectsServerHost));
+  app.route('/api/dashboard', createDashboardRoutes(projectsServerHost));
   declareRoutePolicies(app, '/api/task-attachments', TASK_ATTACHMENT_ROUTE_POLICIES);
   app.route('/api/task-attachments', createTaskAttachmentRoutes(projectsServerHost));
 }

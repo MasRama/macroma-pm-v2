@@ -10,4 +10,4 @@ export {
 export type { FeatureName, WorkspacePerson } from './contract';
 export type { WorkspaceNotificationData, WorkspacesServerHost } from './server/host';
 export { createInvitationRoutes, createWorkspaceRoutes } from './server/routes';
-export { forgetAccounts, isWorkspaceMember, workspaceMemberIds, workspacesOf } from './server/membership';
+export { forgetAccounts, isWorkspaceMember, workspaceMemberIds, workspaceOpenings, workspacesOf } from './server/membership';
