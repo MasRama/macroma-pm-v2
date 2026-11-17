@@ -287,10 +287,9 @@ unread count.
   `task.updated`, `task.deleted`, `batch.created`, `batch.activated`,
   `task.attachment_added`, `task.attachment_removed`. `meta` is
   `{ version }` on `task.created` and `{ from, to, note, version }` on
-  `task.moved`, otherwise `null`. `description` is English text. There are no
-  comment events: V1 rows with event types V2 does not have
-  (`comment.created`, `comment.deleted`, written by older V1 builds) are left
-  out by the V1 import.
+  `task.moved`, otherwise `null`. `description` is English text. V1 rows with
+  an event type V2 does not have, `task.log_added` (written by V1's old +Log
+  button, removed in V1 on 2026-08-04), are left out by the V1 import.
 
 Codes: `PROJECT_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `ALREADY_MEMBER`,
 `MEMBER_NOT_FOUND`, `OWNER_CANNOT_BE_REMOVED`, `STALE_REVISION`. Live:
@@ -551,8 +550,8 @@ npm run import:v1 -- --from /path/to/v1/database/dev.sqlite3 --storage /path/to/
   with a warning.
 - Values the V2 responses do not accept are fixed or left out, each counted
   as a warning in the report: activity entries of event types V2 does not
-  have (`comment.created`, `comment.deleted` from older V1 builds) are
-  skipped and counted per type; activity `meta` that is not a JSON object is
+  have (`task.log_added`, from V1's old +Log button, removed in V1 on
+  2026-08-04) are skipped and counted per type; activity `meta` that is not a JSON object is
   emptied; unknown columns on tasks and task logs become `backlog` and
   unknown priorities `medium`; invitations with a status V2 does not have
   and notification data fields that are not flat values are left out.
