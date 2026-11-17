@@ -414,6 +414,12 @@ export function projectsResponseSchemas() {
     project_count: z.number(),
     /** Every task of the account's projects per column. */
     counts,
+    /**
+     * The account's projects with at least one task in `ongoing`, `revisi` or
+     * `review`, from the same `counts`: the projects behind the active task
+     * count (`counts.ongoing + counts.revisi + counts.review`), 0 when it is 0.
+     */
+    active_project_count: z.number(),
     total: z.number(),
     /** Tasks in `done` whose latest move into `done` falls in this week: since Monday 00:00 in the app time zone. */
     done_this_week: z.number(),

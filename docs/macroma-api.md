@@ -177,7 +177,7 @@ through `POST /api/users/:id/reset-password` (they use
 data: {
   stats: {
     workspace_count, project_count,
-    counts: { backlog, ongoing, revisi, review, done }, total,
+    counts: { backlog, ongoing, revisi, review, done }, active_project_count, total,
     done_this_week, done_last_week, ongoing_mine, revisi_repeated
   },
   trends: [{ day: 'YYYY-MM-DD', workspace, project, active, done }],   // 7 days, today last
@@ -196,6 +196,14 @@ data: {
 - `done_this_week`: tasks now in `done` whose latest move into `done` happened
   since this Monday 00:00. `done_last_week`: the same for the Monday-to-Monday
   week before.
+- `counts`: every task of the account's projects per column, whatever its
+  batch. Active = `ongoing`, `revisi`, `review` across all batches (batch-less
+  tasks included), matching `trends[].active`: the active tasks ("Task aktif")
+  are `counts.ongoing + counts.revisi + counts.review`.
+- `active_project_count`: how many of the account's projects have at least one
+  active task (`ongoing`, `revisi`, `review` across all batches), from the same
+  counts, so "N active tasks in M projects" always agrees (`0` when there are
+  no active tasks). Projects with only `backlog` or `done` tasks do not count.
 - `ongoing_mine`: tasks in `ongoing` assigned to the signed-in account.
 - `revisi_repeated`: tasks in `revisi` that moved to `revisi` more than once.
 - `trends`: each value as it stood at the end of that day. `workspace` counts
