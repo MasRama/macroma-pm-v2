@@ -2,11 +2,11 @@
 
 ## Reporting a Vulnerability
 
-If you find a security vulnerability in Nara, please report it privately instead of opening a public issue.
+If you find a security vulnerability in Macroma, please report it privately instead of opening a public issue.
 
 **Preferred:** GitHub private vulnerability reporting — go to the repository's **Security** tab and click **Report a vulnerability**.
 
-**Alternative:** email the maintainer directly. Allow up to 7 days for an initial response.
+**Alternative:** contact the maintainer, [MasRama](https://github.com/MasRama), privately through GitHub. Allow up to 7 days for an initial response.
 
 Please include:
 
@@ -16,7 +16,7 @@ Please include:
 
 ## Scope
 
-In scope: the Nara codebase itself — auth, CSRF, rate limiting, input sanitization, asset serving, session handling, and dependency supply chain.
+In scope: the Macroma codebase — workspaces, projects, tasks and their access rules, plus what it inherits from Nara: auth, CSRF, rate limiting, input sanitization, asset serving, session handling, and dependency supply chain. A flaw in Nara itself is welcome here too; it is fixed upstream in [MasRama/nara](https://github.com/MasRama/nara).
 
 Out of scope: misconfiguration in deployments you control (e.g. missing TLS, open ports), or dependencies with their own published advisories (report those upstream).
 
@@ -25,6 +25,9 @@ Out of scope: misconfiguration in deployments you control (e.g. missing TLS, ope
 We aim to confirm within 7 days and ship a fix as soon as practical. Please hold public disclosure until a fixed release is published.
 
 ## Security model notes
+
+Macroma inherits these from Nara 3.5.
+
 
 - Same-origin assumption: the Vue app and the Hono API are served from one origin. Session auth relies on it; cross-origin API use is not supported.
 - Sessions: server-side, cookie-based (`auth_id`, HttpOnly, SameSite=Lax, Secure in production, 60-day expiry enforced on lookup). Each device gets its own session (at most 10 per account; the oldest fall off). Owners list them at `GET /api/auth/sessions` by a random public handle — never the cookie token — and revoke one (`DELETE /api/auth/sessions/:id`) or all others (`POST /api/auth/sessions/revoke-others`). Password changes and admin password resets sign out every other device. `last_seen_at` is written at most every 5 minutes per session.

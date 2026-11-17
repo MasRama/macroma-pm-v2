@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Nara.
+description: Report a reproducible problem in Macroma.
 title: "fix: "
 labels:
   - bug
@@ -7,14 +7,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Please keep security vulnerabilities out of public issues and use the Security policy instead.
+        Thanks for reporting a bug. Keep security vulnerabilities out of public issues and use the security policy instead.
 
   - type: input
     id: version
     attributes:
-      label: Nara version
-      description: The Nara or @nara-web/cli version where you observed the problem.
-      placeholder: "3.2.0"
+      label: Macroma version
+      description: The release (from CHANGELOG.md or package.json) or the commit where you saw the problem.
+      placeholder: "2.0.0"
     validations:
       required: true
 
@@ -23,13 +23,13 @@ body:
     attributes:
       label: Area
       options:
-        - CLI
-        - Generated project
-        - Official feature
-        - Architecture tooling
-        - Reference application
-        - Database lifecycle
-        - Build or release
+        - Kanban board
+        - Task versions
+        - Batch releases
+        - Workspaces and projects
+        - Comments, activity or chat
+        - Sign-in and accounts
+        - Install, build or deployment
         - Documentation
         - Other
     validations:
@@ -39,19 +39,18 @@ body:
     id: problem
     attributes:
       label: What happened?
-      description: Describe the observed behavior and what you expected instead.
+      description: Describe what you saw and what you expected instead.
     validations:
       required: true
 
   - type: textarea
     id: reproduce
     attributes:
-      label: Reproduction
-      description: Provide the smallest reliable steps, commands, or repository that reproduces the problem.
+      label: Steps to reproduce
       placeholder: |
-        1. Run ...
-        2. Add ...
-        3. Observe ...
+        1. Open ...
+        2. Click ...
+        3. See ...
     validations:
       required: true
 
@@ -59,15 +58,15 @@ body:
     id: output
     attributes:
       label: Relevant output
-      description: Paste concise logs, diagnostics, or nara doctor --json output. Remove secrets and private data.
+      description: Paste short logs or error messages. Remove secrets and private data.
       render: shell
 
   - type: input
     id: environment
     attributes:
       label: Environment
-      description: OS, Node.js version, npm version, and anything else relevant.
-      placeholder: "Ubuntu 24.04, Node 22.20.0, npm 10.9.8"
+      description: Browser, OS, Node.js version, and anything else relevant.
+      placeholder: "Firefox 140, Ubuntu 24.04, Node 22.20.0"
 
   - type: checkboxes
     id: checks

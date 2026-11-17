@@ -1,229 +1,116 @@
-# Contributing to Nara
+# Contributing to Macroma
 
-Thanks for helping improve Nara.
-
-Nara is an architecture-aware TypeScript application kit built around composable,
-evolvable open code. Contributions should preserve that model: features own their
-implementation, application composition stays explicit, and architecture rules
-remain enforceable by tooling rather than convention alone.
+Thanks for helping. This file covers setup, what a good change looks like,
+how pull requests are checked and how releases work.
 
 ## Before you start
 
-For substantial changes, open an issue first. This is especially useful for:
+- For a bug, open an issue with the steps to reproduce it, unless the fix is
+  small and obvious.
+- For a new feature, open an issue first so it is agreed on before code.
+- Security vulnerabilities never go in a public issue: follow
+  [`SECURITY.md`](./SECURITY.md).
 
-- new CLI behavior or public commands;
-- new official Features;
-- changes to generated-project structure;
-- architecture rules or dependency boundaries;
-- breaking changes;
-- behavior that changes how existing projects evolve.
+## Setup
 
-Small documentation corrections and narrowly scoped fixes can go directly to a
-pull request.
-
-Security vulnerabilities must not be reported in public issues. Follow
-[`SECURITY.md`](./SECURITY.md) instead.
-
-## Local setup
-
-Nara requires:
-
-- Node.js 22 or newer;
-- npm 10.9.8, the one Node.js 22 ships with.
-
-`npm ci` works with that npm. Changing a dependency does not: npm 10.9.8 stops
-with `Cannot read properties of null (reading 'edgesOut')` while resolving
-this dependency tree. Run that one step with npm 11, for example
-`npx npm@11 install <package>`, and check that the lockfile still lists the
-native builds for every platform (`@rolldown/binding-darwin-arm64`,
-`@img/sharp-win32-x64`); CI installs and builds on macOS and Windows to catch
-a lockfile that lost them.
-
-Install dependencies from the repository root:
+You need Node.js 22 or newer and npm 10.9.8, the one Node.js 22 ships with.
 
 ```bash
 npm ci
-```
-
-For application development, copy the example environment when needed:
-
-```bash
 cp .env.example .env
-```
-
-Run the development server with:
-
-```bash
+npm run setup
+git config core.hooksPath .githooks
 npm run dev
 ```
 
-## Architecture expectations
+The last `git config` line turns on the pre-push hook in
+[`.githooks/pre-push`](./.githooks/pre-push). Run it once per clone. The hook
+runs `npm run verify`, the same command pull-request CI runs, so a push that
+would turn CI red stops on your machine instead.
 
-Before changing implementation structure, read:
+`npm ci` works with npm 10.9.8. Changing a dependency does not: npm 10.9.8
+stops with `Cannot read properties of null (reading 'edgesOut')` on this
+dependency tree. Run that one step with npm 11 (`npx npm@11 install <package>`)
+and check that the lockfile still lists the native builds for every platform
+(`@rolldown/binding-darwin-arm64`, `@img/sharp-win32-x64`); CI installs and
+builds on macOS and Windows to catch a lockfile that lost them.
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md);
-- [`docs/feature-model.md`](./docs/feature-model.md).
+## Architecture
 
-The important defaults are:
+Macroma is built on [Nara](https://github.com/MasRama/nara) and follows its
+rules. Read [`ARCHITECTURE.md`](./ARCHITECTURE.md),
+[`docs/feature-model.md`](./docs/feature-model.md) and [`AGENTS.md`](./AGENTS.md)
+before changing structure. In short:
 
-- build by Feature, not by technical layer;
+- build by feature under `src/features/<name>/`, not by technical layer;
 - keep application-wide composition under `src/app/`;
-- do not import another Feature's internals;
+- never import another feature's internals, only its `index.ts` or
+  `web/index.ts`;
 - keep server-only code out of browser code;
-- make server authorization authoritative;
-- keep official Features inspectable and application-owned after installation;
-- prefer explicit TypeScript and ordinary platform primitives over hidden runtime
-  frameworks, DI containers, or generated RPC layers.
+- enforce access on the server: every `/api` route declares a guard or
+  `publicRoute`.
 
-Official Features (Auth, Health, Users, Activity) have one copy: their
-`src/features/<name>/`, marked official by its `.nara/` folder and shipped from
-there by `npm run stage:package`. Change them in place, then run
-`npm run nara -- evolve <name>` to record the change as the committed lineage
-base (`.nara/lineage/`) that applications started from this repository evolve
-from. Tests that need the whole reference app (personas, the composed server,
-other Features) go in the Feature's `tests/app/`, which is not shipped.
-`tests/v3/official-features.test.ts` fails when the evolve step was skipped.
+`npm run nara -- doctor` checks these boundaries and runs in CI.
 
-If a change intentionally alters one of these rules, explain why in the issue and
-pull request instead of working around the architecture checks.
+## Every change goes through a pull request
 
-## Branches and commits
-
-Create a focused branch from the latest `main`. Examples:
+`main` is protected: nothing is pushed to it directly, every pull request
+needs green CI before it merges, and its branch must be up to date with
+`main`. Create a focused branch from the latest `main`:
 
 ```text
-feat/official-auth
-fix/database-backup-timeout
-docs/contribution-workflow
-chore/release-prep
+feat/kanban-board
+fix/task-version-bump
+docs/deployment
 ```
 
-Keep commits understandable and scoped, and start each message with a
-[Conventional Commits](https://www.conventionalcommits.org/) prefix: `feat:`,
-`fix:`, `docs:`, `refactor:`, `test:`, or `chore:`. The prefix decides the
-next version and what the changelog says: `feat:` and `fix:` commits are
-listed in `CHANGELOG.md` word for word, so write the subject for someone who
-uses Nara. Mark a breaking change with `!` (`feat!:`) or a
-`BREAKING CHANGE:` footer.
+Write commit messages and pull request titles as
+[Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`,
+`perf:`, `refactor:`, `test:`, `docs:`, `build:`, `ci:` or `chore:`. The prefix
+decides the next version, and `feat:` and `fix:` subjects land in
+`CHANGELOG.md` word for word, so write them for someone who uses Macroma
+("let a task move back to Revisi", not "update board controller"). Mark a
+breaking change with `!` (`feat!:`) or a `BREAKING CHANGE:` footer. Pull
+requests are squash-merged, so the title becomes the commit on `main`.
+
+Commits must be signed so GitHub shows them as Verified.
 
 Do not mix unrelated cleanup into a feature or bug-fix pull request.
 
-## Validation
+## What CI checks
 
-Run the fast pull-request gate while iterating:
+On a pull request:
 
-```bash
-npm run check:fast
-```
+| Check | What it runs |
+| --- | --- |
+| App validation | `npm ci`, then `npm run check:fast`: Vue typecheck, the fast Vitest projects, the production build (server TypeScript) and `nara doctor` |
+| Install, build and set up (macos-latest) | `npm ci`, `npm run build`, `npm run setup` |
+| Install, build and set up (windows-latest) | the same on Windows |
 
-This covers TypeScript, Vue typechecking, the broad fast Vitest suite, and
-architecture validation. The fast gate also produces the production build, so
-the server TypeScript compilation is not repeated separately in pull-request CI.
-CI uses this path for pull requests so small changes receive feedback quickly.
+After a merge, CI on `main` runs the full suite (`npm run check:frontend && npm test`),
+the build, `nara doctor` and the production serving and startup tests.
 
-The canonical full repository gate remains:
-
-```bash
-npm run check
-```
-
-It includes the process-heavy database lifecycle, build-artifact,
-bootstrap-admin, and executable-transition suites. Run it when changing those
-areas, before release work, or whenever you need the full local signal. After a
-pull request merges, `main` CI runs this full gate automatically.
-
-You can also run only the slow lifecycle group with:
-
-```bash
-npm run test:heavy
-```
-
-Integration-heavy tests that exercise real Git repositories, Vite topology,
-frontend build smoke, transition history, and the extended browser workflow are
-grouped separately:
-
-```bash
-npm run test:integration
-```
-
-The full `npm test` / `npm run check` path still runs every project: fast,
-integration, and heavy.
-
-When running focused commands instead of `npm run check:fast`, also run a
-production build when the change can affect runtime code, frontend assets,
-package composition, or build configuration:
-
-```bash
-npm run build
-```
-
-Changes to packaging, generated projects, official Features, production serving,
-or release mechanics may require the more focused integration commands listed in
-`package.json`. Release work should pass:
-
-```bash
-npm run validate:release
-```
-
-Machine-sensitive performance sanity checks are intentionally separate:
-
-```bash
-npm run perf:sanity
-```
+Locally, `npm run verify` is the pull-request gate and `npm run check` the
+full one. Run the full gate when you change database lifecycle, build or
+startup code. Run one heavy command at a time.
 
 ## Tests
 
-Add or update tests when behavior changes.
-
-Prefer tests at the boundary that owns the behavior:
-
-- Feature behavior belongs with that Feature;
-- architecture rules belong in architecture/CLI tests;
-- generated-project and packaging behavior belongs in integration tests;
-- browser-facing Vue behavior should use the existing Vue/Vitest test setup.
-
-Avoid weakening an existing assertion only to make a change pass. If an expected
-contract is changing, update the contract and explain the reason.
-
-## Pull requests
-
-A pull request should:
-
-- solve one coherent problem;
-- link its issue when one exists (for example, `Closes #123`);
-- explain user-visible and architecture-visible effects;
-- include the validation that was run;
-- update documentation for public behavior changes;
-- avoid drive-by dependency or formatting churn.
-
-Maintainers may merge their own pull requests. CI is still expected to be green
-before merge; self-maintained does not mean bypassing the repository gates.
+Add or update tests when behaviour changes, next to the feature that owns it
+(`src/features/<name>/tests/`). Do not weaken an existing assertion only to
+make a change pass; if a contract changes, change the test and say why in the
+pull request.
 
 ## Releases
 
-Releases are prepared by [release-please](https://github.com/googleapis/release-please).
-Every push to `main` updates a release pull request that bumps the version in
-`package.json`, `package-lock.json` and `packages/nara/package.json`, and
-writes the new section of `CHANGELOG.md` from the commits since the last
-release. Merging that pull request tags the release, publishes it on GitHub,
-and runs `npm run validate:release` against the tag. Do not edit the version
-or the changelog by hand.
-
-## Reviews and compatibility
-
-Review focuses on correctness, architecture boundaries, maintainability, and the
-experience of generated Nara applications.
-
-Backward compatibility matters most for:
-
-- CLI command semantics;
-- generated-project contracts;
-- official Feature composition;
-- lineage/evolution behavior;
-- machine-readable JSON output.
-
-If a breaking change is necessary, call it out clearly so it can be versioned
-and documented deliberately.
+Releases are prepared by
+[release-please](https://github.com/googleapis/release-please). Every push to
+`main` updates one release pull request that bumps the version in
+`package.json` and `package-lock.json` and writes the next section of
+`CHANGELOG.md` from the commits since the last release. Merging that pull
+request tags the release (`v2.0.0`, `v2.1.0`, ...), publishes it on GitHub and
+runs `npm run validate:release` against the tag. The first release is 2.0.0.
+Do not edit the version or the changelog by hand.
 
 ## License
 

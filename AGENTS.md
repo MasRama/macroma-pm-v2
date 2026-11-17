@@ -1,6 +1,8 @@
 # AGENTS.md
 
-Nara is an **architecture-aware TypeScript application kit**. Build by feature, not by layer.
+Macroma is a project-management app (Kanban, per-task versions, batch releases) built on Nara 3.5, an **architecture-aware TypeScript application kit**. Build by feature, not by layer.
+
+Workflow: every change goes through a pull request to `main` with a Conventional Commit title and signed commits; `npm run verify` (also the pre-push hook) must pass before pushing. Do not edit `CHANGELOG.md` or the version: release-please owns them. See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 Stack: TypeScript, Node.js 22+, Hono + `@hono/node-server`, Vue 3 + Vite + `vue-router`, SQLite (`better-sqlite3`, raw SQL), Zod, Vitest. Session auth owned by the `auth` feature.
 

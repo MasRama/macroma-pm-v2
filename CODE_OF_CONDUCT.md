@@ -2,7 +2,7 @@
 
 ## Our standard
 
-Nara is an open-source project. Participation should be welcoming, technical,
+Macroma is an open-source project. Participation should be welcoming, technical,
 and respectful.
 
 Examples of expected behavior include:
@@ -18,9 +18,9 @@ doxxing, sexualized attention, and deliberate disruption are not acceptable.
 
 ## Scope
 
-This standard applies in Nara's repository, issues, pull requests, discussions,
-and other project spaces where someone is participating as a member of the Nara
-community.
+This standard applies in Macroma's repository, issues, pull requests, discussions,
+and other project spaces where someone is participating as a member of the
+Macroma community.
 
 ## Enforcement
 

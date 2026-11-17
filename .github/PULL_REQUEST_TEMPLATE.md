@@ -1,32 +1,22 @@
 ## What changed?
 
-<!-- Describe the problem and the smallest coherent solution in this PR. -->
+<!-- The problem and the smallest coherent solution in this PR. -->
 
 ## Why?
 
 <!-- Link the issue when one exists, for example: Closes #123. -->
 
-## Architecture impact
-
-<!--
-Call out changes to Feature ownership, application composition, generated-project
-contracts, CLI semantics, lineage/evolution, dependencies, or JSON output.
-Write "None" when there is no architecture-visible change.
--->
-
 ## Validation
 
-<!-- List the commands or focused checks you ran. -->
+<!-- Commands or checks you ran. -->
 
-- [ ] `npm run check:fast`
-- [ ] `npm run check` when heavy lifecycle/release-sensitive behavior is affected
-- [ ] `npm run test:integration` when integration-tier behavior is affected
-- [ ] Relevant focused/integration tests when applicable
+- [ ] `npm run verify` (the pre-push hook runs it too)
+- [ ] `npm run check` when database lifecycle, build or startup code changed
+- [ ] Screenshots for visible UI changes
 
-## Review checklist
+## Checklist
 
-- [ ] The change is focused and does not include unrelated cleanup.
-- [ ] Tests were added or updated for behavior changes.
-- [ ] Public behavior changes are documented.
-- [ ] No secrets, generated local data, or private information are included.
-- [ ] Breaking changes, if any, are called out explicitly.
+- [ ] The PR title is a Conventional Commit (`feat: ...`, `fix: ...`); it becomes the changelog line.
+- [ ] Tests were added or updated for behaviour changes.
+- [ ] No secrets, local databases or private data are included.
+- [ ] Breaking changes, if any, are called out.
