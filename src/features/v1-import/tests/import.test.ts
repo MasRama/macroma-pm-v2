@@ -9,6 +9,8 @@ import { signIn, type Persona } from '../../../app/tests/personas';
 import { getDatabase } from '../../../shared/database';
 import { createLocalAssetStorage } from '../../../shared/storage';
 import { findAccountByEmail, getUserRoles, hashPassword } from '../../auth';
+import { notificationsResponseSchemas } from '../../notifications';
+import { projectsResponseSchemas } from '../../projects';
 import { importV1, V1_MIGRATIONS, V1ImportRefused } from '..';
 import { V1_SCHEMA } from './v1-schema';
 
@@ -38,6 +40,9 @@ const ids = {
   task3: randomUUID(),
   storedAttachment: randomUUID(),
   lostAttachment: randomUUID(),
+  nestedNotification: randomUUID(),
+  badMetaActivity: randomUUID(),
+  oddLog: randomUUID(),
   avatarAsset: randomUUID(),
   avatarFile: `${randomUUID()}.webp`,
   notification: randomUUID(),
@@ -162,6 +167,15 @@ async function createFixture(): Promise<Fixture> {
     is_read: 1,
     created_at: T0 + 2 * HOUR,
   });
+  // V2 notification data is flat: a nested value cannot be shown and is left out.
+  insert('notifications', {
+    id: ids.nestedNotification,
+    user_id: ids.ram,
+    type: 'workspace_invitation',
+    data: JSON.stringify({ workspace_name: 'Team', workspace: { id: ids.workspace } }),
+    is_read: 0,
+    created_at: T0 + 3 * HOUR,
+  });
 
   // Tami's scenario: 0.1 active, 0.2 created and activated, then 0.1 activated again; 0.3 only planned.
   insert('projects', {
@@ -211,6 +225,10 @@ async function createFixture(): Promise<Fixture> {
   task(ids.task2, { batch_id: ids.batch02, title: 'Shipped in 0.2', column_id: 'done', version_major: 0, version_minor: 2, version_patch: 2 });
   task(ids.task3, { batch_id: null, title: 'Outside batches', column_id: 'backlog', priority: 'urgent', version_major: 0, version_minor: 0, version_patch: 4 });
   activity('task.moved', T0 + 3 * DAY, { task_id: ids.task2, meta: JSON.stringify({ from: 'review', to: 'done', note: '', version: 'v0.2.2' }) });
+  // Older V1 builds logged comment events; V2's activity feed does not have them.
+  activity('comment.created', T0 + 3 * DAY + HOUR, { task_id: ids.task1 });
+  activity('comment.deleted', T0 + 3 * DAY + 2 * HOUR, { task_id: ids.task1 });
+  activity('task.created', T0 + 3 * DAY + 3 * HOUR, { id: ids.badMetaActivity, task_id: ids.task3, meta: '["v0.0.4"]' });
   const log = (taskId: string, version: string, from: string | null, to: string, at: number) =>
     insert('task_logs', { id: randomUUID(), task_id: taskId, version, column_from: from, column_to: to, note: 'Tugas dibuat', created_by: ids.ram, created_at: at });
   log(ids.task1, 'v0.1.1', null, 'backlog', T0 + DAY);
@@ -218,6 +236,7 @@ async function createFixture(): Promise<Fixture> {
   log(ids.task2, 'v0.2.1', null, 'review', T0 + DAY);
   log(ids.task2, 'v0.2.2', 'review', 'done', T0 + 3 * DAY);
   log(ids.task3, 'v0.0.4', null, 'backlog', T0 + DAY);
+  insert('task_logs', { id: ids.oddLog, task_id: ids.task3, version: 'v0.0.3', column_from: 'testing', column_to: 'qa', note: '', created_by: ids.ram, created_at: T0 + DAY - HOUR });
   insert('task_comments', { id: randomUUID(), task_id: ids.task1, user_id: ids.plain, content: 'Sudah dicek', created_at: T0 + 2 * DAY, updated_at: T0 + 2 * DAY });
   insert('task_attachments', {
     id: ids.storedAttachment,
@@ -298,13 +317,13 @@ describe('V1 import', () => {
       workspace_members: 2,
       workspace_invitations: 1,
       workspace_messages: 1,
-      notifications: 1,
+      notifications: 2,
       projects: 2,
       project_members: 3,
       project_batches: 5,
       tasks: 3,
-      task_logs: 5,
-      project_activity_logs: 5,
+      task_logs: 6,
+      project_activity_logs: 6,
       task_comments: 1,
       task_attachments: 1,
       files: 2,
@@ -319,9 +338,14 @@ describe('V1 import', () => {
         '1 workspace invitation(s) with a status other than pending, accepted or declined were left out',
         `task ${ids.task3}: unknown priority urgent became medium`,
         `task attachment ${ids.lostAttachment} (/storage/task-attachments/${ids.lostAttachment}.webp) was left out: its file is missing`,
+        `notification ${ids.nestedNotification}: left out data fields that are not flat values: workspace`,
+        `task log ${ids.oddLog}: unknown column testing became backlog`,
+        `task log ${ids.oddLog}: unknown column qa became backlog`,
+        `project activity ${ids.badMetaActivity}: its meta was not a JSON object and was emptied`,
+        '2 project activity entries of event types V2 does not record were left out: comment.created (1), comment.deleted (1)',
       ]),
     );
-    expect(report.warnings).toHaveLength(7);
+    expect(report.warnings).toHaveLength(12);
 
     expect(findAccountByEmail(emails.ram)).toBeUndefined();
     expect(getDatabase().prepare('SELECT COUNT(*) AS count FROM projects').get()).toEqual({ count: 0 });
@@ -366,9 +390,9 @@ describe('V1 import', () => {
     const workspace = await callApi(ram, 'GET', `/api/workspaces/${ids.workspace}`);
     expect(workspace.status).toBe(200);
     const notifications = await callApi(ram, 'GET', '/api/notifications');
-    expect(notifications.body.data.notifications).toEqual([
+    expect(notifications.body.data.notifications).toContainEqual(
       expect.objectContaining({ id: ids.notification, type: 'invitation_accepted', is_read: true, created_at: T0 + 2 * HOUR }),
-    ]);
+    );
 
     // Tami's scenario: 0.2 was released and closed when 0.1 was activated again.
     const releases = (await callApi(ram, 'GET', `/api/projects/${ids.project}/releases`)).body.data;
@@ -394,6 +418,41 @@ describe('V1 import', () => {
     expect(Buffer.from((await storage().get(`task-attachments/${ids.storedAttachment}.webp`))!.data)).toEqual(WEBP);
     const task3 = (await callApi(ram, 'GET', `/api/tasks/${ids.task3}`)).body.data.task;
     expect(task3).toMatchObject({ priority: 'medium', version: { major: 0, minor: 0, patch: 4 } });
+  });
+
+  it('imports only values the V2 responses accept, so every imported screen parses with its strict schema', async () => {
+    const projects = projectsResponseSchemas();
+    const notifications = notificationsResponseSchemas();
+    const read = async (route: string) => {
+      const response = await callApi(ram, 'GET', route);
+      expect(response.status, route).toBe(200);
+      return response.body;
+    };
+    const parsed = (schema: { safeParse(value: unknown): { success: boolean; error?: unknown } }, body: unknown) => {
+      const result = schema.safeParse(body);
+      return result.success ? 'ok' : result.error;
+    };
+
+    const activity = await read(`/api/projects/${ids.project}/activity`);
+    expect(parsed(projects.activity, activity)).toBe('ok');
+    const events = activity.data.activity.map((entry: { event_type: string }) => entry.event_type);
+    expect(events).not.toContain('comment.created');
+    expect(events).not.toContain('comment.deleted');
+    expect(activity.data.activity.find((entry: { id: string }) => entry.id === ids.badMetaActivity)).toMatchObject({ meta: null });
+    expect(parsed(projects.dashboard, await read('/api/dashboard'))).toBe('ok');
+    expect(parsed(projects.projects, await read('/api/projects'))).toBe('ok');
+    expect(parsed(projects.projectDetail, await read(`/api/projects/${ids.project}`))).toBe('ok');
+    expect(parsed(projects.tasks, await read(`/api/projects/${ids.project}/tasks`))).toBe('ok');
+    expect(parsed(projects.releases, await read(`/api/projects/${ids.project}/releases`))).toBe('ok');
+    expect(parsed(projects.releaseDetail, await read(`/api/projects/${ids.project}/releases/${ids.batch01}`))).toBe('ok');
+    const task3 = await read(`/api/tasks/${ids.task3}`);
+    expect(parsed(projects.taskDetailFound, task3)).toBe('ok');
+    expect(task3.data.task.logs.find((log: { id: string }) => log.id === ids.oddLog)).toMatchObject({ column_from: 'backlog', column_to: 'backlog' });
+    const list = await read('/api/notifications');
+    expect(parsed(notifications.listSuccess, list)).toBe('ok');
+    expect(list.data.notifications.find((entry: { id: string }) => entry.id === ids.nestedNotification)).toMatchObject({
+      data: { workspace_name: 'Team' },
+    });
   });
 
   it('refuses to import into a database that already holds Macroma data or the V1 emails', async () => {

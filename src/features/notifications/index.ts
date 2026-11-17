@@ -3,6 +3,7 @@ export {
   NOTIFICATIONS_CHANGED_EVENT,
   NOTIFICATIONS_LIST_LIMIT,
   NOTIFICATIONS_REFUSAL_CODES,
+  notificationsResponseSchemas,
 } from './contract';
 export type { FeatureName, Notification, NotificationData } from './contract';
 export type { NotificationsServerHost } from './server/host';

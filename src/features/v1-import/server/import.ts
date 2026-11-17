@@ -19,6 +19,7 @@ import { countNotificationRows, importNotificationRows, type ImportedNotificatio
 import {
   countProjectRows,
   importProjectRows,
+  PROJECT_ACTIVITY_EVENTS,
   TASK_COLUMNS,
   TASK_PRIORITIES,
   taskAttachmentStorageKey,
@@ -101,6 +102,16 @@ function storedFile(
   const file = path.join(path.resolve(storageDir), directory, filename);
   if (!existsSync(file) || !statSync(file).isFile()) return { status: 'missing' };
   return { status: 'found', path: file, filename, size: statSync(file).size };
+}
+
+/** The value parsed as a JSON object, or `undefined` when it is not one. */
+function jsonObject(value: unknown): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(String(value)) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function all(v1: Database.Database, sql: string): Row[] {
@@ -295,13 +306,17 @@ function planWorkspaces(v1: Database.Database, warnings: string[]): WorkspaceImp
 
 function planNotifications(v1: Database.Database, warnings: string[]): ImportedNotification[] {
   return all(v1, 'SELECT * FROM notifications ORDER BY created_at, id').map((row) => {
-    let data: ImportedNotification['data'] = {};
-    try {
-      const parsed = JSON.parse(String(row.data)) as unknown;
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) data = parsed as ImportedNotification['data'];
-      else throw new Error('not an object');
-    } catch {
-      warnings.push(`notification ${String(row.id)}: its data was not a JSON object and was emptied`);
+    const data: ImportedNotification['data'] = {};
+    const parsed = jsonObject(row.data);
+    if (parsed === undefined) warnings.push(`notification ${String(row.id)}: its data was not a JSON object and was emptied`);
+    // V2 notification data is flat, as its response schema requires.
+    const nested: string[] = [];
+    for (const [field, value] of Object.entries(parsed ?? {})) {
+      if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) data[field] = value as string | number | boolean | null;
+      else nested.push(field);
+    }
+    if (nested.length > 0) {
+      warnings.push(`notification ${String(row.id)}: left out data fields that are not flat values: ${nested.join(', ')}`);
     }
     const createdAt = time(row.created_at, 0);
     // V1 kept only whether it was read; its creation is the earliest it can have been.
@@ -312,6 +327,12 @@ function planNotifications(v1: Database.Database, warnings: string[]): ImportedN
 function planProjects(v1: Database.Database, storageDir: string | undefined, files: FileToStore[], warnings: string[]): ProjectImport {
   const columns = new Set<string>(TASK_COLUMNS);
   const priorities = new Set<string>(TASK_PRIORITIES);
+  const events = new Set<string>(PROJECT_ACTIVITY_EVENTS);
+  const logColumn = (logId: string, value: string): TaskColumn => {
+    if (columns.has(value)) return value as TaskColumn;
+    warnings.push(`task log ${logId}: unknown column ${value} became backlog`);
+    return 'backlog';
+  };
   const attachments: ProjectImport['attachments'][number][] = [];
   for (const row of all(v1, 'SELECT * FROM task_attachments ORDER BY created_at, id')) {
     const id = String(row.id);
@@ -393,27 +414,21 @@ function planProjects(v1: Database.Database, storageDir: string | undefined, fil
         updated_at: time(row.updated_at, 0),
       };
     }),
-    taskLogs: all(v1, 'SELECT * FROM task_logs ORDER BY created_at, id').map((row) => ({
-      id: String(row.id),
-      task_id: String(row.task_id),
-      version: String(row.version),
-      column_from: text(row.column_from) as TaskColumn | null,
-      column_to: String(row.column_to) as TaskColumn,
-      note: String(row.note ?? ''),
-      created_by: text(row.created_by),
-      created_at: time(row.created_at, 0),
-    })),
-    activity: all(v1, 'SELECT * FROM project_activity_logs ORDER BY created_at, id').map((row) => ({
-      id: String(row.id),
-      project_id: String(row.project_id),
-      event_type: String(row.event_type) as ProjectImport['activity'][number]['event_type'],
-      description: String(row.description),
-      actor_id: text(row.actor_id),
-      task_id: text(row.task_id),
-      batch_id: text(row.batch_id),
-      meta: text(row.meta),
-      created_at: time(row.created_at, 0),
-    })),
+    taskLogs: all(v1, 'SELECT * FROM task_logs ORDER BY created_at, id').map((row) => {
+      const id = String(row.id);
+      const from = text(row.column_from);
+      return {
+        id,
+        task_id: String(row.task_id),
+        version: String(row.version),
+        column_from: from === null ? null : logColumn(id, from),
+        column_to: logColumn(id, String(row.column_to)),
+        note: String(row.note ?? ''),
+        created_by: text(row.created_by),
+        created_at: time(row.created_at, 0),
+      };
+    }),
+    activity: planActivity(v1, events, warnings),
     comments: all(v1, 'SELECT * FROM task_comments ORDER BY created_at, id').map((row) => ({
       id: String(row.id),
       task_id: String(row.task_id),
@@ -424,6 +439,46 @@ function planProjects(v1: Database.Database, storageDir: string | undefined, fil
     })),
     attachments,
   };
+}
+
+/**
+ * The project activity V2's feed can show. Older V1 builds also logged
+ * comment events, which V2 (like current V1) does not record: they are left
+ * out and counted. `meta` must be a JSON object, as the feed parses it.
+ */
+function planActivity(v1: Database.Database, events: ReadonlySet<string>, warnings: string[]): ProjectImport['activity'] {
+  const leftOut = new Map<string, number>();
+  const activity: ProjectImport['activity'][number][] = [];
+  for (const row of all(v1, 'SELECT * FROM project_activity_logs ORDER BY created_at, id')) {
+    const eventType = String(row.event_type);
+    if (!events.has(eventType)) {
+      leftOut.set(eventType, (leftOut.get(eventType) ?? 0) + 1);
+      continue;
+    }
+    const id = String(row.id);
+    let meta = text(row.meta);
+    if (meta !== null && jsonObject(meta) === undefined) {
+      warnings.push(`project activity ${id}: its meta was not a JSON object and was emptied`);
+      meta = null;
+    }
+    activity.push({
+      id,
+      project_id: String(row.project_id),
+      event_type: eventType as ProjectImport['activity'][number]['event_type'],
+      description: String(row.description),
+      actor_id: text(row.actor_id),
+      task_id: text(row.task_id),
+      batch_id: text(row.batch_id),
+      meta,
+      created_at: time(row.created_at, 0),
+    });
+  }
+  if (leftOut.size > 0) {
+    const total = [...leftOut.values()].reduce((sum, count) => sum + count, 0);
+    const kinds = [...leftOut].sort(([left], [right]) => left.localeCompare(right)).map(([type, count]) => `${type} (${count})`);
+    warnings.push(`${total} project activity entr${total === 1 ? 'y' : 'ies'} of event types V2 does not record were left out: ${kinds.join(', ')}`);
+  }
+  return activity;
 }
 
 function write(plan: ImportPlan): void {
