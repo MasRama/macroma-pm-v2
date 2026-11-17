@@ -446,6 +446,14 @@ function planProjects(v1: Database.Database, storageDir: string | undefined, fil
  * are left out and counted: V1's `task.log_added`, written by its +Log
  * button until that was removed on 2026-08-04. `meta` must be a JSON object, as the feed parses it.
  */
+/**
+ * The task title V1's description names: `Task "<title>" dibuat` and
+ * `Task "<title>" dipindah dari <from> → <to> (<version>)`
+ * (V1 TaskController). Greedy up to the last such ending, so titles with
+ * quotes survive.
+ */
+const V1_TASK_DESCRIPTION = /^Task "(.+)" (?:dibuat|dipindah dari )/;
+
 function planActivity(v1: Database.Database, events: ReadonlySet<string>, warnings: string[]): ProjectImport['activity'] {
   const leftOut = new Map<string, number>();
   const activity: ProjectImport['activity'][number][] = [];
@@ -460,6 +468,11 @@ function planActivity(v1: Database.Database, events: ReadonlySet<string>, warnin
     if (meta !== null && jsonObject(meta) === undefined) {
       warnings.push(`project activity ${id}: its meta was not a JSON object and was emptied`);
       meta = null;
+    }
+    // V1 nulls task_id when the task is deleted; its description is then all that names the task.
+    const deletedTitle = text(row.task_id) === null ? V1_TASK_DESCRIPTION.exec(String(row.description))?.[1] : undefined;
+    if (deletedTitle !== undefined) {
+      meta = JSON.stringify({ ...(meta === null ? {} : jsonObject(meta)), task_title: deletedTitle });
     }
     activity.push({
       id,

@@ -42,6 +42,9 @@ const ids = {
   lostAttachment: randomUUID(),
   nestedNotification: randomUUID(),
   badMetaActivity: randomUUID(),
+  deletedCreated: randomUUID(),
+  deletedMoved: randomUUID(),
+  deletedUnparsed: randomUUID(),
   oddLog: randomUUID(),
   avatarAsset: randomUUID(),
   avatarFile: `${randomUUID()}.webp`,
@@ -229,6 +232,14 @@ async function createFixture(): Promise<Fixture> {
   activity('task.log_added', T0 + 3 * DAY + HOUR, { task_id: ids.task1 });
   activity('task.log_added', T0 + 3 * DAY + 2 * HOUR, { task_id: ids.task1 });
   activity('task.created', T0 + 3 * DAY + 3 * HOUR, { id: ids.badMetaActivity, task_id: ids.task3, meta: '["v0.0.4"]' });
+  // Tasks deleted in V1 left their activity with task_id NULL; only V1's description still names them.
+  activity('task.created', T0 + 3 * DAY + 4 * HOUR, { id: ids.deletedCreated, description: 'Task "Fix the "Save" button" dibuat' });
+  activity('task.moved', T0 + 3 * DAY + 5 * HOUR, {
+    id: ids.deletedMoved,
+    description: 'Task "Ship "v2" docs" dipindah dari Backlog → Ongoing (v0.0.5)',
+    meta: JSON.stringify({ from: 'backlog', to: 'ongoing', version: 'v0.0.5' }),
+  });
+  activity('task.updated', T0 + 3 * DAY + 6 * HOUR, { id: ids.deletedUnparsed, description: 'Tugas diperbarui' });
   const log = (taskId: string, version: string, from: string | null, to: string, at: number) =>
     insert('task_logs', { id: randomUUID(), task_id: taskId, version, column_from: from, column_to: to, note: 'Tugas dibuat', created_by: ids.ram, created_at: at });
   log(ids.task1, 'v0.1.1', null, 'backlog', T0 + DAY);
@@ -323,7 +334,7 @@ describe('V1 import', () => {
       project_batches: 5,
       tasks: 3,
       task_logs: 6,
-      project_activity_logs: 6,
+      project_activity_logs: 9,
       task_comments: 1,
       task_attachments: 1,
       files: 2,
@@ -452,6 +463,19 @@ describe('V1 import', () => {
     expect(named).toContainEqual(['task.moved', 'Shipped in 0.2', null, { from: 'review', to: 'done', note: '', version: 'v0.2.2', task_title: 'Shipped in 0.2' }]);
     expect(named).toContainEqual(['batch.activated', null, '0.2', { batch_version: '0.2' }]);
     expect(named).toContainEqual(['project.created', null, null, null]);
+    // Tasks deleted before the import keep the title V1's description names, quotes included.
+    const byId = new Map(activity.data.activity.map((entry: { id: string }) => [entry.id, entry]));
+    expect(byId.get(ids.deletedCreated)).toMatchObject({
+      task_id: null,
+      task_title: 'Fix the "Save" button',
+      meta: { task_title: 'Fix the "Save" button' },
+    });
+    expect(byId.get(ids.deletedMoved)).toMatchObject({
+      task_id: null,
+      task_title: 'Ship "v2" docs',
+      meta: { from: 'backlog', to: 'ongoing', version: 'v0.0.5', task_title: 'Ship "v2" docs' },
+    });
+    expect(byId.get(ids.deletedUnparsed)).toMatchObject({ task_id: null, task_title: null, meta: null });
     expect(parsed(projects.dashboard, await read('/api/dashboard'))).toBe('ok');
     expect(parsed(projects.projects, await read('/api/projects'))).toBe('ok');
     expect(parsed(projects.projectDetail, await read(`/api/projects/${ids.project}`))).toBe('ok');
