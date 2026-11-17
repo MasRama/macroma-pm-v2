@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../../../../app/server';
 import { signUp } from '../../../../app/tests/personas';
@@ -39,12 +40,30 @@ describe('projects web client contract', () => {
     const task = schemas.taskSaved.parse(
       await client.createTask(id, { title: 'Contract task', priority: 'high', assignee_id: teammate.id, batch_id: batch.id }),
     ).data.task;
+    expect(task).toMatchObject({ comment_count: 0, attachment_count: 0 });
     schemas.taskMoved.parse(await client.moveTask(task.id, { column_id: 'revisi', note: 'Again' }));
     schemas.taskSaved.parse(await client.updateTask(task.id, { revision: 1, description: 'More' }));
     schemas.tasks.parse(await client.tasks(id));
     schemas.tasks.parse(await client.tasks(id, { batch_id: batch.id }));
     expect(schemas.taskDetailFound.parse(await client.task(task.id)).data.task.revisi_count).toBe(1);
     schemas.taskLogs.parse(await client.taskLogs(task.id));
+    const comment = schemas.commentAdded.parse(await client.addComment(task.id, { content: 'Contract comment' })).data.comment;
+    schemas.comments.parse(await client.comments(task.id));
+    const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#336699' } }).png().toBuffer();
+    const uploaded = schemas.attachmentsUploaded.parse(
+      await client.uploadAttachments(task.id, [new File([new Uint8Array(image)], 'contract.png', { type: 'image/png' })]),
+    ).data.attachments;
+    schemas.attachments.parse(await client.attachments(task.id));
+    const counted = { comment_count: 1, attachment_count: 1 };
+    expect(schemas.taskDetailFound.parse(await client.task(task.id)).data.task).toMatchObject(counted);
+    expect(schemas.tasks.parse(await client.tasks(id)).data.tasks[0]).toMatchObject(counted);
+    const moved = schemas.taskMoved.parse(await client.moveTask(task.id, { column_id: 'review' })).data.task;
+    expect(moved).toMatchObject(counted);
+    expect(schemas.taskSaved.parse(await client.updateTask(task.id, { revision: moved.revision, title: 'Counted' })).data.task).toMatchObject(
+      counted,
+    );
+    schemas.done.parse(await client.removeComment(task.id, comment.id));
+    schemas.done.parse(await client.removeAttachment(task.id, uploaded[0].id));
     schemas.projectDetail.parse(await client.get(id));
     schemas.activity.parse(await client.activity(id));
 
@@ -70,6 +89,11 @@ describe('projects web client contract', () => {
     const task = schemas.taskSaved.parse(await client.createTask(id, { title: 'Refused' })).data.task;
     expect(schemas.error.parse(await client.moveTask(task.id, { column_id: 'backlog' }))).toMatchObject({ code: 'TASK_ALREADY_IN_COLUMN' });
     expect(schemas.error.parse(await client.moveTask(task.id, { column_id: 'revisi' }))).toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(schemas.error.parse(await client.removeComment(task.id, randomUUID()))).toMatchObject({ code: 'COMMENT_NOT_FOUND' });
+    expect(schemas.error.parse(await client.removeAttachment(task.id, randomUUID()))).toMatchObject({ code: 'ATTACHMENT_NOT_FOUND' });
+    expect(schemas.error.parse(await client.addComment(task.id, { content: ' ' }))).toMatchObject({ code: 'VALIDATION_ERROR' });
+    const notImage = new File([new Uint8Array(Buffer.from('plain text'))], 'note.png', { type: 'image/png' });
+    expect(schemas.error.parse(await client.uploadAttachments(task.id, [notImage]))).toMatchObject({ code: 'NO_FILES_PROCESSED' });
     await client.updateTask(task.id, { revision: 1, title: 'Moved on' });
     expect(schemas.staleTask.parse(await client.updateTask(task.id, { revision: 1, title: 'Stale' })).current.revision).toBe(2);
   });

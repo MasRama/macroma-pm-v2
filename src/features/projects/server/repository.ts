@@ -43,6 +43,29 @@ export interface TaskRow {
   version_patch: number;
   revision: number;
   revisi_count: number;
+  comment_count: number;
+  attachment_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CommentRow {
+  id: string;
+  task_id: string;
+  user_id: string | null;
+  content: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AttachmentRow {
+  id: string;
+  task_id: string;
+  storage_key: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  uploaded_by: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -72,14 +95,18 @@ export interface ActivityRow {
 
 const PROJECT_COLUMNS = 'p.id, p.name, p.description, p.owner_id, p.workspace_id, p.revision, p.created_at, p.updated_at';
 const BATCH_COLUMNS = 'b.id, b.project_id, b.major, b.minor, b.label, b.is_active, b.created_at, b.updated_at';
-// The derived revisi count comes from one grouped subquery joined in, never a query per task.
+// The derived counts come from grouped subqueries joined in, never a query per task.
 const TASK_SELECT = `SELECT t.id, t.project_id, t.batch_id, t.title, t.description, t.priority, t.assignee_id, t.column_id,
     t.sort_order, t.version_major, t.version_minor, t.version_patch, t.revision, t.created_at, t.updated_at,
-    COALESCE(r.revisi_count, 0) AS revisi_count
+    COALESCE(r.revisi_count, 0) AS revisi_count,
+    COALESCE(c.comment_count, 0) AS comment_count,
+    COALESCE(a.attachment_count, 0) AS attachment_count
   FROM tasks t
   LEFT JOIN (
     SELECT task_id, COUNT(*) AS revisi_count FROM task_logs WHERE column_to = 'revisi' GROUP BY task_id
-  ) r ON r.task_id = t.id`;
+  ) r ON r.task_id = t.id
+  LEFT JOIN (SELECT task_id, COUNT(*) AS comment_count FROM task_comments GROUP BY task_id) c ON c.task_id = t.id
+  LEFT JOIN (SELECT task_id, COUNT(*) AS attachment_count FROM task_attachments GROUP BY task_id) a ON a.task_id = t.id`;
 
 function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
@@ -176,8 +203,22 @@ export function updateProject(id: string, patch: { name?: string; description?: 
   })();
 }
 
-export function deleteProject(id: string): void {
-  getDatabase().prepare('DELETE FROM projects WHERE id = ?').run(id);
+/** Deletes the project with everything inside; returns the storage keys of the attachments that went with it. */
+export function deleteProject(id: string): string[] {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const keys = attachmentKeysWhere('t.project_id = ?', [id]);
+    database.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    return keys;
+  })();
+}
+
+function attachmentKeysWhere(condition: string, values: readonly unknown[]): string[] {
+  return (
+    getDatabase()
+      .prepare(`SELECT a.storage_key FROM task_attachments a JOIN tasks t ON t.id = a.task_id WHERE ${condition}`)
+      .all(...values) as Array<{ storage_key: string }>
+  ).map((row) => row.storage_key);
 }
 
 export function directMembers(projectId: string): MemberRow[] {
@@ -300,16 +341,21 @@ export function projectIdsWithMembers(userIds: readonly string[]): string[] {
  * the projects they owned go with everything inside, their memberships go,
  * and their names come off tasks, logs and the activity feed.
  */
-export function forgetAccountRows(userIds: readonly string[]): void {
-  if (userIds.length === 0) return;
+/** Returns the storage keys of the attachments that went with the deleted projects. */
+export function forgetAccountRows(userIds: readonly string[]): string[] {
+  if (userIds.length === 0) return [];
   const database = getDatabase();
   const list = placeholders(userIds);
-  database.transaction(() => {
+  return database.transaction(() => {
+    const keys = attachmentKeysWhere(`t.project_id IN (SELECT id FROM projects WHERE owner_id IN (${list}))`, userIds);
     database.prepare(`DELETE FROM projects WHERE owner_id IN (${list})`).run(...userIds);
     database.prepare(`DELETE FROM project_members WHERE user_id IN (${list})`).run(...userIds);
     database.prepare(`UPDATE tasks SET assignee_id = NULL WHERE assignee_id IN (${list})`).run(...userIds);
     database.prepare(`UPDATE task_logs SET created_by = NULL WHERE created_by IN (${list})`).run(...userIds);
     database.prepare(`UPDATE project_activity_logs SET actor_id = NULL WHERE actor_id IN (${list})`).run(...userIds);
+    database.prepare(`UPDATE task_comments SET user_id = NULL WHERE user_id IN (${list})`).run(...userIds);
+    database.prepare(`UPDATE task_attachments SET uploaded_by = NULL WHERE uploaded_by IN (${list})`).run(...userIds);
+    return keys;
   })();
 }
 
@@ -639,9 +685,11 @@ export function moveTask(
   return { task: findTask(task.id) as TaskRow, log };
 }
 
-export function deleteTask(task: TaskRow, actorId: string): void {
+/** Deletes the task; returns the storage keys of its attachments. */
+export function deleteTask(task: TaskRow, actorId: string): string[] {
   const database = getDatabase();
-  database.transaction(() => {
+  return database.transaction(() => {
+    const keys = attachmentKeysWhere('t.id = ?', [task.id]);
     database.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
     logActivity({
       projectId: task.project_id,
@@ -649,6 +697,7 @@ export function deleteTask(task: TaskRow, actorId: string): void {
       description: `Task "${task.title}" deleted`,
       actorId,
     });
+    return keys;
   })();
 }
 
@@ -699,4 +748,102 @@ export function listActivity(projectId: string, limit = PROJECT_ACTIVITY_LIMIT):
        FROM project_activity_logs WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
     )
     .all(projectId, limit) as ActivityRow[];
+}
+
+// --- Comments ---------------------------------------------------------------
+
+const COMMENT_COLUMNS = 'id, task_id, user_id, content, created_at, updated_at';
+
+/** Oldest first, as a conversation reads. */
+export function listComments(taskId: string): CommentRow[] {
+  return getDatabase()
+    .prepare(`SELECT ${COMMENT_COLUMNS} FROM task_comments WHERE task_id = ? ORDER BY created_at, rowid`)
+    .all(taskId) as CommentRow[];
+}
+
+export function findComment(id: string): CommentRow | undefined {
+  return getDatabase().prepare(`SELECT ${COMMENT_COLUMNS} FROM task_comments WHERE id = ?`).get(id) as CommentRow | undefined;
+}
+
+export function createComment(input: { taskId: string; userId: string; content: string }): CommentRow {
+  const now = Date.now();
+  const row: CommentRow = { id: randomUUID(), task_id: input.taskId, user_id: input.userId, content: input.content, created_at: now, updated_at: now };
+  getDatabase()
+    .prepare(`INSERT INTO task_comments (${COMMENT_COLUMNS}) VALUES (@id, @task_id, @user_id, @content, @created_at, @updated_at)`)
+    .run(row);
+  return row;
+}
+
+export function deleteComment(id: string): void {
+  getDatabase().prepare('DELETE FROM task_comments WHERE id = ?').run(id);
+}
+
+// --- Attachments ------------------------------------------------------------
+
+const ATTACHMENT_COLUMNS = 'id, task_id, storage_key, name, mime_type, size, uploaded_by, created_at, updated_at';
+
+/** Oldest first, in upload order. */
+export function listAttachments(taskId: string): AttachmentRow[] {
+  return getDatabase()
+    .prepare(`SELECT ${ATTACHMENT_COLUMNS} FROM task_attachments WHERE task_id = ? ORDER BY created_at, rowid`)
+    .all(taskId) as AttachmentRow[];
+}
+
+export function findAttachment(id: string): AttachmentRow | undefined {
+  return getDatabase().prepare(`SELECT ${ATTACHMENT_COLUMNS} FROM task_attachments WHERE id = ?`).get(id) as AttachmentRow | undefined;
+}
+
+/** Records stored images of one upload in one transaction, with one activity entry for all of them. */
+export function addAttachments(
+  task: TaskRow,
+  files: ReadonlyArray<{ id: string; storageKey: string; name: string; size: number }>,
+  actorId: string,
+): AttachmentRow[] {
+  const database = getDatabase();
+  const insert = database.prepare(
+    `INSERT INTO task_attachments (${ATTACHMENT_COLUMNS})
+     VALUES (@id, @task_id, @storage_key, @name, @mime_type, @size, @uploaded_by, @created_at, @updated_at)`,
+  );
+  return database.transaction(() => {
+    const now = Date.now();
+    const rows = files.map((file) => {
+      const row: AttachmentRow = {
+        id: file.id,
+        task_id: task.id,
+        storage_key: file.storageKey,
+        name: file.name,
+        mime_type: 'image/webp',
+        size: file.size,
+        uploaded_by: actorId,
+        created_at: now,
+        updated_at: now,
+      };
+      insert.run(row);
+      return row;
+    });
+    logActivity({
+      projectId: task.project_id,
+      eventType: 'task.attachment_added',
+      description: `${rows.length} image${rows.length === 1 ? '' : 's'} added to task "${task.title}"`,
+      actorId,
+      taskId: task.id,
+      meta: { count: rows.length },
+    });
+    return rows;
+  })();
+}
+
+export function deleteAttachment(task: TaskRow, attachment: AttachmentRow, actorId: string): void {
+  const database = getDatabase();
+  database.transaction(() => {
+    database.prepare('DELETE FROM task_attachments WHERE id = ?').run(attachment.id);
+    logActivity({
+      projectId: task.project_id,
+      eventType: 'task.attachment_removed',
+      description: `Image removed from task "${task.title}"`,
+      actorId,
+      taskId: task.id,
+      meta: { attachment_id: attachment.id },
+    });
+  })();
 }
