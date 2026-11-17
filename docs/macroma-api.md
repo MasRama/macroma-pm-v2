@@ -197,12 +197,13 @@ data: {
   since this Monday 00:00. `done_last_week`: the same for the Monday-to-Monday
   week before.
 - `counts`: every task of the account's projects per column, whatever its
-  batch. The active tasks ("Task aktif") are
-  `counts.ongoing + counts.revisi + counts.review`.
+  batch. Active = `ongoing`, `revisi`, `review` across all batches (batch-less
+  tasks included), matching `trends[].active`: the active tasks ("Task aktif")
+  are `counts.ongoing + counts.revisi + counts.review`.
 - `active_project_count`: how many of the account's projects have at least one
-  of those active tasks, from the same counts, so "N active tasks in M
-  projects" always agrees (`0` when there are no active tasks). Projects with
-  only `backlog` or `done` tasks do not count.
+  active task (`ongoing`, `revisi`, `review` across all batches), from the same
+  counts, so "N active tasks in M projects" always agrees (`0` when there are
+  no active tasks). Projects with only `backlog` or `done` tasks do not count.
 - `ongoing_mine`: tasks in `ongoing` assigned to the signed-in account.
 - `revisi_repeated`: tasks in `revisi` that moved to `revisi` more than once.
 - `trends`: each value as it stood at the end of that day. `workspace` counts
