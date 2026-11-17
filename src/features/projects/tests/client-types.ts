@@ -35,7 +35,16 @@ export async function projectsRouteTypes(): Promise<void> {
   if (dashboard.success) {
     const doneThisWeek: number = dashboard.data.stats.done_this_week;
     const day: string = dashboard.data.trends[0].day;
-    void [doneThisWeek, day];
+    const recentTitle: string | null = dashboard.data.recent_activity[0].task_title;
+    const recentVersion: string | null = dashboard.data.recent_activity[0].batch_version;
+    void [doneThisWeek, day, recentTitle, recentVersion];
+  }
+
+  const activity = await (await projects[':id'].activity.$get({ param: { id: 'p' } })).json();
+  if (activity.success) {
+    const taskTitle: string | null = activity.data.activity[0].task_title;
+    const batchVersion: string | null = activity.data.activity[0].batch_version;
+    void [taskTitle, batchVersion];
   }
 
   // @ts-expect-error an edit carries the revision it was based on

@@ -91,6 +91,10 @@ export interface ActivityRow {
   batch_id: string | null;
   meta: string | null;
   created_at: number;
+  /** Task events: the title recorded with the event, else the task's current one. */
+  task_title: string | null;
+  /** Batch events: `major.minor` recorded with the event, else the batch's current one. */
+  batch_version: string | null;
 }
 
 const PROJECT_COLUMNS = 'p.id, p.name, p.description, p.owner_id, p.workspace_id, p.revision, p.created_at, p.updated_at';
@@ -119,6 +123,11 @@ export function emptyCounts(): ColumnCounts {
 /** `v1.2` for a batch, `v1.2.7` for a task version. */
 export function versionString(major: number, minor: number, patch?: number): string {
   return patch === undefined ? `v${major}.${minor}` : `v${major}.${minor}.${patch}`;
+}
+
+/** A batch's `major.minor`, as activity rows name it: `1.8`. */
+function batchVersion(batch: Pick<BatchRow, 'major' | 'minor'>): string {
+  return `${batch.major}.${batch.minor}`;
 }
 
 function batchName(batch: Pick<BatchRow, 'major' | 'minor' | 'label'>): string {
@@ -488,10 +497,7 @@ export function columnCountsAt(projectIds: readonly string[], moments: readonly 
 export function recentActivity(projectIds: readonly string[], limit: number): ActivityRow[] {
   if (projectIds.length === 0) return [];
   return getDatabase()
-    .prepare(
-      `SELECT id, project_id, event_type, description, actor_id, task_id, batch_id, meta, created_at
-       FROM project_activity_logs WHERE project_id IN (${placeholders(projectIds)}) ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-    )
+    .prepare(`${ACTIVITY_SELECT} WHERE a.project_id IN (${placeholders(projectIds)}) ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`)
     .all(...projectIds, limit) as ActivityRow[];
 }
 
@@ -631,6 +637,7 @@ export function createBatch(
       description: `Batch ${batchName(batch)} created`,
       actorId,
       batchId: batch.id,
+      batchVersion: batchVersion(batch),
     });
     if (input.activate) {
       setActiveBatch(projectId, batch.id, now);
@@ -641,6 +648,7 @@ export function createBatch(
         description: `Batch ${batchName(batch)} activated`,
         actorId,
         batchId: batch.id,
+        batchVersion: batchVersion(batch),
       });
     }
     return batch;
@@ -659,6 +667,7 @@ export function activateBatch(batch: BatchRow, actorId: string): BatchRow {
       description: `Batch ${batchName(batch)} activated`,
       actorId,
       batchId: batch.id,
+      batchVersion: batchVersion(batch),
     });
     return { ...batch, is_active: 1, updated_at: now };
   })();
@@ -769,6 +778,7 @@ export function createTask(input: {
       description: `Task "${input.title}" created`,
       actorId: input.actorId,
       taskId,
+      taskTitle: input.title,
       meta: { version: label },
     });
     return taskId;
@@ -810,6 +820,7 @@ export function updateTask(
       description: `Task "${next.title}" updated`,
       actorId,
       taskId: id,
+      taskTitle: next.title,
     });
     return { status: 'updated', task: findTask(id) as TaskRow };
   })();
@@ -865,6 +876,7 @@ export function moveTask(
       description: `Task "${task.title}" moved from ${COLUMN_NAMES[task.column_id]} to ${COLUMN_NAMES[input.column]} (${label})`,
       actorId,
       taskId: task.id,
+      taskTitle: task.title,
       meta: { from: task.column_id, to: input.column, note: input.note, version: label },
     });
     return entry;
@@ -883,6 +895,7 @@ export function deleteTask(task: TaskRow, actorId: string): string[] {
       eventType: 'task.deleted',
       description: `Task "${task.title}" deleted`,
       actorId,
+      taskTitle: task.title,
     });
     return keys;
   })();
@@ -908,7 +921,16 @@ export function logActivity(entry: {
   taskId?: string | null;
   batchId?: string | null;
   meta?: Record<string, unknown> | null;
+  /** Task events: the title at the time, kept in `meta.task_title` so it outlives the task. */
+  taskTitle?: string;
+  /** Batch events: `major.minor` at the time, kept in `meta.batch_version`. */
+  batchVersion?: string;
 }): void {
+  const meta = {
+    ...entry.meta,
+    ...(entry.taskTitle === undefined ? {} : { task_title: entry.taskTitle }),
+    ...(entry.batchVersion === undefined ? {} : { batch_version: entry.batchVersion }),
+  };
   getDatabase()
     .prepare(
       `INSERT INTO project_activity_logs (id, project_id, event_type, description, actor_id, task_id, batch_id, meta, created_at)
@@ -922,18 +944,33 @@ export function logActivity(entry: {
       entry.actorId,
       entry.taskId ?? null,
       entry.batchId ?? null,
-      entry.meta ? JSON.stringify(entry.meta) : null,
+      Object.keys(meta).length > 0 ? JSON.stringify(meta) : null,
       Date.now(),
     );
 }
 
+/** A text field of the row's meta, or NULL when meta is missing, not JSON or the field is not text. */
+function activityMetaText(field: 'task_title' | 'batch_version'): string {
+  return `CASE WHEN json_valid(a.meta) AND json_type(a.meta, '$.${field}') = 'text' THEN json_extract(a.meta, '$.${field}') END`;
+}
+
+/**
+ * Activity rows with the task and batch they name, one query for any number of
+ * rows: what was recorded with the event, else (rows recorded before, V1
+ * imports) the task's current title and the batch's current version.
+ */
+const ACTIVITY_SELECT = `
+  SELECT a.id, a.project_id, a.event_type, a.description, a.actor_id, a.task_id, a.batch_id, a.meta, a.created_at,
+    CASE WHEN a.event_type LIKE 'task.%' THEN COALESCE(${activityMetaText('task_title')}, t.title) END AS task_title,
+    CASE WHEN a.event_type LIKE 'batch.%' THEN COALESCE(${activityMetaText('batch_version')}, b.major || '.' || b.minor) END AS batch_version
+  FROM project_activity_logs a
+  LEFT JOIN tasks t ON t.id = a.task_id
+  LEFT JOIN project_batches b ON b.id = a.batch_id`;
+
 /** The project's latest activity, newest first. */
 export function listActivity(projectId: string, limit = PROJECT_ACTIVITY_LIMIT): ActivityRow[] {
   return getDatabase()
-    .prepare(
-      `SELECT id, project_id, event_type, description, actor_id, task_id, batch_id, meta, created_at
-       FROM project_activity_logs WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-    )
+    .prepare(`${ACTIVITY_SELECT} WHERE a.project_id = ? ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`)
     .all(projectId, limit) as ActivityRow[];
 }
 
@@ -1014,6 +1051,7 @@ export function addAttachments(
       description: `${rows.length} image${rows.length === 1 ? '' : 's'} added to task "${task.title}"`,
       actorId,
       taskId: task.id,
+      taskTitle: task.title,
       meta: { count: rows.length },
     });
     return rows;
@@ -1030,6 +1068,7 @@ export function deleteAttachment(task: TaskRow, attachment: AttachmentRow, actor
       description: `Image removed from task "${task.title}"`,
       actorId,
       taskId: task.id,
+      taskTitle: task.title,
       meta: { attachment_id: attachment.id },
     });
   })();
@@ -1045,7 +1084,8 @@ export interface ProjectImport {
   batches: readonly BatchRow[];
   tasks: ReadonlyArray<Omit<TaskRow, 'revision' | 'revisi_count' | 'comment_count' | 'attachment_count'>>;
   taskLogs: readonly TaskLogRow[];
-  activity: readonly ActivityRow[];
+  /** The task title and batch version each row names are filled in from the imported tasks and batches. */
+  activity: ReadonlyArray<Omit<ActivityRow, 'task_title' | 'batch_version'>>;
   comments: readonly CommentRow[];
   attachments: readonly AttachmentRow[];
 }
@@ -1071,7 +1111,9 @@ export function countProjectRows(): number {
  * - a batch's `activated_at` is its latest `batch.activated` activity entry.
  *   A batch without one counts as activated at its creation when it is the
  *   active batch or was opened before it (the rule of migration 0304), and
- *   the active batch always ends up with the latest activation.
+ *   the active batch always ends up with the latest activation;
+ * - each activity row records the task title and batch version it names, from
+ *   the same fallback the activity feed reads, so they outlive later deletes.
  */
 export function importProjectRows(rows: ProjectImport): void {
   const database = getDatabase();
@@ -1132,6 +1174,8 @@ export function importProjectRows(rows: ProjectImport): void {
      WHERE project_id = ? AND is_active = 1
        AND activated_at <= (SELECT MAX(other.activated_at) FROM project_batches other WHERE other.project_id = project_batches.project_id AND other.id <> project_batches.id)`,
   );
+  const namedActivity = database.prepare(`${ACTIVITY_SELECT} WHERE a.project_id = ?`);
+  const activityMeta = database.prepare('UPDATE project_activity_logs SET meta = ? WHERE id = ?');
   database.transaction(() => {
     for (const row of rows.projects) project.run(row);
     for (const row of rows.members) member.run(row);
@@ -1147,6 +1191,14 @@ export function importProjectRows(rows: ProjectImport): void {
       loggedActivations.run(id);
       unloggedActivations.run(id);
       activeIsLatest.run(id);
+      for (const row of namedActivity.all(id) as ActivityRow[]) {
+        if (row.task_title === null && row.batch_version === null) continue;
+        // The import keeps only meta that is a JSON object.
+        const meta = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : {};
+        if (row.task_title !== null) meta.task_title = row.task_title;
+        if (row.batch_version !== null) meta.batch_version = row.batch_version;
+        activityMeta.run(JSON.stringify(meta), row.id);
+      }
     }
   })();
 }
