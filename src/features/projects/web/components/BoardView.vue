@@ -22,7 +22,8 @@ import {
  * Project board, presentational: page head with batch filter, members, Bump
  * versi and Task baru; the active batch strip, or without one a hint at Bump
  * versi; five status columns (one status at a time on phones), where only
- * Backlog offers a new task since tasks always start there. Dropping a card on another column asks the
+ * Backlog offers a new task since tasks always start there. A task needs a
+ * batch, so Task baru stays disabled until Bump versi opens one. Dropping a card on another column asks the
  * parent to move it; the parent owns the modals.
  */
 const props = withDefaults(
@@ -118,7 +119,7 @@ function onDragTask(id: string | null): void {
       <template #actions>
         <AvatarStack v-if="members.length" class="board-page__members" :people="members" />
         <BumpVersionMenu v-if="canBump" :current="latestBatch" :closing="activeBatch" @bump="emit('bump', $event)" />
-        <UiButton v-if="canCreate" variant="primary" icon="plus" data-testid="new-task" :disabled="busy" @click="emit('newTask')">
+        <UiButton v-if="canCreate" variant="primary" icon="plus" data-testid="new-task" :disabled="busy || !activeBatch" @click="emit('newTask')">
           Task baru
         </UiButton>
       </template>
@@ -135,13 +136,12 @@ function onDragTask(id: string | null): void {
     <BatchStrip v-if="activeBatch" class="board-page__strip-phone" :batch="activeBatch" compact />
     <div v-if="!activeBatch && project" class="no-batch" data-testid="no-batch">
       <p v-if="canBump">
-        <b>Belum ada batch aktif.</b> Buka batch lewat <b>Bump versi</b>: Minor jadi
+        <b>Belum ada batch aktif.</b> Buka batch dulu lewat <b>Bump versi</b>: Minor jadi
         <span class="mono">{{ nextMinor }}</span>, Major jadi
-        <span class="mono">{{ nextMajor }}</span>. Task yang dibuat sebelum itu dapat versi
-        <span class="mono">v0.0.x</span>.
+        <span class="mono">{{ nextMajor }}</span>. Setelah itu baru bisa bikin task.
       </p>
       <p v-else>
-        <b>Belum ada batch aktif.</b> Task baru dapat versi <span class="mono">v0.0.x</span> sampai owner project bump versi.
+        <b>Belum ada batch aktif.</b> Task baru bisa dibuat setelah owner project bump versi.
       </p>
       <BumpVersionMenu v-if="canBump" class="no-batch__bump" :current="latestBatch" @bump="emit('bump', $event)" />
     </div>
@@ -153,6 +153,7 @@ function onDragTask(id: string | null): void {
         :status="status"
         :tasks="byStatus[status]"
         :can-add="canCreate && status === 'backlog'"
+        :add-disabled="!activeBatch"
         :drop-target="dragging !== null && dragOver === status && findTask(dragging)?.status !== status"
         :lifted-task-id="dragging"
         @add="emit('newTask')"
@@ -184,7 +185,7 @@ function onDragTask(id: string | null): void {
         <p v-if="byStatus[phoneStatus].length === 0" class="phone-board__empty">Belum ada task</p>
       </div>
       <div v-if="canCreate" class="phone-board__bar">
-        <UiButton variant="primary" size="lg" block icon="plus" :disabled="busy" @click="emit('newTask')">Task baru</UiButton>
+        <UiButton variant="primary" size="lg" block icon="plus" :disabled="busy || !activeBatch" @click="emit('newTask')">Task baru</UiButton>
       </div>
     </div>
   </div>

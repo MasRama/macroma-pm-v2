@@ -12,8 +12,10 @@ const props = withDefaults(
     dropTarget?: boolean;
     liftedTaskId?: string | null;
     canAdd?: boolean;
+    /** Show the add button but refuse it (the project has no batch to put a task in yet). */
+    addDisabled?: boolean;
   }>(),
-  { dropTarget: false, liftedTaskId: null, canAdd: true },
+  { dropTarget: false, liftedTaskId: null, canAdd: true, addDisabled: false },
 );
 const emit = defineEmits<{
   add: [status: TaskStatus];
@@ -43,6 +45,7 @@ function onDragOver(): void {
         type="button"
         class="col__plus focus-ring"
         :aria-label="`Task baru di ${STATUS_LABEL[status]}`"
+        :disabled="addDisabled"
         @click="emit('add', status)"
       >
         <UiIcon name="plus" :size="15" :stroke="2.4" />
@@ -104,6 +107,10 @@ function onDragOver(): void {
   color: #fff;
   opacity: 0.85;
   cursor: pointer;
+}
+.col__plus:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .col__drop {
   border: 1.5px dashed var(--dash);

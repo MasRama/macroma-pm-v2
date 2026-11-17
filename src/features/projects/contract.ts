@@ -300,6 +300,12 @@ export function projectsResponseSchemas() {
     note: z.string(),
     user: personRef.nullable(),
     created_at: z.number(),
+    /**
+     * What the entry records, where the API sends it (e.g. `batch_adopted` when
+     * the first Bump versi takes a batch-less task into its batch). Optional:
+     * older entries and servers send none.
+     */
+    kind: z.string().optional(),
   });
   const taskDetail = z.strictObject({
     ...task.shape,

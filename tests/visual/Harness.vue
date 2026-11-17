@@ -69,6 +69,7 @@ const firstBump = screen === 'first-bump';
         project-id="p1"
         :project="f.project"
         :active-batch="f.batches[2]"
+        :batches="f.batches"
         :releases="f.releases"
         :detail="f.releaseDetail"
         :can-bump="true"
