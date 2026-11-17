@@ -200,9 +200,9 @@ export const messages: ChatMessage[] = [
 ];
 
 export const notifications: NotificationItem[] = [
-  { id: 1, kind: 'invited', actor: dimas, subject: 'Nara Labs', invitationId: 7, at: at(17, '10:15'), unread: true },
-  { id: 2, kind: 'invite-accepted', actor: salsa, subject: 'Wajom Studio', at: at(17, '09:20'), unread: true },
-  { id: 3, kind: 'task-moved', actor: azka, subject: 'Checkout Midtrans gagal di Safari iOS', target: 'Revisi', at: at(16, '09:00'), unread: false },
+  { id: 'n1', kind: 'invited', actor: dimas, subject: 'Nara Labs', workspaceId: 'w2', invitationToken: 'preview', at: at(17, '10:15'), unread: true },
+  { id: 'n2', kind: 'invite-accepted', actor: salsa, subject: 'Wajom Studio', workspaceId: 'w1', invitationToken: null, at: at(17, '09:20'), unread: true },
+  { id: 'n3', kind: 'invite-accepted', actor: azka, subject: 'Wajom Studio', workspaceId: 'w1', invitationToken: null, at: at(16, '09:00'), unread: false },
 ];
 
 export const shellUser = { ...ren, caption: 'Owner' };

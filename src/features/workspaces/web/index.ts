@@ -35,4 +35,11 @@ export { default as InviteMemberModal } from './components/InviteMemberModal.vue
 export { default as MembersPanel } from './components/MembersPanel.vue';
 export { default as NewWorkspaceModal } from './components/NewWorkspaceModal.vue';
 export { default as ProjectCard } from './components/ProjectCard.vue';
+export {
+  WORKSPACES_GENERIC_REFUSAL_TEXT,
+  WORKSPACES_REFUSAL_TEXT,
+  workspacesFieldTexts,
+  workspacesRefusalText,
+  type WorkspacesRefusal,
+} from './refusals';
 export * from './view';

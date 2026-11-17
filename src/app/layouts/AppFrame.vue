@@ -20,7 +20,10 @@ withDefaults(
     chatUnread?: number;
     chatOpen?: boolean;
     adminLinks?: ShellLink[];
-    notifications?: NotificationItem[];
+    notifications?: readonly NotificationItem[];
+    notificationsUnread?: number | null;
+    notificationsBusy?: boolean;
+    notificationsError?: string;
     loggingOut?: boolean;
     error?: string;
   }>(),
@@ -32,6 +35,9 @@ withDefaults(
     chatOpen: false,
     adminLinks: () => [],
     notifications: () => [],
+    notificationsUnread: null,
+    notificationsBusy: false,
+    notificationsError: '',
     loggingOut: false,
     error: '',
   },
@@ -41,8 +47,9 @@ const emit = defineEmits<{
   newWorkspace: [];
   logout: [];
   search: [query: string];
-  acceptInvite: [id: number];
-  declineInvite: [id: number];
+  acceptInvite: [token: string];
+  declineInvite: [token: string];
+  readNotification: [id: string];
   markNotificationsRead: [];
 }>();
 
@@ -106,8 +113,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         </form>
         <NotificationsMenu
           :items="notifications"
+          :unread-count="notificationsUnread"
+          :busy="notificationsBusy"
+          :error="notificationsError"
           @accept="emit('acceptInvite', $event)"
           @decline="emit('declineInvite', $event)"
+          @read="emit('readNotification', $event)"
           @mark-all-read="emit('markNotificationsRead')"
         />
       </header>
