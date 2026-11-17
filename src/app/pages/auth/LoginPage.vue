@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import { nextTick, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { createAuthClient, createSecurityClient, SESSION_ENDED_REASON, useAuthSession } from '../../../features/auth/web';
 import { TextField, UiButton } from '../../../shared/ui';
 import AuthLayout from '../../layouts/AuthLayout.vue';
 import GoogleMark from './GoogleMark.vue';
+import { googleErrorMessage, startGoogleSignIn } from './google';
 import { firstErrors, redirectTarget } from './redirect';
 import './auth-form.css';
 
@@ -14,6 +15,7 @@ const code = ref('');
 const useRecovery = ref(false);
 const step = ref<'password' | 'two-factor'>('password');
 const busy = ref(false);
+const googleBusy = ref(false);
 const formError = ref('');
 const errors = ref<Record<string, string>>({});
 
@@ -112,11 +114,27 @@ function startOver(): void {
   useRecovery.value = false;
   code.value = '';
   errors.value = {};
+  // A Google sign-in that asked for the code lands on ?two-factor=1; starting over leaves it.
+  if (route.query['two-factor']) void router.replace({ name: 'login', query: { ...route.query, 'two-factor': undefined } });
 }
 
-function google(): void {
-  formError.value = 'Masuk dengan Google belum tersedia.';
+async function google(): Promise<void> {
+  if (googleBusy.value) return;
+  formError.value = '';
+  googleBusy.value = true;
+  formError.value = await startGoogleSignIn();
+  // Leaving for Google keeps the button busy until the page unloads.
+  if (formError.value) googleBusy.value = false;
 }
+
+onMounted(() => {
+  // Google comes back here when the account needs its second factor, or refused.
+  if (route.query['two-factor'] === '1') {
+    step.value = 'two-factor';
+    void focusCode();
+  }
+  formError.value = googleErrorMessage(route.query['google-error']);
+});
 </script>
 
 <template>
@@ -125,7 +143,8 @@ function google(): void {
       <h1 class="af-title">Masuk</h1>
       <p v-if="canRegister" class="af-sub">Belum punya akun? <RouterLink class="link" :to="{ name: 'register', query: route.query.redirect ? { redirect: route.query.redirect } : {} }">Daftar</RouterLink></p>
       <p v-if="route.query.reason === SESSION_ENDED_REASON" role="status" class="af-notice">Sesi kamu sudah berakhir. Masuk lagi untuk lanjut.</p>
-      <UiButton class="af-google" block @click="google"><GoogleMark />Masuk dengan Google</UiButton>
+      <p v-else-if="route.query.reset === '1'" role="status" class="af-notice" data-testid="reset-done">Password baru tersimpan. Masuk dengan password itu.</p>
+      <UiButton class="af-google" block :disabled="googleBusy" data-testid="google-sign-in" @click="google"><GoogleMark />Masuk dengan Google</UiButton>
       <div class="af-or">atau pakai email</div>
       <form class="af-form" novalidate @submit.prevent="submitPassword">
         <p v-if="formError" role="alert" class="af-alert">{{ formError }}</p>
