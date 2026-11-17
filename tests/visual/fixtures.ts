@@ -122,9 +122,9 @@ export const detailComments: TaskComment[] = Array.from({ length: 6 }, (_, index
   at: at(16, `1${index}:05`),
 }));
 export const detailImages: TaskImage[] = [
-  { id: 'g1', url: '/macroma.svg', name: 'pairing-1.png' },
-  { id: 'g2', url: '/macroma.svg', name: 'pairing-2.png' },
-  { id: 'g3', url: '/macroma.svg', name: 'pairing-3.png' },
+  { id: 'g1', url: '/macroma.svg', name: 'pairing-1.png', uploaderId: null },
+  { id: 'g2', url: '/macroma.svg', name: 'pairing-2.png', uploaderId: null },
+  { id: 'g3', url: '/macroma.svg', name: 'pairing-3.png', uploaderId: null },
 ];
 
 export const releases: ReleaseSummary[] = [

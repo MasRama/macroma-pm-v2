@@ -10,6 +10,7 @@ import EditTaskModal from '../components/EditTaskModal.vue';
 import MoveTaskModal from '../components/MoveTaskModal.vue';
 import NewTaskModal from '../components/NewTaskModal.vue';
 import TaskDetailModal from '../components/TaskDetailModal.vue';
+import { checkImages, uploadProblems } from '../images';
 import { fieldText, refusalText } from '../refusals';
 import { STATUS_LABEL } from '../format';
 import {
@@ -17,13 +18,17 @@ import {
   toBatchSummary,
   toProjectSummary,
   toTaskCard,
+  toTaskComment,
   toTaskDetail,
+  toTaskImage,
   type BatchSummary,
   type BumpKind,
   type EditTaskField,
   type EditTaskForm,
   type MoveTaskInput,
   type NewTaskInput,
+  type TaskComment,
+  type TaskImage,
   type ProjectSummary,
   type TaskCardData,
   type TaskDetailData,
@@ -45,8 +50,10 @@ const props = withDefaults(
     client: ProjectsClient;
     /** Names the project's workspace in the breadcrumb. */
     workspaceNameOf?: (id: string) => string | undefined;
+    /** The signed-in account: it may delete the images it uploaded. */
+    meId?: string | null;
   }>(),
-  { taskId: null, workspaceNameOf: () => undefined },
+  { taskId: null, workspaceNameOf: () => undefined, meId: null },
 );
 const route = useRoute();
 const router = useRouter();
@@ -59,6 +66,9 @@ const batches = ref<BatchSummary[]>([]);
 const members = ref<PersonRef[]>([]);
 const tasks = ref<TaskCardData[]>([]);
 const detail = ref<TaskDetailData | null>(null);
+/** The open task's comments and images; `null` until loaded, which leaves their tab out. */
+const comments = ref<TaskComment[] | null>(null);
+const images = ref<TaskImage[] | null>(null);
 const gone = ref('');
 const loading = ref(true);
 const busy = ref(false);
@@ -135,10 +145,16 @@ async function loadDetail(): Promise<void> {
   const ticket = ++detailTicket;
   if (!id) {
     detail.value = null;
+    comments.value = null;
+    images.value = null;
     return;
   }
+  if (detail.value?.id !== id) {
+    comments.value = null;
+    images.value = null;
+  }
   try {
-    const response = await props.client.task(id);
+    const [response] = await Promise.all([props.client.task(id), loadComments(id, ticket), loadImages(id, ticket)]);
     if (ticket !== detailTicket || id !== props.taskId) return;
     if (response.success) {
       detail.value = toTaskDetail(response.data.task);
@@ -151,6 +167,109 @@ async function loadDetail(): Promise<void> {
   } catch (cause) {
     console.error(cause);
   }
+}
+
+/** Loads the task's comments; a refusal is said under the comment box. `ticket` drops an answer for a task no longer open. */
+async function loadComments(id: string, ticket = detailTicket): Promise<void> {
+  try {
+    const response = await props.client.comments(id);
+    if (ticket !== detailTicket || id !== props.taskId) return;
+    if (response.success) comments.value = response.data.comments.map(toTaskComment);
+    else if (response.code !== 'UNAUTHORIZED' && response.code !== 'TASK_NOT_FOUND') commentError.value = say(response);
+  } catch (cause) {
+    console.error(cause);
+  }
+}
+
+/** Loads the task's images, each with the API's guarded `url`. */
+async function loadImages(id: string, ticket = detailTicket): Promise<void> {
+  try {
+    const response = await props.client.attachments(id);
+    if (ticket !== detailTicket || id !== props.taskId) return;
+    if (response.success) images.value = response.data.attachments.map(toTaskImage);
+    else if (response.code !== 'UNAUTHORIZED' && response.code !== 'TASK_NOT_FOUND') imageError.value = say(response);
+  } catch (cause) {
+    console.error(cause);
+  }
+}
+
+/* Komentar */
+const commentError = ref<string | undefined>();
+const commenting = ref(false);
+async function addComment(body: string, sent: () => void): Promise<void> {
+  const id = props.taskId;
+  if (!id || commenting.value) return;
+  commenting.value = true;
+  commentError.value = undefined;
+  try {
+    const response = await props.client.addComment(id, { content: body });
+    if (response.success) {
+      sent();
+      const added = toTaskComment(response.data.comment);
+      if (id === props.taskId && comments.value && !comments.value.some((comment) => comment.id === added.id)) {
+        comments.value = [...comments.value, added];
+      }
+    } else {
+      commentError.value = fieldText(response.errors, 'content') ?? say(response);
+    }
+  } catch (cause) {
+    console.error(cause);
+    commentError.value = 'Komentar belum terkirim. Coba lagi.';
+  } finally {
+    commenting.value = false;
+  }
+}
+
+/* Gambar */
+const imageError = ref<string | undefined>();
+const imagesBusy = ref(false);
+function canRemoveImage(image: TaskImage): boolean {
+  return isOwner.value || (props.meId !== null && image.uploaderId === props.meId);
+}
+
+/** Uploads checked files to a task; returns what to say about the ones that did not make it ('' when all did). */
+async function sendImages(taskId: string, files: readonly File[]): Promise<string> {
+  const { accepted, rejected } = checkImages(files);
+  if (!accepted.length) return uploadProblems(rejected, 0);
+  const response = await props.client.uploadAttachments(taskId, accepted);
+  if (!response.success) {
+    const refused = response.code === 'NO_FILES_PROCESSED' ? refusalText(response.code) : say(response);
+    return [...rejected, refused].join(' ');
+  }
+  return uploadProblems(rejected, response.data.errors.length);
+}
+
+async function uploadImages(files: File[]): Promise<void> {
+  const id = props.taskId;
+  if (!id || imagesBusy.value || !files.length) return;
+  imagesBusy.value = true;
+  imageError.value = undefined;
+  try {
+    imageError.value = (await sendImages(id, files)) || undefined;
+  } catch (cause) {
+    console.error(cause);
+    imageError.value = 'Gambar belum bisa diunggah. Coba lagi.';
+  } finally {
+    imagesBusy.value = false;
+  }
+  if (id === props.taskId) await loadImages(id);
+}
+
+async function removeImage(imageId: string): Promise<void> {
+  const id = props.taskId;
+  if (!id || imagesBusy.value) return;
+  imagesBusy.value = true;
+  imageError.value = undefined;
+  try {
+    const response = await props.client.removeAttachment(id, imageId);
+    if (!response.success && response.code !== 'ATTACHMENT_NOT_FOUND') imageError.value = say(response);
+  } catch (cause) {
+    console.error(cause);
+    imageError.value = 'Gambar belum bisa dihapus. Coba lagi.';
+  } finally {
+    imagesBusy.value = false;
+  }
+  if (id === props.taskId) await loadImages(id);
 }
 
 async function reload(): Promise<void> {
@@ -182,7 +301,11 @@ watch(
 watch(batchFilter, () => void loadTasks());
 watch(
   () => props.taskId,
-  () => void loadDetail(),
+  () => {
+    commentError.value = undefined;
+    imageError.value = undefined;
+    void loadDetail();
+  },
 );
 
 function openTask(id: string): void {
@@ -194,7 +317,7 @@ function closeTask(): void {
 
 /* Task baru */
 const newTaskOpen = ref(false);
-const newTaskErrors = ref<Partial<Record<'title' | 'description' | 'assigneeId', string>>>({});
+const newTaskErrors = ref<Partial<Record<'title' | 'description' | 'assigneeId' | 'files', string>>>({});
 const newTaskError = ref<string | undefined>();
 /** The board shows every task of the active batch, so the start version can be read off it. */
 const showsActiveBatch = computed(() => batchFilter.value === 'all' || batchFilter.value === activeBatch.value?.id);
@@ -211,6 +334,13 @@ async function createTask(input: NewTaskInput): Promise<void> {
   busy.value = true;
   newTaskErrors.value = {};
   newTaskError.value = undefined;
+  // A wrong file is said before the task exists, so the person can drop it and try again.
+  const { rejected } = checkImages(input.files);
+  if (rejected.length) {
+    newTaskErrors.value = { files: uploadProblems(rejected, 0) };
+    busy.value = false;
+    return;
+  }
   try {
     const response = await props.client.createTask(props.projectId, {
       title: input.title,
@@ -220,6 +350,13 @@ async function createTask(input: NewTaskInput): Promise<void> {
     });
     if (response.success) {
       newTaskOpen.value = false;
+      if (input.files.length) {
+        const problems = await sendImages(response.data.task.id, input.files).catch((cause: unknown) => {
+          console.error(cause);
+          return 'Gambarnya belum bisa diunggah. Coba lagi dari detail task.';
+        });
+        if (problems) notice.value = `Task dibuat, tapi ada gambar yang belum terunggah. ${problems}`;
+      }
     } else if (response.code === 'VALIDATION_ERROR') {
       newTaskErrors.value = {
         title: fieldText(response.errors, 'title'),
@@ -452,6 +589,7 @@ async function deleteTask(): Promise<void> {
     :busy="busy"
     :errors="newTaskErrors"
     :error="newTaskError"
+    allow-files
     @close="newTaskOpen = false"
     @submit="createTask"
   />
@@ -472,10 +610,20 @@ async function deleteTask(): Promise<void> {
     :can-edit="true"
     :can-delete="isOwner"
     :deleting="busy"
+    :comments="comments"
+    :images="images"
+    :comment-error="commentError"
+    :commenting="commenting"
+    :can-remove-image="canRemoveImage"
+    :images-busy="imagesBusy"
+    :image-error="imageError"
     @close="closeTask"
     @move="startMove(detail, null)"
     @edit="openEdit"
     @delete="deleteTask"
+    @comment="addComment"
+    @upload="uploadImages"
+    @remove-image="removeImage"
   />
   <EditTaskModal
     v-model:title="form.title"

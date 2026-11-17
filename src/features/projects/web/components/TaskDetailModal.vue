@@ -37,16 +37,37 @@ const props = withDefaults(
     canDelete?: boolean;
     deleting?: boolean;
     commentError?: string;
+    /** A comment is on its way; the draft stays until it is saved. */
+    commenting?: boolean;
+    /** Whether this account may delete an image (its uploader or the project owner). */
+    canRemoveImage?: (image: TaskImage) => boolean;
+    /** Images are uploading or one is being deleted. */
+    imagesBusy?: boolean;
+    imageError?: string;
   }>(),
-  { comments: null, images: null, initialTab: 'detail', canEdit: true, canDelete: true, deleting: false, commentError: undefined },
+  {
+    comments: null,
+    images: null,
+    initialTab: 'detail',
+    canEdit: true,
+    canDelete: true,
+    deleting: false,
+    commentError: undefined,
+    commenting: false,
+    canRemoveImage: () => false,
+    imagesBusy: false,
+    imageError: undefined,
+  },
 );
 const emit = defineEmits<{
   close: [];
   move: [];
   edit: [];
   delete: [];
-  comment: [body: string];
+  /** `sent` clears the draft; the page calls it once the comment is saved. */
+  comment: [body: string, sent: () => void];
   upload: [files: File[]];
+  removeImage: [id: string];
 }>();
 
 const tab = ref<string>(props.initialTab);
@@ -55,8 +76,9 @@ const confirmDelete = ref(false);
 
 watch(
   () => [props.open, props.task?.id] as const,
-  ([open]) => {
-    if (!open) return;
+  ([open, id], previous) => {
+    // A live refetch hands over a new task object for the same task; only opening or switching task starts over.
+    if (!open || (previous?.[0] === open && previous[1] === id)) return;
     tab.value = tabs.value.some((option) => option.value === props.initialTab) ? props.initialTab : 'detail';
     draft.value = '';
     confirmDelete.value = false;
@@ -77,9 +99,10 @@ const logs = computed(() => [...(props.task?.logs ?? [])].sort((a, b) => b.at.lo
 
 function sendComment(): void {
   const body = draft.value.trim();
-  if (!body) return;
-  emit('comment', body);
-  draft.value = '';
+  if (!body || props.commenting) return;
+  emit('comment', body, () => {
+    draft.value = '';
+  });
 }
 </script>
 
@@ -123,7 +146,7 @@ function sendComment(): void {
               <p v-else class="td__empty">Belum ada komentar.</p>
               <form class="td__reply" @submit.prevent="sendComment">
                 <TextArea id="task-comment" v-model="draft" label="Komentar" placeholder="Tulis komentar…" :error="commentError" />
-                <UiButton variant="primary" type="submit" size="sm" :disabled="!draft.trim()">Kirim</UiButton>
+                <UiButton variant="primary" type="submit" size="sm" :disabled="!draft.trim() || commenting">Kirim</UiButton>
               </form>
             </template>
 
@@ -141,12 +164,25 @@ function sendComment(): void {
 
             <template v-else>
               <ul v-if="images.length" class="td__images">
-                <li v-for="image in images" :key="image.id">
+                <li v-for="image in images" :key="image.id" class="td__shot" :data-image-id="image.id">
                   <a :href="image.url" target="_blank" rel="noopener" class="td__image focus-ring">
                     <img :src="image.url" :alt="image.name" loading="lazy" />
                   </a>
+                  <button
+                    v-if="canRemoveImage(image)"
+                    type="button"
+                    class="td__unshot focus-ring"
+                    :aria-label="`Hapus gambar ${image.name}`"
+                    :disabled="imagesBusy"
+                    @click="emit('removeImage', image.id)"
+                  >
+                    <UiIcon name="trash" :size="14" :stroke="2.2" />
+                  </button>
                 </li>
               </ul>
+              <p v-else class="td__empty">Belum ada gambar.</p>
+              <p v-if="imageError" role="alert" class="td__error" data-testid="task-image-error">{{ imageError }}</p>
+              <p v-if="imagesBusy" class="td__busy" role="status">Memproses gambar…</p>
               <UiDropzone v-if="canEdit" id="task-detail-images" @files="emit('upload', $event)" />
             </template>
           </div>
@@ -341,6 +377,38 @@ function sendComment(): void {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.td__shot {
+  position: relative;
+}
+.td__unshot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: var(--block);
+  color: var(--block-fg);
+  cursor: pointer;
+}
+.td__unshot:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.td__error {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--alert);
+}
+.td__busy {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--mute);
 }
 .td__rail {
   width: 300px;

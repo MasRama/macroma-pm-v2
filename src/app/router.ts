@@ -36,6 +36,7 @@ const boardProps = (route: RouteLocationNormalized) => ({
   taskId: route.params.taskId ? String(route.params.taskId) : null,
   client: projectsClient,
   workspaceNameOf,
+  meId: authSession.user.value?.id ?? null,
 });
 export const appRoutes = [
   { path: '/', redirect: '/dashboard' },

@@ -30,7 +30,7 @@ const selectedRelease = ref('b22');
 const editForm = ref({ title: f.detail.title, description: f.detail.description ?? '', priority: f.detail.priority, assigneeId: '1' });
 const framed = !['login', 'register', 'forgot-password', 'reset-password', 'not-found'].includes(screen);
 const chatOpen = screen === 'chat';
-const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'edit-task', 'confirm', 'bump', 'first-bump', 'notifications'];
+const boardScreens = ['board', 'task-detail', 'task-comments', 'task-images', 'new-task', 'move-task', 'edit-task', 'confirm', 'bump', 'first-bump', 'notifications'];
 /** A new project: no batch yet, so the owner opens the first one. */
 const firstBump = screen === 'first-bump';
 </script>
@@ -112,6 +112,7 @@ const firstBump = screen === 'first-bump';
       :batch="{ major: 2, minor: 3 }"
       :start-version="nextTaskVersion({ major: 2, minor: 3 }, 'b23', f.tasks)"
       :members="f.team"
+      allow-files
     />
     <MoveTaskModal
       :open="screen === 'move-task'"
@@ -126,6 +127,23 @@ const firstBump = screen === 'first-bump';
       :comments="f.detailComments"
       :images="f.detailImages"
       initial-tab="history"
+    />
+    <TaskDetailModal
+      :open="screen === 'task-comments'"
+      :task="f.detail"
+      :comments="f.detailComments"
+      :images="f.detailImages"
+      initial-tab="comments"
+      comment-error="Komentar wajib diisi, maksimal 2000 karakter."
+    />
+    <TaskDetailModal
+      :open="screen === 'task-images'"
+      :task="f.detail"
+      :comments="f.detailComments"
+      :images="f.detailImages"
+      initial-tab="images"
+      :can-remove-image="() => true"
+      image-error="big-screenshot.png: maksimal 5 MB."
     />
     <EditTaskModal
       v-model:title="editForm.title"
