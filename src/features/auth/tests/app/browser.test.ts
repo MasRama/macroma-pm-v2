@@ -171,6 +171,9 @@ beforeEach(async () => {
   await useAuthSession().logout();
   await router.push('/');
   await router.isReady();
+  // "/" redirects to the signed-in dashboard, so parking the router already
+  // asks /api/auth/me; each test counts only the requests it makes itself.
+  fetchPaths = [];
 });
 
 afterEach(async () => {
@@ -193,23 +196,22 @@ describe('browser authentication lifecycle', () => {
     await registerNavigation;
 
     expect(router.currentRoute.value.name).toBe('register');
-    expect(container.querySelector('h1')?.textContent).toContain('Create your account');
+    expect(container.querySelector('.af-title')?.textContent).toBe('Daftar');
 
     const email = `register-${Date.now()}@example.com`;
-    setInput('#name', 'Ada Lovelace');
-    setInput('#email', email);
-    setInput('#password', TEST_PASSWORD);
-    setInput('#password-confirmation', TEST_PASSWORD);
+    setInput('#register-name', 'Ada Lovelace');
+    setInput('#register-email', email);
+    setInput('#register-password', TEST_PASSWORD);
     const dashboardNavigation = waitForNavigation();
     submitForm();
     await nextTick();
     const registrationButton = container.querySelector<HTMLButtonElement>('button[type="submit"]');
     expect(registrationButton?.disabled).toBe(true);
-    expect(registrationButton?.textContent).toContain('Creating account…');
+    expect(registrationButton?.textContent).toContain('Membuat akun…');
     await dashboardNavigation;
 
     expect(router.currentRoute.value.name).toBe('dashboard');
-    expect(container.querySelector('h1')?.textContent).toContain('Hi, Ada.');
+    expect(container.querySelector('h1')?.textContent).toMatch(/, Ada$/);
     expect(document.documentElement).toBe(documentElement);
     expect(useAuthSession().user.value?.email).toBe(email);
     expect(fetchPaths).toContain('/api/auth/register');
@@ -223,17 +225,16 @@ describe('browser authentication lifecycle', () => {
   it('renders registration validation errors without sending invalid input', async () => {
     await mountAt('/register');
 
-    setInput('#name', 'A');
-    setInput('#email', 'invalid');
-    setInput('#password', 'short');
-    setInput('#password-confirmation', 'different');
+    setInput('#register-name', ' ');
+    setInput('#register-email', 'invalid');
+    setInput('#register-password', 'short');
     submitForm();
     await settle();
 
     expect(router.currentRoute.value.name).toBe('register');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Please correct');
-    expect(container.textContent).toContain('Name must be at least 2 characters');
-    expect(container.textContent).toContain('Invalid email format');
+    expect(container.textContent).toContain('Nama wajib diisi');
+    expect(container.textContent).toContain('Masukkan email yang valid');
+    expect(container.textContent).toContain('Password minimal 8 karakter');
     expect(fetchPaths.filter((path) => path === '/api/auth/register')).toHaveLength(0);
   });
 
@@ -243,10 +244,9 @@ describe('browser authentication lifecycle', () => {
     await useAuthSession().logout();
     await mountAt('/register');
 
-    setInput('#name', 'Another User');
-    setInput('#email', email);
-    setInput('#password', TEST_PASSWORD);
-    setInput('#password-confirmation', TEST_PASSWORD);
+    setInput('#register-name', 'Another User');
+    setInput('#register-email', email);
+    setInput('#register-password', TEST_PASSWORD);
     submitForm();
     await settle();
 
@@ -260,14 +260,14 @@ describe('browser authentication lifecycle', () => {
     await useAuthSession().logout();
     await mountAt('/login');
 
-    setInput('#email', email);
-    setInput('#password', 'wrong password');
+    setInput('#login-email', email);
+    setInput('#login-password', 'wrong password');
     submitForm();
 
     await nextTick();
     const loginErrorButton = container.querySelector<HTMLButtonElement>('button[type="submit"]');
     expect(loginErrorButton?.disabled).toBe(true);
-    expect(loginErrorButton?.textContent).toContain('Signing in…');
+    expect(loginErrorButton?.textContent).toContain('Masuk…');
     await settle();
 
     expect(router.currentRoute.value.name).toBe('login');
@@ -357,18 +357,18 @@ describe('browser authentication lifecycle', () => {
     expect(router.currentRoute.value.query.redirect).toBe('/dashboard');
 
     const documentElement = document.documentElement;
-    setInput('#email', email);
-    setInput('#password', TEST_PASSWORD);
+    setInput('#login-email', email);
+    setInput('#login-password', TEST_PASSWORD);
     const navigation = waitForNavigation();
     submitForm();
     await nextTick();
     const loginButton = container.querySelector<HTMLButtonElement>('button[type="submit"]');
     expect(loginButton?.disabled).toBe(true);
-    expect(loginButton?.textContent).toContain('Signing in…');
+    expect(loginButton?.textContent).toContain('Masuk…');
     await navigation;
 
     expect(router.currentRoute.value.name).toBe('dashboard');
-    expect(container.querySelector('h1')?.textContent).toContain('Hi, Existing.');
+    expect(container.querySelector('h1')?.textContent).toMatch(/, Existing$/);
     expect(useAuthSession().isAuthenticated.value).toBe(true);
     expect(document.documentElement).toBe(documentElement);
   });
@@ -383,20 +383,20 @@ describe('browser authentication lifecycle', () => {
     await useAuthSession().logout();
 
     await mountAt('/login');
-    setInput('#email', email);
-    setInput('#password', TEST_PASSWORD);
+    setInput('#login-email', email);
+    setInput('#login-password', TEST_PASSWORD);
     submitForm();
     await settle();
     expect(container.querySelector('[data-testid="two-factor-form"]')).not.toBeNull();
     expect(useAuthSession().isAuthenticated.value).toBe(false);
 
-    setInput('#two-factor-code', '000000');
+    setInput('#login-code', '000000');
     submitForm();
     await settle();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid authentication code');
 
     const navigation = waitForNavigation();
-    setInput('#two-factor-code', totpCode(secret, totpStep() + 1));
+    setInput('#login-code', totpCode(secret, totpStep() + 1));
     submitForm();
     await navigation;
     expect(router.currentRoute.value.name).toBe('dashboard');
@@ -440,8 +440,8 @@ describe('browser authentication lifecycle', () => {
     await useAuthSession().logout();
 
     await mountAt('/login');
-    setInput('#email', email);
-    setInput('#password', TEST_PASSWORD);
+    setInput('#login-email', email);
+    setInput('#login-password', TEST_PASSWORD);
     const forcedNavigation = waitForNavigation();
     submitForm();
     await forcedNavigation;
@@ -473,8 +473,8 @@ describe('browser authentication lifecycle', () => {
     await useAuthSession().refresh();
     await mountAt('/dashboard');
 
-    const logoutButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Sign out'));
-    expect(logoutButton?.textContent).toContain('Sign out');
+    const logoutButton = container.querySelector<HTMLButtonElement>('button[aria-label="Keluar"]');
+    expect(logoutButton).not.toBeNull();
     const navigation = waitForNavigation();
     logoutButton?.click();
     await navigation;

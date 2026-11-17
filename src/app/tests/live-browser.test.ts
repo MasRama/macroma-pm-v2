@@ -184,7 +184,7 @@ describe('live updates in the open tab', () => {
 
     expect(router.currentRoute.value.name).toBe('login');
     expect(router.currentRoute.value.query).toMatchObject({ redirect: '/security', reason: 'session-ended' });
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('Your session was ended');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Sesi kamu sudah berakhir');
   });
 
   it('leaves a page as soon as an administrator takes away the permission it needs', async () => {
@@ -319,21 +319,21 @@ describe('live updates in the open tab', () => {
     const member = await register();
 
     await openTab(member.cookie, '/profile');
-    expect(fieldValue('#name')).toBe('Live Browser');
+    expect(fieldValue('#profile-name')).toBe('Live Browser');
     const renamed = `${randomUUID()}@example.com`;
     expect((await asDevice(admin.cookie, `/api/users/${member.id}`, 'PUT', { revision: 1, email: renamed })).status).toBe(200);
     await settle();
-    expect(fieldValue('#email')).toBe(renamed);
+    expect(fieldValue('#profile-email')).toBe(renamed);
 
-    type('#name', 'Typed Here');
+    type('#profile-name', 'Typed Here');
     await settle();
     expect((await asDevice(admin.cookie, `/api/users/${member.id}`, 'PUT', { revision: 2, name: 'Admin Pick' })).status).toBe(200);
     await settle();
 
-    expect(fieldValue('#name')).toBe('Typed Here');
+    expect(fieldValue('#profile-name')).toBe('Typed Here');
     expect(container.querySelector('[data-testid="profile-conflicts"] [data-conflict-field="name"]')).not.toBeNull();
     await click('[data-testid="use-theirs-name"]');
-    expect(fieldValue('#name')).toBe('Admin Pick');
+    expect(fieldValue('#profile-name')).toBe('Admin Pick');
     expect(container.querySelector('[data-testid="profile-conflicts"]')).toBeNull();
   });
 });
