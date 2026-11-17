@@ -1,8 +1,47 @@
 /*
- * Browser boundary of the projects Feature: board, task detail, releases,
- * dashboard and activity pages, the components other features and the app
- * shell reuse, and the view types they render.
+ * Browser boundary of the projects Feature: the typed API client, the board,
+ * task detail, releases, dashboard and activity pages, the components other
+ * features and the app shell reuse, and the view types they render. API
+ * shapes whose names the view types use are exported with a `Data` suffix.
  */
+export { createProjectsClient } from './client';
+export type { ProjectsClient, ProjectsClientOptions, ProjectsWebCsrf } from './client';
+export {
+  PROJECT_ACTIVITY_EVENTS,
+  PROJECT_ACTIVITY_LIMIT,
+  PROJECTS_BOARD_CHANGED_EVENT,
+  PROJECTS_CHANGED_EVENT,
+  PROJECTS_REFUSAL_CODES,
+  TASK_COLUMNS,
+  TASK_PRIORITIES,
+} from '../contract';
+export type {
+  AddProjectMemberInput,
+  Batch,
+  BatchRef,
+  BoardQuery,
+  ColumnCounts,
+  CreateBatchInput,
+  CreateProjectInput,
+  CreateTaskInput,
+  ListProjectsQuery,
+  MoveTaskInput as MoveTaskInputData,
+  Project,
+  ProjectActivity,
+  ProjectActivityEvent,
+  ProjectMember,
+  ProjectPerson,
+  ProjectPersonRef,
+  ProjectsError,
+  ProjectSummary as ProjectSummaryData,
+  Task,
+  TaskColumn,
+  TaskDetail,
+  TaskLog,
+  UpdateProjectInput,
+  UpdateTaskInput,
+} from '../contract';
+
 export { default as ActivityPage } from './pages/ActivityPage.vue';
 export { default as BoardPage } from './pages/BoardPage.vue';
 export { default as DashboardPage } from './pages/DashboardPage.vue';

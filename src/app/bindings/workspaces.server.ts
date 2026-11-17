@@ -7,6 +7,8 @@ import {
   SESSION_COOKIE_NAME,
 } from '../../features/auth';
 import { notify, withdrawNotifications } from '../../features/notifications';
+import { detachWorkspace, workspaceProjectCounts } from '../../features/projects';
+import { projectsServerHost } from './projects.server';
 import {
   createInvitationRoutes,
   createWorkspaceRoutes,
@@ -37,9 +39,8 @@ export const workspacesServerHost: WorkspacesServerHost = {
   withdrawNotifications: (type, field, value) => {
     withdrawNotifications(type, field, value);
   },
-  // No Feature holds projects yet; workspaces count none and have none to detach.
-  projectCounts: () => ({}),
-  workspaceDeleted: () => undefined,
+  projectCounts: (workspaceIds) => workspaceProjectCounts(workspaceIds),
+  workspaceDeleted: (workspaceId) => detachWorkspace(projectsServerHost, workspaceId),
 };
 
 // Workspaces keep no foreign keys into Auth's users table; deleted accounts are forgotten here.
