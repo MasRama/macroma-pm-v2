@@ -393,10 +393,20 @@ export function toTaskCard(row: TaskRow): TaskCardData {
   };
 }
 
+/** How the note #30 writes starts when a project's first batch takes in its batch-less tasks. */
+const ADOPT_NOTE_PREFIX = 'Moved into batch';
+
+/**
+ * Without a `kind`, an entry that keeps its column is not a move: it is #30's adopt when its note
+ * starts with #30's text, else a plain note (imported V1 "+Log" rows, odd V1 moves mapped
+ * backlog → backlog), which shows its author and note with no from → to.
+ */
 function taskLogKind(row: TaskLogRow): TaskLogEntry['kind'] {
   if (row.kind === 'batch_adopted') return 'adopt';
   if (row.kind === 'note') return 'note';
-  if (row.kind === undefined && row.column_from !== null && row.column_from === row.column_to) return 'adopt';
+  if (row.kind === undefined && row.column_from !== null && row.column_from === row.column_to) {
+    return row.note.startsWith(ADOPT_NOTE_PREFIX) ? 'adopt' : 'note';
+  }
   return 'move';
 }
 
