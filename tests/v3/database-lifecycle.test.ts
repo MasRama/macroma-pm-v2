@@ -10,6 +10,11 @@ import { discoverMigrations, migrate, migrateFresh, migrateStatus } from '../../
 import { discoverSeeds, seed } from '../../src/shared/database/seeder';
 import { optimizeDatabase } from '../../src/shared/database/sqlite';
 
+/** Template and application migrations together, so new app migrations need no edit here. */
+function migrationCount(): number {
+  return discoverMigrations({ root: process.cwd() }).length;
+}
+
 type TestDatabase = Database.Database;
 
 const execFileAsync = promisify(execFile);
@@ -266,9 +271,10 @@ describe('canonical SQLite migration lifecycle', () => {
     const database = openMemoryDatabase();
     try {
       const first = migrate({ database, root: process.cwd() });
-      expect(first.applied).toHaveLength(17);
+      expect(first.applied).toHaveLength(migrationCount());
       expect(first.skipped).toEqual([]);
-      expect(tableNames(database)).toEqual([
+      // The template's tables; the application's own migrations add more.
+      expect(tableNames(database)).toEqual(expect.arrayContaining([
         '_nara_migrations',
         'activity_events',
         'assets',
@@ -280,10 +286,10 @@ describe('canonical SQLite migration lifecycle', () => {
         'two_factor_recovery_codes',
         'user_roles',
         'users',
-      ]);
+      ]));
       expect(
         database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get(),
-      ).toEqual({ count: 17 });
+      ).toEqual({ count: migrationCount() });
       expect(
         (database.prepare('SELECT checksum FROM _nara_migrations').all() as Array<{ checksum: string }>).every(
           (row) => /^[a-f0-9]{64}$/.test(row.checksum),
@@ -425,7 +431,7 @@ describe('canonical SQLite migration lifecycle', () => {
       await waitForReady(child, port);
       const database = new Database(databaseFile);
       try {
-        expect(database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get()).toEqual({ count: 17 });
+        expect(database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get()).toEqual({ count: migrationCount() });
       } finally {
         database.close();
       }
@@ -471,13 +477,13 @@ describe('canonical SQLite migration lifecycle', () => {
       // alternate migrations after the held lock is released. What matters is
       // that every process accounts for the complete ordered set and each
       // migration is applied exactly once globally.
-      expect(migrationResults.every((result) => result.applied.length + result.skipped.length === 17)).toBe(true);
-      expect(migrationResults.reduce((total, result) => total + result.applied.length, 0)).toBe(17);
-      expect(migrationResults.reduce((total, result) => total + result.skipped.length, 0)).toBe(17);
+      expect(migrationResults.every((result) => result.applied.length + result.skipped.length === migrationCount())).toBe(true);
+      expect(migrationResults.reduce((total, result) => total + result.applied.length, 0)).toBe(migrationCount());
+      expect(migrationResults.reduce((total, result) => total + result.skipped.length, 0)).toBe(migrationCount());
 
       const database = new Database(databaseFile);
       try {
-        expect(database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get()).toEqual({ count: 17 });
+        expect(database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get()).toEqual({ count: migrationCount() });
         expect(
           database
             .prepare(
@@ -485,7 +491,7 @@ describe('canonical SQLite migration lifecycle', () => {
             )
             .all(),
         ).toEqual([]);
-        expect(tableNames(database)).toEqual([
+        expect(tableNames(database)).toEqual(expect.arrayContaining([
           '_nara_migrations',
           'activity_events',
           'assets',
@@ -497,7 +503,7 @@ describe('canonical SQLite migration lifecycle', () => {
           'two_factor_recovery_codes',
           'user_roles',
           'users',
-        ]);
+        ]));
       } finally {
         database.close();
       }
@@ -628,7 +634,8 @@ describe('canonical SQLite migration lifecycle', () => {
       );
 
       const result = migrate({ database, root: process.cwd() });
-      expect(result.applied).toEqual([
+      // The template's own migrations come first; the application's follow them.
+      expect(result.applied.slice(0, 10)).toEqual([
         '202609030008_assets_owner_reference.sql',
         '202609030009_harden_access_permissions.sql',
         '202609030010_require_user_name.sql',
@@ -645,7 +652,9 @@ describe('canonical SQLite migration lifecycle', () => {
         email: 'legacy@example.com',
         name: 'legacy@example.com',
       });
-      expect(database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get()).toEqual({ count: 17 });
+      expect(database.prepare('SELECT COUNT(*) AS count FROM _nara_migrations').get()).toEqual({
+        count: result.applied.length + 7,
+      });
       expect(database.pragma('foreign_key_list(assets)')).toEqual([]);
     } finally {
       database.close();
