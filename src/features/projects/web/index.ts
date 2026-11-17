@@ -80,6 +80,7 @@ export { default as BumpVersionMenu } from './components/BumpVersionMenu.vue';
 export { default as MoveTaskModal } from './components/MoveTaskModal.vue';
 export { default as NewProjectModal } from './components/NewProjectModal.vue';
 export { default as NewTaskModal } from './components/NewTaskModal.vue';
+export { default as ReleasesView } from './components/ReleasesView.vue';
 export { default as PriorityBars } from './components/PriorityBars.vue';
 export { default as ProjectTopBar } from './components/ProjectTopBar.vue';
 export { default as StatusBar } from './components/StatusBar.vue';

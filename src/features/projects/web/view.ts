@@ -1,5 +1,6 @@
 import type { PersonRef } from '../../../shared/ui';
 import type {
+  ActiveRelease as ActiveReleaseRow,
   Batch as BatchRow,
   BatchRef as BatchRefRow,
   BoardHealth as BoardHealthApiRow,
@@ -8,6 +9,8 @@ import type {
   DashboardSuccess,
   ProjectPersonRef as PersonRefRow,
   ProjectSummary as ProjectSummaryRow,
+  Release as ReleaseRow,
+  ReleaseDetailSuccess,
   Task as TaskRow,
   TaskAttachment as TaskAttachmentRow,
   TaskComment as TaskCommentRow,
@@ -186,6 +189,8 @@ export interface ChangelogEntry {
   priority: TaskPriority;
   version: TaskVersion;
   assignee?: PersonRef | null;
+  /** The task's column now. */
+  status: TaskStatus;
 }
 
 export interface Contributor {
@@ -193,8 +198,19 @@ export interface Contributor {
   taskCount: number;
 }
 
-export interface ReleaseDetail extends ReleaseSummary {
-  durationDays: number;
+/** The release shown on the right of Rilis: a closed batch, or the active one when the URL names it. */
+export interface ReleaseDetail extends BatchVersion {
+  id: string;
+  label: string;
+  /** `null` for a planned batch that was never active. */
+  openedAt: string | null;
+  /** `null` while the batch is active or planned. */
+  closedAt: string | null;
+  taskCount: number;
+  isMajor: boolean;
+  isActive: boolean;
+  /** Whole days from opening to closing; `null` until the batch closes. */
+  durationDays: number | null;
   revisiTaskCount: number;
   changelog: ChangelogEntry[];
   contributors: Contributor[];
@@ -305,6 +321,61 @@ export function toBatchSummary(row: BatchRow): BatchSummary {
   };
 }
 
+/** The active batch on Rilis, in the shape the board's batch strip uses too. */
+export function toActiveRelease(row: ActiveReleaseRow): BatchSummary {
+  return {
+    id: row.id,
+    major: row.major,
+    minor: row.minor,
+    label: row.label ?? '',
+    openedAt: iso(row.opened_at),
+    isActive: true,
+    counts: toCounts(row.counts),
+  };
+}
+
+export function toRelease(row: ReleaseRow): ReleaseSummary {
+  return {
+    id: row.id,
+    major: row.major,
+    minor: row.minor,
+    label: row.label ?? '',
+    openedAt: iso(row.opened_at),
+    closedAt: iso(row.closed_at),
+    taskCount: row.task_count,
+    isMajor: row.major_bump,
+  };
+}
+
+export function toReleaseDetail(data: ReleaseDetailSuccess['data']): ReleaseDetail {
+  const { batch, stats } = data;
+  return {
+    id: batch.id,
+    major: batch.major,
+    minor: batch.minor,
+    label: batch.label ?? '',
+    openedAt: batch.opened_at === null ? null : iso(batch.opened_at),
+    closedAt: batch.closed_at === null ? null : iso(batch.closed_at),
+    taskCount: stats.task_count,
+    isMajor: batch.major_bump,
+    isActive: batch.is_active,
+    durationDays: stats.duration_days,
+    revisiTaskCount: stats.revisi_task_count,
+    changelog: data.changelog.map((entry) => ({
+      id: entry.task_id,
+      title: entry.title,
+      priority: entry.priority,
+      version: { ...entry.version },
+      assignee: entry.assignee ? toPerson(entry.assignee, entry.task_id) : null,
+      status: entry.column_id,
+    })),
+    contributors: data.contributors.map((contributor) => ({
+      person: { id: contributor.user.id, name: contributor.user.name || contributor.user.email, avatar: contributor.user.avatar },
+      taskCount: contributor.task_count,
+    })),
+  };
+}
+
 export function toTaskCard(row: TaskRow): TaskCardData {
   return {
     id: row.id,
@@ -322,10 +393,20 @@ export function toTaskCard(row: TaskRow): TaskCardData {
   };
 }
 
+/** How the note #30 writes starts when a project's first batch takes in its batch-less tasks. */
+const ADOPT_NOTE_PREFIX = 'Moved into batch';
+
+/**
+ * Without a `kind`, an entry that keeps its column is not a move: it is #30's adopt when its note
+ * starts with #30's text, else a plain note (imported V1 "+Log" rows, odd V1 moves mapped
+ * backlog → backlog), which shows its author and note with no from → to.
+ */
 function taskLogKind(row: TaskLogRow): TaskLogEntry['kind'] {
   if (row.kind === 'batch_adopted') return 'adopt';
   if (row.kind === 'note') return 'note';
-  if (row.kind === undefined && row.column_from !== null && row.column_from === row.column_to) return 'adopt';
+  if (row.kind === undefined && row.column_from !== null && row.column_from === row.column_to) {
+    return row.note.startsWith(ADOPT_NOTE_PREFIX) ? 'adopt' : 'note';
+  }
   return 'move';
 }
 

@@ -16,7 +16,7 @@ import {
   MoveTaskModal,
   NewTaskModal,
   nextTaskVersion,
-  ReleasesPage,
+  ReleasesView,
   TaskDetailModal,
 } from '../../src/features/projects/web';
 import { ChatDrawer, WorkspaceView } from '../../src/features/workspaces/web';
@@ -63,13 +63,13 @@ const firstBump = screen === 'first-bump';
         :can-bump="true"
         :can-create="true"
       />
-      <ReleasesPage
+      <ReleasesView
         v-else-if="screen === 'releases'"
         v-model:selected-id="selectedRelease"
         project-id="p1"
         :project="f.project"
         :active-batch="f.batches[2]"
-        :batches="f.batches"
+        :latest="f.batches[2]"
         :releases="f.releases"
         :detail="f.releaseDetail"
         :can-bump="true"

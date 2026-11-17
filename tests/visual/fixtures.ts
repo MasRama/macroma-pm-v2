@@ -140,9 +140,11 @@ const change = (id: string, title: string, priority: TaskCardData['priority'], p
   priority,
   version: { major: 2, minor: 2, patch },
   assignee,
+  status: 'done' as const,
 });
 export const releaseDetail: ReleaseDetail = {
   ...releases[0]!,
+  isActive: false,
   durationDays: 20,
   revisiTaskCount: 5,
   changelog: [

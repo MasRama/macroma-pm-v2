@@ -1,417 +1,254 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { formatDay, PageHead, UiAvatar, UiTabs, type TabOption } from '../../../../shared/ui';
-import BumpVersionMenu from '../components/BumpVersionMenu.vue';
-import PriorityBars from '../components/PriorityBars.vue';
-import ProjectTopBar from '../components/ProjectTopBar.vue';
-import StatusBar from '../components/StatusBar.vue';
-import VersionText from '../components/VersionText.vue';
-import { formatVersion, totalCount } from '../format';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { onServerEvent } from '../../../../shared/realtime/browser';
+import { PROJECTS_BOARD_CHANGED_EVENT, PROJECTS_CHANGED_EVENT } from '../../contract';
+import type { ProjectsClient } from '../client';
+import ReleasesView from '../components/ReleasesView.vue';
+import { refusalText } from '../refusals';
 import {
   latestBatchVersion,
+  toActiveRelease,
+  toBatchSummary,
+  toProjectSummary,
+  toRelease,
+  toReleaseDetail,
   type BatchSummary,
-  type BatchVersion,
   type BumpKind,
   type ProjectSummary,
   type ReleaseDetail,
   type ReleaseSummary,
 } from '../view';
 
-/** Every batch is a release: the active batch on top, shipped ones below, the selected release's changelog on the right. */
-const CHANGELOG_PREVIEW = 8;
-
+/**
+ * Rilis on the Projects API: the project (name, role, batches for Bump versi),
+ * its releases view and the selected release's detail. The selection lives in
+ * `?release=<batchId>` so it can be linked; without one, the latest closed
+ * release is shown. Follows `projects.changed` and `projects.board-changed`.
+ */
 const props = withDefaults(
   defineProps<{
-    projectId: string | number;
-    project?: ProjectSummary | null;
-    activeBatch?: BatchSummary | null;
-    /** Every batch of the project; Bump versi counts on the highest, as on the board. */
-    batches?: BatchVersion[];
-    releases?: ReleaseSummary[];
-    /** Id of the release shown on the right. */
-    selectedId?: string | null;
-    detail?: ReleaseDetail | null;
-    canBump?: boolean;
+    projectId: string;
+    client: ProjectsClient;
+    /** Names the project's workspace in the breadcrumb. */
+    workspaceNameOf?: (id: string) => string | undefined;
   }>(),
-  { project: null, activeBatch: null, batches: () => [], releases: () => [], selectedId: null, detail: null, canBump: false },
+  { workspaceNameOf: () => undefined },
 );
-const emit = defineEmits<{ 'update:selectedId': [id: string]; bump: [kind: BumpKind] }>();
+const route = useRoute();
+const router = useRouter();
 
-const latestBatch = computed(() => latestBatchVersion([...props.batches, ...(props.activeBatch ? [props.activeBatch] : [])]));
+const projectRow = ref<ProjectSummary | null>(null);
+const batches = ref<BatchSummary[]>([]);
+const active = ref<BatchSummary | null>(null);
+const releases = ref<ReleaseSummary[]>([]);
+const detail = ref<ReleaseDetail | null>(null);
+const detailError = ref('');
+const gone = ref('');
+const loading = ref(true);
+const busy = ref(false);
+const notice = ref('');
 
-const tab = ref('changelog');
-const showAll = ref(false);
+const project = computed<ProjectSummary | null>(() => {
+  const row = projectRow.value;
+  if (!row) return null;
+  return { ...row, workspaceName: row.workspaceId ? props.workspaceNameOf(row.workspaceId) : undefined };
+});
+const isOwner = computed(() => project.value?.role === 'owner');
+const latest = computed(() => latestBatchVersion(batches.value));
+
+/** The release on the right: the one `?release=` names, else the latest closed one. */
+const selectedId = computed<string | null>(() => {
+  const asked = route.query.release;
+  if (typeof asked === 'string' && asked) return asked;
+  return releases.value[0]?.id ?? null;
+});
+function select(id: string): void {
+  void router.replace({ query: { ...route.query, release: id } });
+}
+
+let projectTicket = 0;
+async function loadProject(): Promise<void> {
+  const ticket = ++projectTicket;
+  try {
+    const response = await props.client.get(props.projectId);
+    if (ticket !== projectTicket) return;
+    if (!response.success) {
+      if (response.code === 'UNAUTHORIZED') return;
+      projectRow.value = null;
+      gone.value =
+        response.code === 'FORBIDDEN' || response.code === 'PROJECT_NOT_FOUND'
+          ? 'Project ini tidak ada, atau kamu tidak punya akses ke sana.'
+          : refusalText(response.code);
+      return;
+    }
+    gone.value = '';
+    projectRow.value = toProjectSummary(response.data.project);
+    batches.value = response.data.batches.map(toBatchSummary);
+  } catch (cause) {
+    console.error(cause);
+    if (ticket === projectTicket) notice.value = 'Project belum bisa dimuat. Coba muat ulang halaman.';
+  }
+}
+
+let releasesTicket = 0;
+async function loadReleases(): Promise<void> {
+  const ticket = ++releasesTicket;
+  try {
+    const response = await props.client.releases(props.projectId);
+    if (ticket !== releasesTicket) return;
+    if (!response.success) {
+      if (response.code !== 'UNAUTHORIZED' && !gone.value) notice.value = refusalText(response.code);
+      return;
+    }
+    active.value = response.data.active ? toActiveRelease(response.data.active) : null;
+    releases.value = response.data.closed.map(toRelease);
+  } catch (cause) {
+    console.error(cause);
+    if (ticket === releasesTicket) notice.value = 'Rilis belum bisa dimuat. Coba muat ulang halaman.';
+  }
+}
+
+let detailTicket = 0;
+async function loadDetail(): Promise<void> {
+  const id = selectedId.value;
+  const ticket = ++detailTicket;
+  if (!id || gone.value) {
+    detail.value = null;
+    detailError.value = '';
+    return;
+  }
+  try {
+    const response = await props.client.release(props.projectId, id);
+    if (ticket !== detailTicket) return;
+    if (response.success) {
+      detail.value = toReleaseDetail(response.data);
+      detailError.value = '';
+    } else if (response.code !== 'UNAUTHORIZED') {
+      detail.value = null;
+      detailError.value = response.code === 'BATCH_NOT_FOUND' ? 'Rilis ini sudah tidak ada. Pilih rilis lain di kiri.' : refusalText(response.code);
+    }
+  } catch (cause) {
+    console.error(cause);
+    if (ticket === detailTicket) detailError.value = 'Changelog belum bisa dimuat. Coba lagi.';
+  }
+}
+
+async function reload(): Promise<void> {
+  await loadProject();
+  if (gone.value) {
+    loading.value = false;
+    return;
+  }
+  await loadReleases();
+  loading.value = false;
+  await loadDetail();
+}
+
+let stopLive: (() => void) | undefined;
+onMounted(() => {
+  const stopProject = onServerEvent(PROJECTS_CHANGED_EVENT, () => void reload());
+  const stopBoard = onServerEvent(PROJECTS_BOARD_CHANGED_EVENT, async () => {
+    await loadReleases();
+    await loadDetail();
+  });
+  stopLive = () => {
+    stopProject();
+    stopBoard();
+  };
+  void reload();
+});
+onBeforeUnmount(() => stopLive?.());
 watch(
-  () => props.detail?.id,
+  () => props.projectId,
   () => {
-    tab.value = 'changelog';
-    showAll.value = false;
+    loading.value = true;
+    notice.value = '';
+    projectRow.value = null;
+    active.value = null;
+    releases.value = [];
+    detail.value = null;
+    void reload();
   },
 );
-
-const tabs = computed<TabOption[]>(() => [
-  { value: 'changelog', label: 'Changelog', count: props.detail?.changelog.length ?? 0 },
-  { value: 'contributors', label: 'Kontributor', count: props.detail?.contributors.length ?? 0 },
-]);
-const changelog = computed(() => {
-  const all = props.detail?.changelog ?? [];
-  return showAll.value ? all : all.slice(0, CHANGELOG_PREVIEW);
+watch(selectedId, (id, before) => {
+  if (id !== before) void loadDetail();
 });
-const hiddenCount = computed(() => (props.detail?.changelog.length ?? 0) - changelog.value.length);
+
+/* Bump versi: opens the next batch and makes it the active one, which closes the batch that was active */
+async function bump(kind: BumpKind): Promise<void> {
+  if (busy.value) return;
+  busy.value = true;
+  notice.value = '';
+  try {
+    const response = await props.client.createBatch(props.projectId, { bump_major: kind === 'major', activate: true });
+    if (response.success) {
+      // Show the release this bump just closed.
+      const query = { ...route.query };
+      delete query.release;
+      await router.replace({ query });
+    } else {
+      notice.value = refusalText(response.code);
+    }
+  } catch (cause) {
+    console.error(cause);
+    notice.value = 'Versi belum bisa dinaikkan. Coba lagi.';
+  } finally {
+    busy.value = false;
+  }
+  await reload();
+}
 </script>
 
 <template>
-  <div class="rel">
-    <ProjectTopBar
-      :project-id="projectId"
-      :project-name="project?.name ?? 'Project'"
-      :workspace-name="project?.workspaceName"
-      active="releases"
-    />
-    <PageHead title="Rilis" description="Tiap batch adalah satu rilis. Bump versi menutup batch aktif dan membuka yang baru.">
-      <template v-if="canBump && activeBatch" #actions>
-        <BumpVersionMenu :current="latestBatch" :closing="activeBatch" @bump="emit('bump', $event)" />
-      </template>
-    </PageHead>
-
-    <div class="rel__grid">
-      <div class="rel__list">
-        <div v-if="activeBatch" class="active">
-          <div class="active__row">
-            <VersionText class="active__ver" :version="activeBatch" />
-            <div class="active__lab">
-              <small>Batch aktif · dibuka {{ formatDay(activeBatch.openedAt) }}</small>
-              <b>{{ activeBatch.label }}</b>
-            </div>
-            <div class="active__count">
-              <b>{{ activeBatch.counts.done }}</b><span> /{{ totalCount(activeBatch.counts) }}</span>
-            </div>
-          </div>
-          <StatusBar class="active__bar" :counts="activeBatch.counts" :height="8" />
-        </div>
-
-        <div class="rel__cap cap">SUDAH RILIS</div>
-        <p v-if="releases.length === 0" class="rel__empty">Belum ada rilis. Bump versi untuk menutup batch aktif.</p>
-        <button
-          v-for="release in releases"
-          :key="release.id"
-          type="button"
-          class="release focus-ring"
-          :class="{ 'release--on': release.id === selectedId }"
-          :aria-pressed="release.id === selectedId"
-          @click="emit('update:selectedId', release.id)"
-        >
-          <VersionText class="release__ver" :version="release" />
-          <span class="release__body">
-            <span class="release__title">
-              <b>{{ release.label }}</b>
-              <span v-if="release.isMajor" class="release__major">MAJOR</span>
-            </span>
-            <span class="release__dates">{{ formatDay(release.openedAt) }} → {{ formatDay(release.closedAt) }}</span>
-          </span>
-          <span class="release__n"><b>{{ release.taskCount }}</b><small>task</small></span>
-        </button>
-      </div>
-
-      <section v-if="detail" class="panel detail" :aria-label="`Rilis ${formatVersion(detail)}`">
-        <div class="detail__head">
-          <div>
-            <div class="detail__ver-row">
-              <VersionText class="detail__ver" :version="detail" />
-              <span class="detail__shipped">Rilis {{ formatDay(detail.closedAt) }}</span>
-            </div>
-            <div class="detail__label">{{ detail.label }}</div>
-          </div>
-          <dl class="detail__nums">
-            <div><dt>task</dt><dd>{{ detail.taskCount }}</dd></div>
-            <div><dt>hari</dt><dd>{{ detail.durationDays }}</dd></div>
-            <div><dt>pernah revisi</dt><dd class="detail__rev">{{ detail.revisiTaskCount }}</dd></div>
-          </dl>
-        </div>
-        <UiTabs v-model="tab" class="detail__tabs" :tabs="tabs" label="Isi rilis" />
-        <template v-if="tab === 'changelog'">
-          <ul class="rows">
-            <li v-for="entry in changelog" :key="entry.id" class="row">
-              <span class="row__sq" />
-              <span class="row__title">{{ entry.title }}</span>
-              <PriorityBars :priority="entry.priority" />
-              <VersionText class="row__ver" :version="entry.version" />
-              <UiAvatar v-if="entry.assignee" :person="entry.assignee" :size="22" />
-              <span v-else class="row__noone" />
-            </li>
-          </ul>
-          <button v-if="hiddenCount > 0" type="button" class="detail__more" @click="showAll = true">
-            +{{ hiddenCount }} task lain
-          </button>
-        </template>
-        <ul v-else class="rows">
-          <li v-for="contributor in detail.contributors" :key="contributor.person.id" class="row">
-            <UiAvatar :person="contributor.person" :size="26" />
-            <span class="row__title">{{ contributor.person.name }}</span>
-            <span class="row__tasks"><b>{{ contributor.taskCount }}</b> task</span>
-          </li>
-        </ul>
-      </section>
-      <section v-else class="panel detail detail--empty">
-        <p>Pilih rilis di kiri untuk lihat changelog-nya.</p>
-      </section>
-    </div>
+  <div v-if="gone" class="rel-gone" data-testid="releases-gone">
+    <p>{{ gone }}</p>
+    <RouterLink to="/dashboard" class="link">Kembali ke Dashboard</RouterLink>
   </div>
+  <p v-else-if="loading && !project" class="rel-loading">Memuat rilis…</p>
+  <ReleasesView
+    v-else
+    data-testid="releases-page"
+    :project-id="projectId"
+    :project="project"
+    :active-batch="active"
+    :latest="latest"
+    :releases="releases"
+    :selected-id="selectedId"
+    :detail="detail"
+    :detail-error="detailError"
+    :can-bump="isOwner"
+    :busy="busy"
+    @update:selected-id="select"
+    @bump="bump"
+  >
+    <template #notice>
+      <p v-if="notice" role="alert" class="rel-notice" data-testid="releases-notice">{{ notice }}</p>
+    </template>
+  </ReleasesView>
 </template>
 
 <style scoped>
-.rel {
-  padding-bottom: 28px;
-}
-.rel__grid {
-  display: grid;
-  grid-template-columns: 440px minmax(0, 1fr);
-  gap: 18px;
-  padding: 0 28px;
-  align-items: start;
-}
-.rel__list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.active {
-  background: var(--block);
-  border: 1px solid var(--block-line);
-  color: var(--block-fg);
-  border-radius: var(--r-panel);
-  padding: 18px 20px;
-}
-.active__row {
-  display: flex;
-  align-items: center;
-}
-.active__ver {
-  font-size: 28px;
-  font-weight: 700;
-}
-.active__lab {
-  margin-left: 10px;
-  min-width: 0;
-}
-.active__lab small {
-  display: block;
-  font-size: 11px;
-  color: var(--block-meta);
-}
-.active__lab b {
-  font-size: 15px;
-  font-weight: 600;
-}
-.active__count {
-  margin-left: auto;
-  text-align: right;
-}
-.active__count b {
-  font-size: 22px;
-}
-.active__count span {
-  color: var(--block-dim);
-}
-.active__bar {
-  margin-top: 14px;
-}
-.rel__cap {
-  padding: 8px 2px 0;
-}
-.rel__empty {
-  margin: 0;
-  font-size: 13px;
+.rel-gone,
+.rel-loading {
+  padding: 32px 28px;
   color: var(--mute);
 }
-.release {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  width: 100%;
-  padding: 15px 18px;
+.rel-gone p {
+  margin: 8px 0 14px;
+}
+.rel-notice {
+  margin: 0 28px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--alert);
+  border-radius: var(--r-small);
+  font-size: 13px;
+  color: var(--alert);
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--r-panel);
-  text-align: left;
-  cursor: pointer;
-}
-.release--on {
-  border: 2px solid var(--ink);
-  padding: 14px 17px;
-}
-.release__ver {
-  width: 62px;
-  flex-shrink: 0;
-  font-size: 22px;
-  font-weight: 700;
-}
-.release__body {
-  flex: 1;
-  min-width: 0;
-}
-.release__title {
-  display: flex;
-  align-items: center;
-}
-.release__title b {
-  font-size: 14px;
-  font-weight: 600;
-}
-.release__major {
-  margin-left: 8px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--primary-bg);
-  color: var(--primary-fg);
-  font-size: 11px;
-  font-weight: 700;
-}
-.release__dates {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--mute);
-}
-.release__n {
-  text-align: right;
-}
-.release__n b {
-  font-size: 16px;
-}
-.release__n small {
-  display: block;
-  font-size: 11.5px;
-  color: var(--mute);
-}
-.detail {
-  padding: 22px 26px;
-}
-.detail--empty p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--mute);
-}
-.detail__head {
-  display: flex;
-  align-items: flex-end;
-}
-.detail__ver-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.detail__ver {
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-.detail__shipped {
-  padding: 4px 8px;
-  border-radius: var(--r-block);
-  background: var(--c-done);
-  color: var(--on-status);
-  font-size: 12px;
-  font-weight: 700;
-}
-.detail__label {
-  margin-top: 4px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.detail__nums {
-  margin: 0 0 0 auto;
-  display: flex;
-  gap: 26px;
-  text-align: right;
-}
-.detail__nums div {
-  display: flex;
-  flex-direction: column-reverse;
-}
-.detail__nums dt {
-  font-size: 11.5px;
-  color: var(--mute);
-}
-.detail__nums dd {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-}
-.detail__rev {
-  color: var(--c-revisi);
-}
-.detail__tabs {
-  margin-top: 18px;
-}
-.rows {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line-soft);
-}
-.row__sq {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--c-done);
-  flex-shrink: 0;
-}
-.row__title {
-  flex: 1;
-  min-width: 0;
-  font-size: 13.5px;
-  font-weight: 500;
-}
-.row__ver {
-  width: 58px;
-  text-align: right;
-  font-size: 12px;
-  font-weight: 700;
-}
-.row__noone {
-  width: 22px;
-}
-.row__tasks {
-  font-size: 12.5px;
-  color: var(--mute);
-}
-.row__tasks b {
-  color: var(--ink);
-}
-.detail__more {
-  padding: 12px 0 0;
-  border: 0;
-  background: none;
-  font-size: 12.5px;
-  color: var(--mute);
-  cursor: pointer;
-}
-@media (max-width: 1100px) {
-  .rel__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 @media (max-width: 760px) {
-  .rel__grid {
-    padding: 0 16px;
-  }
-  .detail {
-    padding: 18px;
-  }
-  .detail__head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  .detail__nums {
-    margin: 0;
+  .rel-notice {
+    margin: 0 16px 14px;
   }
 }
 </style>
