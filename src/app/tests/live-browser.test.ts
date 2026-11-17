@@ -947,10 +947,18 @@ describe('projects, the board and the dashboard in the open tab', () => {
     const hint = () => container.querySelector('[data-testid="no-batch"]');
     expect(hint()?.textContent).toContain('Belum ada batch aktif.');
     expect(hint()?.textContent).toMatch(/Minor jadi\s+v0\.1, Major jadi\s+v1\.0/);
-    // Tasks always start in Backlog, so only that column offers one; Task baru stays open (it counts on v0.0.x).
-    const adders = [...container.querySelectorAll('.board [data-status]')].filter((node) => node.querySelector('[aria-label^="Task baru di"]'));
-    expect(adders.map((node) => node.getAttribute('data-status'))).toEqual(['backlog']);
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="new-task"]')?.disabled).toBe(false);
+    expect(hint()?.textContent).toContain('Setelah itu baru bisa bikin task.');
+    // Tasks always start in Backlog, so only that column offers one. A task needs a batch, so both
+    // Task baru and the Backlog + stay disabled until the first bump.
+    const adders = () => [...container.querySelectorAll<HTMLButtonElement>('.board [data-status] [aria-label^="Task baru di"]')];
+    expect(adders().map((node) => node.closest('[data-status]')?.getAttribute('data-status'))).toEqual(['backlog']);
+    expect(adders()[0]?.disabled).toBe(true);
+    const newTask = () => container.querySelector<HTMLButtonElement>('[data-testid="new-task"]');
+    expect(newTask()?.disabled).toBe(true);
+    adders()[0]?.click();
+    newTask()?.click();
+    await settle();
+    expect(document.querySelector('#new-task-title')).toBeNull();
 
     await click('.board-page__head [data-testid="bump-version"]');
     const option = (kind: string) => container.querySelector<HTMLButtonElement>(`.board-page__head [data-testid="bump-${kind}"]`)!;
@@ -963,14 +971,17 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(active).toEqual({ major: 0, minor: 1 });
     expect(hint()).toBeNull();
     expect(container.querySelector('.batch')?.textContent).toContain('v0.1');
+    expect(newTask()?.disabled).toBe(false);
+    expect(adders()[0]?.disabled).toBe(false);
 
     application?.unmount();
     application = undefined;
     const empty = await createProject(owner, 'Proyek Kosong');
     await addMember(owner, empty, member);
     await openTab(member.cookie, `/projects/${empty}/board`);
-    expect(hint()?.textContent).toContain('sampai owner project bump versi');
+    expect(hint()?.textContent).toContain('Task baru bisa dibuat setelah owner project bump versi.');
     expect(container.querySelector('[data-testid="bump-version"]')).toBeNull();
+    expect(newTask()?.disabled).toBe(true);
   });
 
   it('merges a task edit saved elsewhere and asks only about the field both changed', async () => {

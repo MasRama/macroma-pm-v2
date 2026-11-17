@@ -7,7 +7,15 @@ import ProjectTopBar from '../components/ProjectTopBar.vue';
 import StatusBar from '../components/StatusBar.vue';
 import VersionText from '../components/VersionText.vue';
 import { formatVersion, totalCount } from '../format';
-import type { BatchSummary, BumpKind, ProjectSummary, ReleaseDetail, ReleaseSummary } from '../view';
+import {
+  latestBatchVersion,
+  type BatchSummary,
+  type BatchVersion,
+  type BumpKind,
+  type ProjectSummary,
+  type ReleaseDetail,
+  type ReleaseSummary,
+} from '../view';
 
 /** Every batch is a release: the active batch on top, shipped ones below, the selected release's changelog on the right. */
 const CHANGELOG_PREVIEW = 8;
@@ -17,15 +25,19 @@ const props = withDefaults(
     projectId: string | number;
     project?: ProjectSummary | null;
     activeBatch?: BatchSummary | null;
+    /** Every batch of the project; Bump versi counts on the highest, as on the board. */
+    batches?: BatchVersion[];
     releases?: ReleaseSummary[];
     /** Id of the release shown on the right. */
     selectedId?: string | null;
     detail?: ReleaseDetail | null;
     canBump?: boolean;
   }>(),
-  { project: null, activeBatch: null, releases: () => [], selectedId: null, detail: null, canBump: false },
+  { project: null, activeBatch: null, batches: () => [], releases: () => [], selectedId: null, detail: null, canBump: false },
 );
 const emit = defineEmits<{ 'update:selectedId': [id: string]; bump: [kind: BumpKind] }>();
+
+const latestBatch = computed(() => latestBatchVersion([...props.batches, ...(props.activeBatch ? [props.activeBatch] : [])]));
 
 const tab = ref('changelog');
 const showAll = ref(false);
@@ -58,7 +70,7 @@ const hiddenCount = computed(() => (props.detail?.changelog.length ?? 0) - chang
     />
     <PageHead title="Rilis" description="Tiap batch adalah satu rilis. Bump versi menutup batch aktif dan membuka yang baru.">
       <template v-if="canBump && activeBatch" #actions>
-        <BumpVersionMenu :current="activeBatch" :closing="activeBatch" @bump="emit('bump', $event)" />
+        <BumpVersionMenu :current="latestBatch" :closing="activeBatch" @bump="emit('bump', $event)" />
       </template>
     </PageHead>
 
