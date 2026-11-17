@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { NotificationsMenu, type NotificationItem } from '../../features/notifications/web';
-import { UiIcon } from '../../shared/ui';
+import { UiIcon, useEscape } from '../../shared/ui';
 import AppSidebar from './AppSidebar.vue';
 import type { ShellLink, ShellProject, ShellUser, ShellWorkspace } from './shell-types';
 
@@ -57,6 +57,11 @@ watch(
     menuOpen.value = false;
   },
 );
+
+// The phone menu closes like every other overlay: on Escape.
+useEscape(menuOpen, () => {
+  menuOpen.value = false;
+});
 
 function onKey(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {

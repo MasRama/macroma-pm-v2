@@ -1,8 +1,10 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { createApp, nextTick } from 'vue';
+import { createApp, h, nextTick } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/app/App.vue';
+import AppFrame from '../../src/app/layouts/AppFrame.vue';
 import router from '../../src/app/router';
 import { initializeTheme, setTheme, THEME_STORAGE_KEY } from '../../src/app/theme';
 
@@ -82,6 +84,32 @@ describe('Macroma frontend shell', () => {
 
     expect(container.querySelector('[data-testid="not-found-page"]')).not.toBeNull();
     expect(container.querySelector('h1')?.textContent).toContain('Halaman tidak ditemukan');
+  });
+});
+
+describe('Macroma phone menu', () => {
+  it('opens from the menu button and closes on Escape', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const memory = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { render: () => null } }] });
+    await memory.push('/');
+    const user = { id: 1, name: 'Ren', caption: 'Owner' };
+    const frame = createApp({ render: () => h(AppFrame, { user }) }).use(memory);
+    frame.mount(container);
+    await nextTick();
+
+    const side = container.querySelector('.shell__side')!;
+    container.querySelector<HTMLButtonElement>('button[aria-label="Buka menu"]')!.click();
+    await nextTick();
+    expect(side.classList.contains('shell__side--open')).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await nextTick();
+    expect(side.classList.contains('shell__side--open')).toBe(false);
+    expect(container.querySelector('.shell__scrim')).toBeNull();
+
+    frame.unmount();
+    container.remove();
   });
 });
 

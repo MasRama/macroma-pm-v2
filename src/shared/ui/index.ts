@@ -36,3 +36,4 @@ export {
   formatTime,
 } from './dates';
 export { initials, personColor, type PersonRef } from './people';
+export { useEscape } from './useDismiss';
