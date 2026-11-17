@@ -301,6 +301,41 @@ describe('live updates in the open tab', () => {
     expect(container.querySelector('[data-testid="role-list"]')?.textContent).toContain(slug);
   });
 
+  it("follows another administrator's save into the open user form after the account leaves the shown list", async () => {
+    const admin = await register();
+    grantRole(admin.id, 'admin');
+    const colleague = await register();
+    grantRole(colleague.id, 'admin');
+    const marker = `Shared ${randomUUID().slice(0, 8)}`;
+    const target = await register(marker);
+    await openTab(admin.cookie, '/users');
+    type('#user-search', marker);
+    container.querySelector<HTMLFormElement>('[data-testid="user-search-form"]')!.requestSubmit();
+    await settle();
+    await click(`[data-testid="edit-user-${target.id}"]`);
+    const phone = document.querySelector<HTMLInputElement>('#user-phone')!;
+    phone.value = '0812 3456 789';
+    phone.dispatchEvent(new Event('input'));
+    await settle();
+
+    // Their new name no longer matches the search, so the account drops off the list in view.
+    expect((await asDevice(colleague.cookie, `/api/users/${target.id}`, 'PUT', { revision: 1, name: 'Renamed Elsewhere' })).status).toBe(200);
+    await settle();
+
+    expect(container.querySelector(`[data-user-id="${target.id}"]`)).toBeNull();
+    expect(document.querySelector<HTMLInputElement>('#user-name')?.value).toBe('Renamed Elsewhere');
+    expect(document.querySelector<HTMLInputElement>('#user-phone')?.value).toBe('0812 3456 789');
+    expect(document.querySelector('[data-testid="user-merge-notice"]')?.textContent).toContain('Nama');
+
+    document.querySelector<HTMLFormElement>('[data-testid="user-form"]')!.requestSubmit();
+    await settle();
+    expect(getDatabase().prepare('SELECT name, phone, revision FROM users WHERE id = ?').get(target.id)).toEqual({
+      name: 'Renamed Elsewhere',
+      phone: '0812 3456 789',
+      revision: 3,
+    });
+  });
+
   it("merges another administrator's save into an open role form and asks only about the field both changed", async () => {
     const admin = await register();
     grantRole(admin.id, 'admin');
