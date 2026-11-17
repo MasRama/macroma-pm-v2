@@ -1026,6 +1026,11 @@ describe('projects, the board and the dashboard in the open tab', () => {
     await settle();
     expect(flat(activeBlock())).toContain('0 /2');
 
+    // Pick the release so the URL names it: the bump must drop it to show the release it just closed.
+    items()[0]!.click();
+    await settle();
+    expect(router.currentRoute.value.query.release).toBe(batchId(1));
+
     await click('[data-testid="bump-version"]');
     const minor = document.querySelector<HTMLButtonElement>('[data-testid="bump-minor"]')!;
     expect(minor.textContent).toContain('v0.2 → v0.3');
@@ -1035,6 +1040,7 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(flat(activeBlock())).toContain('v0.3');
     expect(items().map((item) => item.dataset.releaseId)).toEqual([batchId(2), batchId(1)]);
     expect(router.currentRoute.value.query.release).toBeUndefined();
+    expect(items()[0]!.getAttribute('aria-pressed')).toBe('true');
     expect(flat(detail())).toContain('Invoice PDF');
 
     items()[1]!.click();
@@ -1053,6 +1059,22 @@ describe('projects, the board and the dashboard in the open tab', () => {
     await router.push(`/projects/${projectId}/releases?release=missing`);
     await settle();
     expect(container.querySelector('[data-testid="release-detail-empty"]')?.textContent).toContain('Rilis ini sudah tidak ada.');
+  });
+
+  it('counts Rilis Bump versi on the project\'s highest batch, above the active one', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId, { label: 'Template pesan', activate: true });
+    // An upcoming batch, not active yet: the project's highest version is v0.2 while v0.1 is active.
+    await openBatch(owner, projectId, { label: 'Billing', activate: false });
+
+    await openTab(owner.cookie, `/projects/${projectId}/releases`);
+    await click('[data-testid="bump-version"]');
+    const minor = document.querySelector<HTMLButtonElement>('[data-testid="bump-minor"]')!;
+    const major = document.querySelector<HTMLButtonElement>('[data-testid="bump-major"]')!;
+    expect(minor.textContent).toContain('v0.2 → v0.3');
+    expect(major.textContent).toContain('v0.2 → v1.0');
+    expect(minor.textContent).toContain('Batch v0.1 ditutup.');
   });
 
   it('merges a task edit saved elsewhere and asks only about the field both changed', async () => {
