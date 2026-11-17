@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { app } from '../../../../app/server';
 import { grantAdmin, signUp, type Persona } from '../../../../app/tests/personas';
 import { getDatabase } from '../../../../shared/database';
+import { closeEventStreams, EVENTS_PATH, STREAM_READY_EVENT } from '../../../../shared/realtime';
+import { readEvents, type EventReader } from '../../../../shared/realtime/tests/helpers';
 import { csrfHeaders, issueCsrf } from '../../../../shared/security/tests/helpers';
-import { NOTIFICATIONS_LIST_LIMIT } from '../../contract';
+import { NOTIFICATIONS_CHANGED_EVENT, NOTIFICATIONS_LIST_LIMIT } from '../../contract';
 import { notify, withdrawNotifications } from '../../index';
 
 async function send(persona: Persona, method: string, path: string, body?: unknown): Promise<Response> {
@@ -21,6 +23,25 @@ async function list(persona: Persona) {
   expect(response.status).toBe(200);
   return ((await response.json()) as { data: { notifications: Array<{ id: string; type: string; data: unknown; is_read: boolean }>; unread_count: number } }).data;
 }
+
+async function listen(persona: Persona): Promise<EventReader> {
+  const response = await app.request(EVENTS_PATH, { headers: { Cookie: persona.cookie } });
+  expect(response.status).toBe(200);
+  const events = readEvents(response);
+  expect(await events.next()).toBe(STREAM_READY_EVENT);
+  return events;
+}
+
+/** Every event that arrives until the stream stays quiet for `quietMs`. */
+async function drain(events: EventReader, quietMs = 150): Promise<string[]> {
+  const seen: string[] = [];
+  for (let event = await events.next(quietMs); event !== 'timeout' && event !== 'closed'; event = await events.next(quietMs)) {
+    seen.push(event);
+  }
+  return seen;
+}
+
+afterEach(() => closeEventStreams());
 
 describe('notifications', () => {
   it('lists only the account’s own notifications, newest first, with the unread count', async () => {
@@ -63,6 +84,19 @@ describe('notifications', () => {
     const listed = await list(owner);
     expect(listed.unread_count).toBe(0);
     expect(listed.notifications[0].is_read).toBe(true);
+  });
+
+  it('announces a read only when the notification was unread', async () => {
+    const owner = await signUp('Notification Reader');
+    const notification = notify(owner.id, 'test', {});
+    const events = await listen(owner);
+
+    expect((await send(owner, 'POST', `/api/notifications/${notification.id}/read`)).status).toBe(200);
+    expect(await drain(events)).toEqual([NOTIFICATIONS_CHANGED_EVENT]);
+
+    expect((await send(owner, 'POST', `/api/notifications/${notification.id}/read`)).status).toBe(200);
+    expect((await send(owner, 'POST', '/api/notifications/read-all')).status).toBe(200);
+    expect(await drain(events)).toEqual([]);
   });
 
   it('marks every notification of the account read and leaves other accounts alone', async () => {

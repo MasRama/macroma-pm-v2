@@ -112,6 +112,28 @@ export function findAccountById(userId: string): AccountRecord | undefined {
   return row ? toAccount(row) : undefined;
 }
 
+/** The accounts that exist among `userIds`, in no particular order; one query however many. */
+export function findAccountsByIds(userIds: readonly string[]): AccountRecord[] {
+  const unique = [...new Set(userIds)];
+  if (unique.length === 0) return [];
+  const rows: AccountRow[] = [];
+  // Stay well under SQLite's bound-parameter limit for very large lists.
+  for (let start = 0; start < unique.length; start += 500) {
+    const chunk = unique.slice(start, start + 500);
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(...(getDatabase().prepare(`SELECT ${ACCOUNT_COLUMNS} FROM users WHERE id IN (${placeholders})`).all(...chunk) as AccountRow[]));
+  }
+  return rows.map(toAccount);
+}
+
+/** The account using the email, ignoring case. */
+export function findAccountByEmail(email: string): AccountRecord | undefined {
+  const row = getDatabase().prepare(`SELECT ${ACCOUNT_COLUMNS} FROM users WHERE lower(email) = lower(?)`).get(email) as
+    | AccountRow
+    | undefined;
+  return row ? toAccount(row) : undefined;
+}
+
 const FILTER_CLAUSE: Record<AccountFilter, string> = {
   all: '',
   verified: ' AND verified = 1',

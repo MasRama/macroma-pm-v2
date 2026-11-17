@@ -5,7 +5,9 @@ import {
   createAccount,
   createAccountWithRoles,
   deleteAccounts,
+  findAccountByEmail,
   findAccountById,
+  findAccountsByIds,
   listAccounts,
   onAccountsDeleted,
   resetAccountPassword,
@@ -27,6 +29,19 @@ describe('auth account directory', () => {
     expect(account).not.toHaveProperty('password');
     expect(findAccountById(account.id)).toEqual(account);
     expect(findAccountById(randomUUID())).toBeUndefined();
+  });
+
+  it('finds accounts in bulk by id and one by email, ignoring case', () => {
+    const first = createAccount({ id: randomUUID(), name: 'Bulk One', email: uniqueEmail(), passwordHash: 'hash' });
+    const second = createAccount({ id: randomUUID(), name: 'Bulk Two', email: uniqueEmail(), passwordHash: 'hash' });
+
+    expect(findAccountsByIds([]).length).toBe(0);
+    const found = findAccountsByIds([first.id, second.id, first.id, randomUUID()]);
+    expect(found.map((account) => account.id).sort()).toEqual([first.id, second.id].sort());
+    expect(found[0]).not.toHaveProperty('password');
+
+    expect(findAccountByEmail(first.email.toUpperCase())?.id).toBe(first.id);
+    expect(findAccountByEmail(uniqueEmail())).toBeUndefined();
   });
 
   it('lists accounts with search and bounded pagination', () => {
