@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The Release workflow dispatches this for release-please's pull request:
+  # a pull request opened with GITHUB_TOKEN starts no workflow by itself,
+  # and main requires these checks before it merges.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,7 +57,7 @@ jobs:
           key: ${{ steps.npm-cache-restore.outputs.cache-primary-key }}
 
       - name: Fast pull request check
-        if: github.event_name == 'pull_request'
+        if: github.event_name != 'push'
         run: npm run verify
 
       - name: Full main tests

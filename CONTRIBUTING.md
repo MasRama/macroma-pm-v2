@@ -110,6 +110,8 @@ Releases are prepared by
 `CHANGELOG.md` from the commits since the last release. Merging that pull
 request tags the release (`v2.0.0`, `v2.1.0`, ...), publishes it on GitHub and
 runs `npm run validate:release` against the tag. The first release is 2.0.0.
+A pull request opened by release-please starts no workflow by itself, so the
+Release workflow dispatches CI on it; its checks are the same required ones.
 Do not edit the version or the changelog by hand.
 
 ## License
