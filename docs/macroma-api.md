@@ -296,8 +296,9 @@ unread count.
     other event.
   - `meta` is the recorded detail: `{ version }` on `task.created`,
     `{ from, to, note, version }` on `task.moved`, `{ count }` and
-    `{ attachment_id }` on the image events, `{ adopted_task_count }` on a
-    first batch's `batch.created` that adopted tasks, plus the recorded `task_title`
+    `{ attachment_id }` on the image events, `{ adopted_task_count }` on the
+    entry of a project's first activation that adopted tasks (`batch.created`
+    of a batch created active, else `batch.activated`), plus the recorded `task_title`
     or `batch_version`. It is `null` when nothing was recorded. Read the two
     names from the top-level fields, which also cover older rows.
   `description` is English text. V1 rows with
@@ -327,9 +328,12 @@ active at a time. New tasks go into the active batch.
   minor (`v0.4` → `v0.5`), or with `bump_major` the next major at minor 0
   (`v0.4` → `v1.0`). A project's first batch is `v0.1`, or `v1.0` with
   `bump_major`.
-- **First batch adopts earlier tasks.** A task created while the project has
-  no active batch goes in no batch, on `v0.0.x`. Opening the project's **first** batch moves every batch-less task
-  of the project into it, in the same transaction:
+- **First activation adopts earlier tasks.** A task created while the project
+  has no active batch goes in no batch, on `v0.0.x`. The project's **first**
+  activation (no batch of it was ever active), by `activate: true` on create
+  or by the activate route, moves every batch-less task of the project into
+  the batch it activates, in the same transaction. Creating a batch without
+  `activate` moves nothing:
   - in version order, each task gets the batch's next patch (`v0.1.1`,
     `v0.1.2`, … or `v1.0.1`, … with `bump_major`), its `revision` goes up by
     one, and its column stays;
@@ -337,10 +341,12 @@ active at a time. New tasks go into the active batch.
     `column_to` and the note `Moved into batch v0.1`. Such entries are not
     moves, so `revisi_count`, `done_this_week`/`done_last_week`,
     `revisi_repeated` and the releases' revisi count leave them out;
-  - the `batch.created` activity entry records `meta.adopted_task_count`;
+  - the activity entry of the activation records `meta.adopted_task_count`:
+    `batch.created` when the batch is created active, else `batch.activated`;
   - `projects.board-changed` is sent as well as `projects.changed`.
-  Later batches move nothing. Creating a task without a batch stays allowed
-  (V1 imports can have batch-less tasks too).
+  Later activations move nothing, nor do the activations of an imported V1
+  project that already had an active batch. Creating a task without a batch
+  stays allowed (V1 imports can have batch-less tasks too).
 - **Bump version** (the design's owner-only "Bump versi"): `activate: true`
   creates the batch and makes it the active one in one step, which closes the
   batch that was active.

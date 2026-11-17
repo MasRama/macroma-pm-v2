@@ -375,12 +375,16 @@ export function createProjectRoutes(host: ProjectsServerHost) {
       const project = current(context);
       const batch = findBatch(context.req.param('batchId'));
       if (!batch || batch.project_id !== project.id) return batchNotFound(context);
-      const activated = batch.is_active === 1 ? batch : activateBatch(batch, actor.id);
-      if (activated !== batch) announceProjectChange(projectAudience(host, project));
+      const activated = batch.is_active === 1 ? { batch, adopted: 0 } : activateBatch(batch, actor.id);
+      if (activated.batch !== batch) {
+        const audience = projectAudience(host, project);
+        announceProjectChange(audience);
+        if (activated.adopted > 0) announceBoardChange(audience);
+      }
       return context.json({
         success: true as const,
         message: 'Batch activated',
-        data: { batch: savedBatch(activated) },
+        data: { batch: savedBatch(activated.batch) },
       } satisfies BatchSavedSuccess);
     })
     .get('/:id/releases', guard.signedIn, projectAccess('member'), (context) => {

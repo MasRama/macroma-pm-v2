@@ -604,10 +604,24 @@ function setActiveBatch(projectId: string, batchId: string, now: number): void {
 }
 
 /**
+ * Makes the batch the project's active one. The project's first activation
+ * ever (no batch of it has an `activated_at` yet) also adopts its batch-less
+ * tasks; returns how many it adopted.
+ */
+function activateAndAdopt(batch: BatchRow, actorId: string, now: number): number {
+  const activatedBefore = getDatabase()
+    .prepare('SELECT 1 FROM project_batches WHERE project_id = ? AND activated_at IS NOT NULL LIMIT 1')
+    .get(batch.project_id);
+  setActiveBatch(batch.project_id, batch.id, now);
+  return activatedBefore ? 0 : adoptBatchlessTasks(batch.project_id, batch, actorId, now);
+}
+
+/**
  * Opens the next batch: the next minor version, or the next major one with
  * `bumpMajor`, with its own patch counter at zero. With `activate`, the
- * batch also becomes the active one. A project's first batch adopts the
- * tasks created before it (see `adoptBatchlessTasks`); `adopted` counts them.
+ * batch also becomes the active one; when that is the project's first
+ * activation, the batch adopts its batch-less tasks (see `activateAndAdopt`)
+ * and `adopted` counts them.
  */
 export function createBatch(
   projectId: string,
@@ -638,7 +652,8 @@ export function createBatch(
          VALUES (@id, @project_id, @major, @minor, @label, @is_active, @created_at, @updated_at)`,
       )
       .run(batch);
-    const adopted = latest ? 0 : adoptBatchlessTasks(projectId, batch, actorId, now);
+    const adopted = input.activate ? activateAndAdopt(batch, actorId, now) : 0;
+    if (input.activate) batch.is_active = 1;
     logActivity({
       projectId,
       eventType: 'batch.created',
@@ -649,8 +664,6 @@ export function createBatch(
       meta: adopted > 0 ? { adopted_task_count: adopted } : null,
     });
     if (input.activate) {
-      setActiveBatch(projectId, batch.id, now);
-      batch.is_active = 1;
       logActivity({
         projectId,
         eventType: 'batch.activated',
@@ -665,11 +678,11 @@ export function createBatch(
 }
 
 /**
- * Moves every task the project created before its first batch (batch-less,
- * v0.0.x) into that batch, oldest version first. Each becomes a new version
- * of the batch (its next patch, as `nextVersion` takes it) with a version-log
- * entry that stays in its column, and its revision goes up. Runs inside
- * `createBatch`'s transaction.
+ * Moves every batch-less task of the project (v0.0.x) into the batch its
+ * first activation made active, oldest version first. Each becomes a new
+ * version of the batch (its next patch, as `nextVersion` takes it) with a
+ * version-log entry that stays in its column, and its revision goes up.
+ * Runs inside the activation's transaction.
  */
 function adoptBatchlessTasks(projectId: string, batch: BatchRow, actorId: string, now: number): number {
   const database = getDatabase();
@@ -701,12 +714,15 @@ function adoptBatchlessTasks(projectId: string, batch: BatchRow, actorId: string
   return tasks.length;
 }
 
-/** Makes the batch the project's only active one. */
-export function activateBatch(batch: BatchRow, actorId: string): BatchRow {
+/**
+ * Makes the batch the project's only active one; the project's first
+ * activation adopts its batch-less tasks, counted in `adopted`.
+ */
+export function activateBatch(batch: BatchRow, actorId: string): { batch: BatchRow; adopted: number } {
   const database = getDatabase();
-  return database.transaction((): BatchRow => {
+  return database.transaction((): { batch: BatchRow; adopted: number } => {
     const now = Date.now();
-    setActiveBatch(batch.project_id, batch.id, now);
+    const adopted = activateAndAdopt(batch, actorId, now);
     logActivity({
       projectId: batch.project_id,
       eventType: 'batch.activated',
@@ -714,8 +730,9 @@ export function activateBatch(batch: BatchRow, actorId: string): BatchRow {
       actorId,
       batchId: batch.id,
       batchVersion: batchVersion(batch),
+      meta: adopted > 0 ? { adopted_task_count: adopted } : null,
     });
-    return { ...batch, is_active: 1, updated_at: now };
+    return { batch: { ...batch, is_active: 1, updated_at: now }, adopted };
   })();
 }
 
