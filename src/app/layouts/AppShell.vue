@@ -9,6 +9,7 @@ import {
   createWorkspacesList,
   NewWorkspaceModal,
   type NewWorkspaceInput,
+  workspacesFieldTexts,
   workspacesRefusalText,
 } from '../../features/workspaces/web';
 import { workspacesClient } from '../api-clients';
@@ -93,7 +94,7 @@ async function createWorkspace(input: NewWorkspaceInput): Promise<void> {
   try {
     const response = await workspacesClient.create({ name: input.name, description: input.description || null });
     if (!response.success) {
-      newWorkspaceError.value = response.errors?.name?.[0] ?? response.message;
+      newWorkspaceError.value = workspacesFieldTexts(response.errors).name ?? workspacesRefusalText(response.code);
       return;
     }
     newWorkspaceOpen.value = false;

@@ -491,6 +491,13 @@ describe('workspaces and chat in the open tab', () => {
     await submit('#new-workspace-form');
     expect(document.body.textContent).toContain('Nama wajib diisi');
 
+    // The server's 422 is worded in Indonesian by field, not shown as its English message.
+    typeIn('#workspace-name', 'x'.repeat(256));
+    await submit('#new-workspace-form');
+    expect(document.body.textContent).toContain('Nama wajib diisi, maksimal 255 karakter.');
+    expect(document.body.textContent).not.toContain('Name must be at most');
+    expect(getDatabase().prepare('SELECT 1 FROM workspaces WHERE owner_id = ?').get(owner.id)).toBeUndefined();
+
     typeIn('#workspace-name', 'Nara Labs');
     await submit('#new-workspace-form');
     const created = getDatabase().prepare('SELECT id FROM workspaces WHERE owner_id = ?').get(owner.id) as { id: string };

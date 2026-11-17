@@ -3,6 +3,7 @@ import type { PersonRef } from '../../../shared/ui';
 import { onServerEvent } from '../../../shared/realtime/browser';
 import { WORKSPACES_CHANGED_EVENT, WORKSPACES_CHAT_EVENT } from '../contract';
 import type { WorkspacesClient } from './client';
+import { workspacesFieldTexts, workspacesRefusalText } from './refusals';
 import { toChatMessage, toWorkspaceMember, toWorkspaceSummary, type ChatMessage, type WorkspaceSummary } from './view';
 
 /*
@@ -32,7 +33,7 @@ export function createWorkspacesList(client: WorkspacesClient): WorkspacesList {
       const response = await client.list();
       if (ticket !== latest) return;
       if (!response.success) {
-        error.value = response.code === 'UNAUTHORIZED' ? '' : response.message;
+        error.value = response.code === 'UNAUTHORIZED' ? '' : workspacesRefusalText(response.code);
         return;
       }
       items.value = response.data.workspaces.map(toWorkspaceSummary);
@@ -91,11 +92,6 @@ export interface WorkspaceChat {
 }
 
 /** What the chat says when a post is refused, by code. */
-const SEND_REFUSALS: Partial<Record<string, string>> = {
-  FORBIDDEN: 'Kamu bukan anggota workspace ini lagi.',
-  WORKSPACE_NOT_FOUND: 'Workspace ini sudah tidak ada.',
-};
-
 export function createWorkspaceChat(client: WorkspacesClient, meId: () => string | null): WorkspaceChat {
   const workspaceId = ref<string | null>(null);
   const messages = ref<ChatMessage[]>([]);
@@ -170,7 +166,7 @@ export function createWorkspaceChat(client: WorkspacesClient, meId: () => string
     try {
       const response = await client.postMessage(id, { message: body });
       if (!response.success) {
-        error.value = response.errors?.message?.[0] ?? SEND_REFUSALS[response.code] ?? response.message;
+        error.value = workspacesFieldTexts(response.errors).message ?? workspacesRefusalText(response.code);
         return false;
       }
       const posted = toChatMessage(response.data.message);

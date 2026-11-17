@@ -5,6 +5,7 @@ import { mergeEdit, onServerEvent } from '../../../../shared/realtime/browser';
 import { ConfirmDialog, TextArea, TextField, UiButton, UiModal } from '../../../../shared/ui';
 import { WORKSPACES_CHANGED_EVENT, type Workspace, type WorkspacesError } from '../../contract';
 import type { WorkspacesClient } from '../client';
+import { workspacesFieldTexts, workspacesRefusalText } from '../refusals';
 import InviteMemberModal from '../components/InviteMemberModal.vue';
 import WorkspaceView from '../components/WorkspaceView.vue';
 import { toPendingInvite, toWorkspaceMember, toWorkspaceSummary, type PendingInvite, type WorkspaceMember, type WorkspaceSummary } from '../view';
@@ -20,18 +21,7 @@ const props = defineProps<{ workspaceId: string; client: WorkspacesClient; meId?
 const router = useRouter();
 
 type Code = WorkspacesError['code'];
-const REFUSALS: Partial<Record<Code, string>> = {
-  FORBIDDEN: 'Akun kamu tidak boleh melakukan ini di workspace ini.',
-  WORKSPACE_NOT_FOUND: 'Workspace ini sudah tidak ada.',
-  ACCOUNT_NOT_FOUND: 'Belum ada akun dengan email ini. Minta dia daftar dulu.',
-  ALREADY_MEMBER: 'Akun ini sudah jadi anggota workspace.',
-  INVITATION_PENDING: 'Email ini masih punya undangan yang belum dijawab.',
-  INVITATION_NOT_FOUND: 'Undangan itu sudah tidak ada.',
-  INVITATION_NOT_PENDING: 'Undangan itu sudah dijawab.',
-  MEMBER_NOT_FOUND: 'Akun itu sudah bukan anggota workspace.',
-  OWNER_CANNOT_LEAVE: 'Owner tidak bisa keluar atau dikeluarkan dari workspace-nya.',
-};
-const say = (response: { code: Code; message: string }) => REFUSALS[response.code] ?? response.message;
+const say = (response: { code: Code }) => workspacesRefusalText(response.code);
 
 const workspace = ref<WorkspaceSummary | null>(null);
 const members = ref<WorkspaceMember[]>([]);
@@ -57,7 +47,7 @@ async function load(): Promise<void> {
       gone.value =
         response.code === 'FORBIDDEN' || response.code === 'WORKSPACE_NOT_FOUND'
           ? 'Workspace ini tidak ada, atau kamu bukan anggotanya.'
-          : response.message;
+          : workspacesRefusalText(response.code);
       return;
     }
     gone.value = '';
@@ -119,7 +109,7 @@ async function invite(email: string): Promise<void> {
     if (response.success) {
       inviteOpen.value = false;
     } else {
-      inviteError.value = response.errors?.email?.[0] ?? say(response);
+      inviteError.value = workspacesFieldTexts(response.errors).email ?? say(response);
     }
   } catch (cause) {
     console.error(cause);
@@ -215,7 +205,8 @@ async function saveEdit(): Promise<void> {
     } else if (response.code === 'STALE_REVISION' && 'current' in response) {
       mergeStale(response.current);
     } else if (response.code === 'VALIDATION_ERROR') {
-      editErrors.value = { name: response.errors?.name?.[0], description: response.errors?.description?.[0] };
+      const texts = workspacesFieldTexts(response.errors);
+      editErrors.value = { name: texts.name, description: texts.description };
     } else {
       editError.value = say(response);
     }
