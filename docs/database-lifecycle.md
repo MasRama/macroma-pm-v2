@@ -1,0 +1,224 @@
+# Nara SQLite lifecycle
+
+Nara uses a local SQLite file through `better-sqlite3` and raw SQL. There is no ORM, query builder, or Nara database abstraction. The connection layer opens the file and configures SQLite; Features own their application schema.
+
+## Layout and ownership
+
+```text
+database/
+├── dev.sqlite3
+├── production.sqlite3
+└── backups/
+
+src/shared/database/
+├── sqlite.ts       # open/configure/close the shared connection
+├── migrator.ts     # discover and apply forward migrations
+└── seeder.ts       # discover and run reference seeds
+
+src/features/auth/server/
+├── migrations/     # users, sessions, roles, permissions, RBAC joins
+└── seeds/          # admin and user roles
+
+src/features/users/server/
+└── migrations/     # assets (with a provider-neutral owner reference)
+```
+
+One Feature owns each table; no table has two writers from different
+Features:
+
+- `auth` owns account identity data: `users` (identity, credentials,
+  login identifiers, avatar), `sessions`, `roles`, `permissions`,
+  `role_permissions`, and `user_roles`. Its account directory
+  (`findAccountById`, `listAccounts`, `createAccount`, `updateAccount`,
+  `deleteAccounts`) is the only writer of account rows.
+- `users` owns the `assets` table (avatar/profile asset metadata). The
+  `assets.user_id` column is an opaque owner reference with no foreign
+  key into Auth-owned storage, so the Users package installs and runs
+  without depending on one provider's account table. Deleting an account
+  does not rewrite asset rows; assets are addressed by URL.
+
+Capabilities that need account behavior but do not own it (such as user
+management) reach accounts exclusively through a typed host requirement
+adapted in application-owned bindings — never through direct SQL on
+another Feature's tables.
+
+The current baseline migrations create `users`, `sessions`, `roles`,
+`permissions`, `role_permissions`, `user_roles`, and `assets`, plus the
+forward migration that drops the original `assets.user_id` foreign key.
+Schema ownership follows the business Feature above.
+`src/shared/database` owns none of those tables.
+
+SQLite `STRICT` tables were evaluated but are not used for this baseline. Keeping the existing non-STRICT table shape avoids an unnecessary table-reconstruction compatibility break; the previous-v3 compatibility check rejects a `STRICT` schema as non-equivalent, so it requires an explicit corrective migration. A future Feature may adopt `STRICT` for a new table when its data contract warrants it.
+
+The reference application ships the guaranteed application substrate (`src/shared/database/` engine, `src/shared/config/` environment, and `src/shared/storage/` asset-storage capability). The database engine and storage contract are platform; application tables remain Feature-owned. Startup applies pending migrations before serving traffic.
+
+## Connection settings
+
+Persistent databases are opened after their parent directory is created and use exactly:
+
+```sql
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+PRAGMA optimize=0x10002;
+```
+
+`:memory:` databases skip the persistent WAL/synchronous settings and still enable foreign keys and the busy timeout. Do not put a SQLite database on a shared network filesystem. The database file, its WAL files, and backups must be on storage local to the application host.
+
+`PRAGMA optimize=0x10002` runs when the shared connection opens so SQLite can
+refresh planner statistics when appropriate without forcing a full `ANALYZE`.
+After a migration actually applies schema changes Nara also runs
+`PRAGMA optimize`. The reference app repeats the normal `PRAGMA optimize`
+periodically as low-cost maintenance. This is deliberately separate from
+`VACUUM`: Nara never performs an automatic database rebuild or compaction.
+
+## Forward-only migrations
+
+Migration files are plain SQL under a Feature's `server/migrations/` directory. Filenames use a globally sortable numeric identifier and description:
+
+```text
+202609030001_create_users.sql
+202609030002_create_sessions.sql
+202609030003_create_roles.sql
+```
+
+The migrator scans `src/features/*/server/migrations/`, sorts by numeric identifier, and rejects duplicate identifiers across Features. No migration manifest is maintained. A migration executes once, forward only; production rollback/down migrations are intentionally not supported. Recover a bad production schema from a backup or create a corrective forward migration.
+
+The internal `_nara_migrations` table stores:
+
+```text
+id          TEXT PRIMARY KEY
+name        TEXT UNIQUE NOT NULL
+checksum    TEXT NOT NULL   -- SHA-256 of the SQL file
+applied_at  INTEGER NOT NULL
+duration_ms INTEGER NOT NULL
+```
+
+Before an applied migration is accepted, its current filename and checksum are compared with the ledger. Editing or renaming an applied migration fails loudly. Restore the immutable file or create a new migration instead.
+
+Each pending migration runs inside `BEGIN IMMEDIATE`. The engine re-checks the ledger after acquiring the write transaction, verifies an existing checksum, executes the SQL, records the ledger row, and commits. Any error rolls back both schema changes and ledger insertion. SQLite's busy timeout handles a second process waiting for the writer; no distributed lock is used.
+
+The former v3 `sqlite.ts` schema bootstrap is recognized only when every expected table, column, index, and foreign key matches the baseline. The migrator then records the baseline files and their current checksums without rewriting data. A partial or different schema is not marked applied and is not destroyed; it requires a deliberate corrective forward migration. V2's old `migrations` history is not silently translated.
+
+## Startup and commands
+
+The normal application startup opens the database and applies pending migrations before Hono begins listening. A migration failure aborts startup. Startup then writes the permissions Feature bindings declared. Startup never runs arbitrary seeds.
+
+```bash
+npm run migrate          # apply pending migrations
+npm run migrate:status   # show applied/pending and verify checksums
+npm run migrate:fresh    # development reset, migrate, and reference seeds
+npm run seed             # run reference seeds explicitly
+npm run setup            # migrate, seed, and create the first admin if needed
+npm run bootstrap:admin  # first-admin bootstrap only (also ensures migrate + seed)
+npm run db:backup        # create an online SQLite backup
+npm run db:check         # run quick_check and foreign_key_check
+```
+
+`migrate:fresh` refuses `NODE_ENV=production`, drops the application schema, and rebuilds it through the same migration engine. It does not duplicate `CREATE TABLE` statements. There is no `migrate:rollback` command.
+
+## Seeds and administrator bootstrap
+
+Feature seeds are deterministic, idempotent, and run in transactions. The auth reference seed restores the `admin`/`user` roles. Re-running it does not create duplicates. Permissions are not seeded: Features declare them through their bindings and startup writes them after migrations, so they appear on the first start after `npm run setup`.
+
+Administrator credentials remain separate from reference seeds. `npm run setup`
+and `npm run bootstrap:admin` create an administrator only when no administrator
+already exists. Without overrides the reference application uses the convenient
+development bootstrap `Admin` / `admin@nara.local` / `admin12345`, stores only
+its PBKDF2-SHA512 hash, marks the credential temporary, and forces a password
+change before normal authenticated access. `NARA_ADMIN_NAME`,
+`NARA_ADMIN_EMAIL`, and `NARA_ADMIN_PASSWORD` override the bootstrap values; an
+explicit password is treated as intentional and is not marked temporary.
+Existing administrator credentials are never reset by setup/bootstrap, and a
+non-admin collision on the requested bootstrap email is rejected without
+changes. The bootstrap writes no SQL itself: Auth owns accounts and roles, and
+its `ensureAdministrator` makes the account. Managed password resets are also temporary: sessions are revoked and
+the target must choose a new password after the next login.
+
+## Backup and integrity
+
+`npm run db:backup` uses the `better-sqlite3` online backup API, which snapshots a live WAL database safely into a timestamped, non-overwriting file under `database/backups/` (`DB_BACKUP_DIR`). It does not copy only the main `.sqlite3` file.
+
+The running application takes the same snapshot on a schedule. In production
+it writes one backup every 24 hours and keeps the newest 7; elsewhere the
+schedule is off until `DB_BACKUP_INTERVAL_HOURS` is set.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DB_BACKUP_INTERVAL_HOURS` | `24` in production, `0` elsewhere | Hours between scheduled backups. `0` turns them off. |
+| `DB_BACKUP_KEEP` | `7` | Scheduled backups kept; older ones are deleted after each new one. |
+| `DB_BACKUP_DIR` | `database/backups` | Where scheduled and manual backups are written. |
+
+Scheduled backups are named `auto-<UTC time>.sqlite3` and manual ones
+`nara-<UTC time>.sqlite3`. Only scheduled backups are ever deleted. Whether a
+backup is due is read from the newest `auto-` file, so restarting the
+application neither writes an extra backup nor postpones the next one. A
+backup takes its `.sqlite3` name only when it is complete; a `.partial` file
+is an interrupted one and is removed on the next run. A failed backup is
+logged as `Maintenance failed` and tried again within the hour.
+
+A backup beside the database protects against a bad migration or a mistaken
+delete, not against losing the disk. Point `DB_BACKUP_DIR` at other storage,
+or copy the directory off the host on a schedule of your own.
+
+To restore, stop the application, then put the backup in place of the
+database and remove the old write-ahead files, which belong to the database
+being replaced:
+
+```bash
+cp database/backups/auto-20261113T080000000Z.sqlite3 database/production.sqlite3
+rm -f database/production.sqlite3-wal database/production.sqlite3-shm
+npm run db:check
+```
+
+Start the application again once the check passes; startup applies any
+migration newer than the backup.
+
+`npm run db:check` reports failure and exits non-zero if `PRAGMA quick_check` returns anything other than `ok` or `PRAGMA foreign_key_check` returns rows. A healthy database reports both checks passed.
+Both operational commands require an existing persistent database file and fail before opening SQLite when it is absent. They never initialize an empty database; run `npm run migrate` for intentional database creation.
+
+## Runtime maintenance and retention
+
+Each Feature owns the upkeep of its own tables. It exports `MaintenanceTask`s
+(`name`, `everyMs`, `run(now)`), and whatever composes it declares them with
+`declareMaintenance(feature, tasks)` from `src/shared/database`. After
+migrations the application runtime runs every declared task once, then on its
+own interval, and stops them all during graceful shutdown. A task that throws
+is logged as `Maintenance failed` with its Feature and task name and runs again
+on its next interval; it never stops the server. A task that removed something
+returns the details, logged as `Maintenance ran`. A task may return a promise
+instead; it is then not started again until that promise settles.
+
+The reference application declares five tasks:
+
+1. `auth/expired-sessions`, hourly: deletes expired sessions.
+2. `activity/retention`, every 24 hours: deletes Activity events older than
+   `ACTIVITY_RETENTION_DAYS` oldest first, at most 10,000 rows per pass, so
+   stale history converges without one long write.
+3. `users/orphaned-assets`, every 24 hours: deletes the asset rows and stored
+   files of accounts that no longer exist, and of assets an older deletion
+   left without an owner. Deleting accounts commits before their avatars are
+   cleaned up, so an interrupted deletion converges here.
+   Users asks its host whether an owner exists; it never reads Auth's tables.
+4. `database/optimize`, every 24 hours, owned by the application: `PRAGMA
+   optimize` lets SQLite update planner statistics only when SQLite determines
+   that doing so is useful.
+5. `database/backup`, checked hourly, owned by the application: writes a
+   scheduled backup when the newest one is older than
+   `DB_BACKUP_INTERVAL_HOURS`. It is declared only when that interval is above
+   zero and the database is a file. See [Backup and integrity](#backup-and-integrity).
+
+The default retention is 365 days. Set `ACTIVITY_RETENTION_DAYS=0` to disable
+automatic Activity pruning. Values above zero are interpreted as whole days
+and validated at startup. Retention is application policy: deployments with a
+legal or audit requirement for a longer history should increase the value or
+disable pruning and manage archival/storage explicitly.
+
+Deleting old rows makes their pages reusable inside SQLite but does not promise
+that the database file shrinks on disk. Nara intentionally does not run
+`VACUUM` automatically because it is a heavier rebuild-style maintenance
+operation. Likewise WAL checkpointing remains SQLite-managed during normal
+runtime; the application does not force periodic `TRUNCATE` checkpoints.
+
+SQLite is the default local-disk architecture, not a multi-host shared database. Applications requiring high write concurrency or a database shared across hosts should use a client/server database architecture instead of stretching SQLite beyond its intended deployment boundary.
