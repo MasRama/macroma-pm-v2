@@ -1104,8 +1104,10 @@ onUnmounted(() => stopEditing?.());
   .list__size {
     width: 100%;
   }
-  /* Phones: each account is a card with its actions beside the name, so Edit
-     and Hapus are in view without scrolling the table sideways. */
+}
+/* Tablets and phones: each account is a card with its actions beside the name,
+   so Edit and Hapus are in view without scrolling the table sideways. */
+@media (max-width: 1024px) {
   .table {
     display: block;
     min-width: 0;
