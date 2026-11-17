@@ -6,10 +6,3 @@ export function redirectTarget(route: RouteLocationNormalizedLoaded): string {
   if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')) return redirect;
   return '/dashboard';
 }
-
-/** First server message per field, for the form's error slots. */
-export function firstErrors(errors: Record<string, string[]> | undefined): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, messages] of Object.entries(errors ?? {})) if (messages[0]) result[key] = messages[0];
-  return result;
-}

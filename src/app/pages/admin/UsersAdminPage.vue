@@ -12,6 +12,8 @@ import {
   type UsersEditor,
   type UsersFilter,
   type UsersWebRole,
+  usersFieldTexts,
+  usersRefusalText,
 } from '../../../features/users/web';
 import { keepEditing, mergeEdit, onServerEvent, sameValue } from '../../../shared/realtime/browser';
 import {
@@ -29,7 +31,6 @@ import {
 } from '../../../shared/ui';
 import { usersWebHost as host } from '../../bindings/users.web';
 import { isPhone } from '../auth/phone';
-import { firstErrors } from '../auth/redirect';
 
 /*
  * Pengguna: the Users feature's account administration in the Macroma shell.
@@ -223,7 +224,7 @@ async function loadUsers(nextPage = page.value): Promise<void> {
     if (requestId !== usersLoadRequestId) return;
     if (!response.success) {
       loadForbidden.value = response.code === 'FORBIDDEN';
-      if (!loadForbidden.value) loadError.value = response.message;
+      if (!loadForbidden.value) loadError.value = usersRefusalText(response.code);
       users.value = [];
       return;
     }
@@ -382,8 +383,8 @@ async function resetManagedPassword(): Promise<void> {
   try {
     const response = await usersClient.resetPassword(editingUser.value.id, { password: userPassword.value });
     if (!response.success) {
-      formError.value = response.message;
-      fieldErrors.value = firstErrors(response.errors);
+      formError.value = usersRefusalText(response.code);
+      fieldErrors.value = usersFieldTexts(response.errors);
       return;
     }
     userPassword.value = '';
@@ -408,8 +409,8 @@ async function createUser(): Promise<void> {
       ...(canAssignRoles.value ? { roles: selectedRoles.value } : {}),
     });
     if (!response.success) {
-      formError.value = response.message;
-      fieldErrors.value = firstErrors(response.errors);
+      formError.value = usersRefusalText(response.code);
+      fieldErrors.value = usersFieldTexts(response.errors);
       return;
     }
     isFormOpen.value = false;
@@ -445,8 +446,8 @@ async function updateUser(user: ManagedUser): Promise<void> {
             : 'Akun ini disimpan orang lain saat kamu mengedit. Perubahannya sudah digabung, cek lalu simpan lagi.';
         return;
       }
-      formError.value = response.message;
-      fieldErrors.value = firstErrors(response.errors);
+      formError.value = usersRefusalText(response.code);
+      fieldErrors.value = usersFieldTexts(response.errors);
       return;
     }
     isFormOpen.value = false;
@@ -494,7 +495,7 @@ async function confirmDelete(): Promise<void> {
   try {
     const response = await usersClient.deleteUsers({ ids: [target.id] });
     if (!response.success) {
-      actionError.value = response.message;
+      actionError.value = usersRefusalText(response.code);
       pendingDelete.value = null;
       return;
     }

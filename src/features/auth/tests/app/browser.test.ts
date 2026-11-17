@@ -255,7 +255,7 @@ describe('browser authentication lifecycle', () => {
     await settle();
 
     expect(router.currentRoute.value.name).toBe('register');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Email already in use');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Email ini sudah dipakai akun lain.');
   });
 
   it('renders login errors and loading state', async () => {
@@ -275,7 +275,7 @@ describe('browser authentication lifecycle', () => {
     await settle();
 
     expect(router.currentRoute.value.name).toBe('login');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid email or password');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Email atau password salah.');
     expect(useAuthSession().status.value).toBe('unauthenticated');
   });
 
@@ -399,7 +399,7 @@ describe('browser authentication lifecycle', () => {
     setInput('#login-code', '000000');
     submitForm();
     await settle();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid authentication code');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Kodenya salah. Coba lagi.');
 
     const navigation = waitForNavigation();
     setInput('#login-code', totpCode(secret, totpStep() + 1));

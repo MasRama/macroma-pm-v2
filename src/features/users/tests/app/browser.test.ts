@@ -418,7 +418,7 @@ describe('users browser surfaces', () => {
     submitForm('[data-testid="password-form"]');
     await settle();
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Current password is incorrect');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Password saat ini salah.');
     expect(router.currentRoute.value.name).toBe('profile');
 
     setInput('#profile-current-password', TEST_PASSWORD);
@@ -818,7 +818,7 @@ describe('users administration browser surfaces', () => {
     await click('[data-role-slug="admin"]');
     submitForm('[data-testid="user-form"]');
     await settle();
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Cannot remove admin role from yourself');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Kamu nggak bisa melepas role admin dari akunmu sendiri.');
     expect(usersWebHost.currentSessionUser()).not.toBeNull();
 
     const selfAfter = getDatabase()

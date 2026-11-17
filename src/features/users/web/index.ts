@@ -1,4 +1,5 @@
 export { createUsersClient, type UsersClient, type UsersClientOptions } from './client';
+export { USERS_GENERIC_REFUSAL_TEXT, USERS_REFUSAL_TEXT, usersFieldTexts, usersRefusalText, type UsersRefusal } from './refusals';
 export {
   AVATAR_ALLOWED_MIME_TYPES,
   AVATAR_MAX_FILE_SIZE_BYTES,

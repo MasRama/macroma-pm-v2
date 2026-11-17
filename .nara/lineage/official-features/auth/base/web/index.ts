@@ -10,6 +10,7 @@ export {
 } from '../contract';
 export type { ChangePasswordInput, ForgotPasswordInput, GoogleSignInError, ResetPasswordInput } from '../contract';
 export { createAuthClient, type AuthClient } from './client';
+export { AUTH_GENERIC_REFUSAL_TEXT, AUTH_REFUSAL_TEXT, authFieldTexts, authRefusalText, type AuthRefusal } from './refusals';
 export { createAuthSession, SESSION_ENDED_REASON, useAuthSession } from './session';
 export {
   CSRF_BOOTSTRAP_PATH,

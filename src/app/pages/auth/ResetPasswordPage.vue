@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { createAuthClient } from '../../../features/auth/web';
+import { authFieldTexts, authRefusalText, createAuthClient } from '../../../features/auth/web';
 import { TextField, UiButton } from '../../../shared/ui';
 import AuthLayout from '../../layouts/AuthLayout.vue';
-import { firstErrors } from './redirect';
 import './auth-form.css';
 
 /** Set a new password from the emailed link (`/reset-password?token=…`). A reset signs out every device. */
@@ -41,8 +40,8 @@ async function submit(): Promise<void> {
       linkInvalid.value = true;
       return;
     }
-    formError.value = response.message;
-    errors.value = { password: firstErrors(response.errors).password ?? '' };
+    formError.value = authRefusalText(response.code);
+    errors.value = { password: authFieldTexts(response.errors).password ?? '' };
   } catch (error) {
     console.error(error);
     formError.value = 'Password belum bisa disimpan. Cek koneksi lalu coba lagi.';

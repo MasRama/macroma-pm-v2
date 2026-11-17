@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { createAuthClient, createSecurityClient, SESSION_ENDED_REASON, useAuthSession } from '../../../features/auth/web';
+import {
+  authFieldTexts,
+  authRefusalText,
+  createAuthClient,
+  createSecurityClient,
+  SESSION_ENDED_REASON,
+  useAuthSession,
+} from '../../../features/auth/web';
 import { TextField, UiButton } from '../../../shared/ui';
 import AuthLayout from '../../layouts/AuthLayout.vue';
 import GoogleMark from './GoogleMark.vue';
 import { googleErrorMessage, startGoogleSignIn } from './google';
-import { firstErrors, redirectTarget } from './redirect';
+import { redirectTarget } from './redirect';
 import './auth-form.css';
 
 const email = ref('');
@@ -52,8 +59,8 @@ async function submitPassword(): Promise<void> {
   try {
     const response = await authClient.login({ email: email.value.trim(), password: password.value });
     if (!response.success) {
-      formError.value = response.message;
-      errors.value = firstErrors(response.errors);
+      formError.value = authRefusalText(response.code);
+      errors.value = authFieldTexts(response.errors);
       return;
     }
     if (response.data?.twoFactorRequired) {
@@ -87,8 +94,8 @@ async function submitCode(): Promise<void> {
     if (!response.success) {
       if (response.code === 'TWO_FACTOR_CHALLENGE_EXPIRED' || response.code === 'TWO_FACTOR_LOCKED') startOver();
       else code.value = '';
-      formError.value = response.message;
-      const fieldErrors = firstErrors(response.errors);
+      formError.value = authRefusalText(response.code);
+      const fieldErrors = authFieldTexts(response.errors);
       errors.value = { code: fieldErrors.code ?? fieldErrors.recovery_code ?? '' };
       return;
     }

@@ -8,9 +8,12 @@ import {
   createUsersClient,
   STALE_REVISION,
   USERS_CHANGED_EVENT,
+  usersFieldTexts,
+  usersRefusalText,
   type UpdateProfileResponse,
   type UserProfile,
 } from '../../features/users/web';
+import { authFieldTexts, authRefusalText, createAuthClient } from '../../features/auth/web';
 import { mergeEdit, onServerEvent, sameValue } from '../../shared/realtime/browser';
 import { PageHead, ShellTopBar, TextField, TopCrumb, UiAvatar, UiButton } from '../../shared/ui';
 import { usersWebHost } from '../bindings/users.web';
@@ -19,6 +22,7 @@ import { isPhone } from './auth/phone';
 
 /** Profil: photo, name, email and phone, password change, and the per-browser theme. */
 const usersClient = createUsersClient({ csrf: usersWebHost.csrf });
+const authClient = createAuthClient();
 const router = useRouter();
 const theme = useTheme();
 
@@ -56,12 +60,6 @@ const THEMES: { value: ThemeMode; label: string }[] = [
   { value: 'dark', label: 'Gelap' },
   { value: 'system', label: 'Ikut sistem' },
 ];
-
-function first(errors: Record<string, string[]> | undefined): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, messages] of Object.entries(errors ?? {})) if (messages[0]) result[key] = messages[0];
-  return result;
-}
 
 function fields(user: UserProfile): Fields {
   return { name: user.name, email: user.email, phone: user.phone ?? '' };
@@ -116,7 +114,7 @@ async function load(): Promise<void> {
       await router.replace({ name: 'login', query: { redirect: '/profile' } });
       return;
     }
-    loadError.value = response.message;
+    loadError.value = usersRefusalText(response.code);
   } catch (error) {
     console.error(error);
     loadError.value = 'Profil belum bisa dimuat.';
@@ -163,8 +161,8 @@ async function saveProfile(): Promise<void> {
         ? 'Profil kamu diubah di tempat lain. Pilih versi yang mau disimpan.'
         : 'Profil kamu diubah di tempat lain. Perubahannya sudah digabung, cek lalu simpan lagi.';
     } else {
-      profileErrors.value = first(response.errors);
-      profileError.value = response.message;
+      profileErrors.value = usersFieldTexts(response.errors);
+      profileError.value = usersRefusalText(response.code);
     }
   } catch (error) {
     console.error(error);
@@ -184,10 +182,15 @@ async function changePassword(): Promise<void> {
 
   passwordBusy.value = true;
   try {
-    const response = await usersWebHost.changePassword({ currentPassword: currentPassword.value, newPassword: newPassword.value });
+    // Auth's client, not the Users host: its answer carries the refusal code the page words the error by.
+    const response = await authClient.changePassword({ current_password: currentPassword.value, new_password: newPassword.value });
     if (!response.success) {
-      passwordErrors.value = first(response.errors);
-      passwordError.value = response.message;
+      const texts = authFieldTexts(response.errors);
+      passwordErrors.value = {
+        ...(texts.current_password ? { currentPassword: texts.current_password } : {}),
+        ...(texts.new_password ? { newPassword: texts.new_password } : {}),
+      };
+      passwordError.value = authRefusalText(response.code);
       return;
     }
     currentPassword.value = '';
@@ -220,7 +223,7 @@ async function uploadAvatar(event: Event): Promise<void> {
   try {
     const response = await usersClient.uploadAvatar(file);
     if (!response.success) {
-      avatarMessage.value = response.message;
+      avatarMessage.value = usersRefusalText(response.code);
       return;
     }
     if (profile.value) {
@@ -256,7 +259,7 @@ async function removeAvatar(): Promise<void> {
     } else if (response.code === 'NOT_FOUND') {
       avatarMessage.value = 'Akun kamu tidak ditemukan. Masuk lagi untuk lanjut.';
     } else {
-      avatarMessage.value = response.message;
+      avatarMessage.value = usersRefusalText(response.code);
     }
   } catch (error) {
     console.error(error);

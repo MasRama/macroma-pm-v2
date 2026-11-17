@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { RouterLink } from 'vue-router';
-import { createAuthClient } from '../../../features/auth/web';
+import { authFieldTexts, authRefusalText, createAuthClient } from '../../../features/auth/web';
 import { TextField, UiButton } from '../../../shared/ui';
 import AuthLayout from '../../layouts/AuthLayout.vue';
-import { firstErrors } from './redirect';
 import './auth-form.css';
 
 /** Ask for a reset link by email. The answer never says whether the email has an account. */
@@ -31,12 +30,8 @@ async function submit(): Promise<void> {
       sentTo.value = address;
       return;
     }
-    if (response.code === 'MAIL_DISABLED') {
-      formError.value = 'Reset password lewat email belum aktif di server ini. Minta admin untuk reset password kamu.';
-      return;
-    }
-    formError.value = response.message;
-    error.value = firstErrors(response.errors).email;
+    formError.value = authRefusalText(response.code);
+    error.value = authFieldTexts(response.errors).email;
   } catch (failure) {
     console.error(failure);
     formError.value = 'Link reset belum bisa dikirim. Cek koneksi lalu coba lagi.';

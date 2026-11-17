@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { createAuthClient, useAuthSession } from '../../../features/auth/web';
+import { authFieldTexts, authRefusalText, createAuthClient, useAuthSession } from '../../../features/auth/web';
 import { TextField, UiButton } from '../../../shared/ui';
 import AuthLayout from '../../layouts/AuthLayout.vue';
 import GoogleMark from './GoogleMark.vue';
 import { startGoogleSignIn } from './google';
 import { isPhone } from './phone';
-import { firstErrors, redirectTarget } from './redirect';
+import { redirectTarget } from './redirect';
 import './auth-form.css';
 
 const name = ref('');
@@ -48,8 +48,8 @@ async function submit(): Promise<void> {
       password: password.value,
     });
     if (!response.success) {
-      formError.value = response.message;
-      errors.value = firstErrors(response.errors);
+      formError.value = authRefusalText(response.code);
+      errors.value = authFieldTexts(response.errors);
       return;
     }
     if (response.data?.user) authSession.setAuthenticated(response.data.user);
