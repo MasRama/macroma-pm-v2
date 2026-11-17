@@ -6,12 +6,13 @@ import { PROJECTS_BOARD_CHANGED_EVENT, PROJECTS_CHANGED_EVENT } from '../../cont
 import type { ProjectsClient } from '../client';
 import DashboardView from '../components/DashboardView.vue';
 import NewProjectModal from '../components/NewProjectModal.vue';
+import { fieldText, refusalText } from '../refusals';
 import { toDashboard, type DashboardData, type NewProjectInput } from '../view';
 
 /**
  * The dashboard on the Projects API: stats, board health and the latest
- * activity across the account's projects, refreshed on `projects.changed` and
- * `projects.board-changed`. "Project baru" creates the project in the
+ * activity across the account's projects, refreshed on `projects.changed`,
+ * `projects.board-changed` and `workspaces.changed` (the workspace count). "Project baru" creates the project in the
  * workspace in view; "Workspace baru" is the shell's.
  */
 const props = withDefaults(
@@ -31,6 +32,9 @@ const notice = ref('');
 const now = ref(new Date());
 let latest = 0;
 
+/** Workspaces owns this topic; naming it here keeps projects from depending on workspaces, which depends on projects. */
+const WORKSPACES_CHANGED_TOPIC = 'workspaces.changed';
+
 async function load(): Promise<void> {
   const ticket = ++latest;
   try {
@@ -41,7 +45,7 @@ async function load(): Promise<void> {
       data.value = toDashboard(response.data);
       notice.value = '';
     } else if (response.code !== 'UNAUTHORIZED') {
-      notice.value = response.message;
+      notice.value = refusalText(response.code);
     }
   } catch (cause) {
     console.error(cause);
@@ -53,9 +57,11 @@ let stopLive: (() => void) | undefined;
 onMounted(() => {
   const stopProjects = onServerEvent(PROJECTS_CHANGED_EVENT, () => void load());
   const stopBoard = onServerEvent(PROJECTS_BOARD_CHANGED_EVENT, () => void load());
+  const stopWorkspaces = onServerEvent(WORKSPACES_CHANGED_TOPIC, () => void load());
   stopLive = () => {
     stopProjects();
     stopBoard();
+    stopWorkspaces();
   };
   void load();
 });
@@ -83,7 +89,7 @@ async function createProject(input: NewProjectInput): Promise<void> {
       workspace_id: workspace.value?.id ?? null,
     });
     if (!response.success) {
-      newProjectError.value = response.errors?.name?.[0] ?? response.message;
+      newProjectError.value = fieldText(response.errors, 'name') ?? refusalText(response.code);
       return;
     }
     newProjectOpen.value = false;

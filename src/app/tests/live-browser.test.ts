@@ -735,6 +735,14 @@ describe('projects, the board and the dashboard in the open tab', () => {
 
     await click('[data-testid="new-task"]');
     expect(document.body.textContent).toContain('mulai di v0.1.2');
+    // The server's 422 on the title is worded in Indonesian, not shown as its English message.
+    typeIn('#new-task-title', 'x'.repeat(501));
+    await settle();
+    await submit('#new-task-form');
+    expect(document.body.textContent).toContain('Judul wajib diisi, maksimal 500 karakter.');
+    expect(document.body.textContent).not.toContain('Title must be at most');
+    expect(db().prepare('SELECT 1 FROM tasks WHERE project_id = ? AND length(title) > 500').get(projectId)).toBeUndefined();
+
     typeIn('#new-task-title', 'Export riwayat broadcast ke CSV');
     await settle();
     await submit('#new-task-form');

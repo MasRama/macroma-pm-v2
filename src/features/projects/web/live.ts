@@ -2,19 +2,24 @@ import { computed, ref, type Ref } from 'vue';
 import { onServerEvent } from '../../../shared/realtime/browser';
 import { PROJECTS_CHANGED_EVENT } from '../contract';
 import type { ProjectsClient } from './client';
+import { refusalText } from './refusals';
 import { toProjectSummary, type ProjectSummary } from './view';
 
 /*
  * The account's projects, kept by the app shell for the sidebar. Refetches on
- * `projects.changed` (and on the stream's resume), never by polling.
+ * `projects.changed` and `workspaces.changed` (workspace projects come and go
+ * with membership; the stream's resume refetches too), never by polling.
  */
+
+/** Workspaces owns this topic; naming it here keeps projects from depending on workspaces, which depends on projects. */
+const WORKSPACES_CHANGED_TOPIC = 'workspaces.changed';
 
 export interface ProjectsList {
   readonly items: Readonly<Ref<ProjectSummary[]>>;
   readonly loaded: Readonly<Ref<boolean>>;
   readonly error: Ref<string>;
   load(): Promise<void>;
-  /** Loads now and on every `projects.changed`; returns the stop function, which empties the list. */
+  /** Loads now and on every `projects.changed` or `workspaces.changed`; returns the stop function, which empties the list. */
   start(): () => void;
 }
 
@@ -30,7 +35,7 @@ export function createProjectsList(client: ProjectsClient): ProjectsList {
       const response = await client.list();
       if (ticket !== latest) return;
       if (!response.success) {
-        error.value = response.code === 'UNAUTHORIZED' ? '' : response.message;
+        error.value = response.code === 'UNAUTHORIZED' ? '' : refusalText(response.code);
         return;
       }
       items.value = response.data.projects.map(toProjectSummary);
@@ -43,7 +48,12 @@ export function createProjectsList(client: ProjectsClient): ProjectsList {
   }
 
   function start(): () => void {
-    const stop = onServerEvent(PROJECTS_CHANGED_EVENT, () => void load());
+    const stopProjects = onServerEvent(PROJECTS_CHANGED_EVENT, () => void load());
+    const stopWorkspaces = onServerEvent(WORKSPACES_CHANGED_TOPIC, () => void load());
+    const stop = () => {
+      stopProjects();
+      stopWorkspaces();
+    };
     void load();
     // The next account to sign in in this tab starts from an empty list.
     return () => {

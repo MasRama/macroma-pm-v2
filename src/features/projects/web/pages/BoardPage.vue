@@ -10,6 +10,7 @@ import EditTaskModal from '../components/EditTaskModal.vue';
 import MoveTaskModal from '../components/MoveTaskModal.vue';
 import NewTaskModal from '../components/NewTaskModal.vue';
 import TaskDetailModal from '../components/TaskDetailModal.vue';
+import { fieldText, refusalText } from '../refusals';
 import { STATUS_LABEL } from '../format';
 import {
   nextTaskVersion,
@@ -51,14 +52,7 @@ const route = useRoute();
 const router = useRouter();
 
 type Code = ProjectsError['code'];
-const REFUSALS: Partial<Record<Code, string>> = {
-  FORBIDDEN: 'Akun kamu tidak boleh melakukan ini di project ini.',
-  PROJECT_NOT_FOUND: 'Project ini sudah tidak ada.',
-  TASK_NOT_FOUND: 'Task ini sudah tidak ada.',
-  BATCH_NOT_FOUND: 'Batch itu sudah tidak ada.',
-  TASK_ALREADY_IN_COLUMN: 'Task ini sudah ada di kolom itu.',
-};
-const say = (response: { code: Code; message: string }) => REFUSALS[response.code] ?? response.message;
+const say = (response: { code: Code }) => refusalText(response.code);
 
 const projectRow = ref<ProjectSummary | null>(null);
 const batches = ref<BatchSummary[]>([]);
@@ -100,7 +94,7 @@ async function loadProject(): Promise<void> {
       gone.value =
         response.code === 'FORBIDDEN' || response.code === 'PROJECT_NOT_FOUND'
           ? 'Project ini tidak ada, atau kamu tidak punya akses ke sana.'
-          : response.message;
+          : refusalText(response.code);
       return;
     }
     gone.value = '';
@@ -228,11 +222,11 @@ async function createTask(input: NewTaskInput): Promise<void> {
       newTaskOpen.value = false;
     } else if (response.code === 'VALIDATION_ERROR') {
       newTaskErrors.value = {
-        title: response.errors?.title?.[0],
-        description: response.errors?.description?.[0],
-        assigneeId: response.errors?.assignee_id?.[0],
+        title: fieldText(response.errors, 'title'),
+        description: fieldText(response.errors, 'description'),
+        assigneeId: fieldText(response.errors, 'assignee_id'),
       };
-      if (!Object.values(newTaskErrors.value).some(Boolean)) newTaskError.value = response.message;
+      if (!Object.values(newTaskErrors.value).some(Boolean)) newTaskError.value = say(response);
     } else {
       newTaskError.value = say(response);
     }
@@ -275,8 +269,8 @@ async function moveTask(input: MoveTaskInput): Promise<void> {
     const response = await props.client.moveTask(input.taskId, { column_id: input.to, note: input.note });
     if (response.success) {
       moving.value = null;
-    } else if (response.code === 'VALIDATION_ERROR' && response.errors?.note) {
-      moveNoteError.value = response.errors.note[0];
+    } else if (response.code === 'VALIDATION_ERROR' && fieldText(response.errors, 'note')) {
+      moveNoteError.value = fieldText(response.errors, 'note');
     } else if (response.code === 'TASK_ALREADY_IN_COLUMN') {
       moveError.value = `Task ini sudah ada di ${STATUS_LABEL[input.to]}.`;
     } else {
@@ -383,11 +377,11 @@ async function saveEdit(): Promise<void> {
       mergeStale(response.current);
     } else if (response.code === 'VALIDATION_ERROR') {
       editErrors.value = {
-        title: response.errors?.title?.[0],
-        description: response.errors?.description?.[0],
-        assigneeId: response.errors?.assignee_id?.[0],
+        title: fieldText(response.errors, 'title'),
+        description: fieldText(response.errors, 'description'),
+        assigneeId: fieldText(response.errors, 'assignee_id'),
       };
-      if (!Object.values(editErrors.value).some(Boolean)) editError.value = response.message;
+      if (!Object.values(editErrors.value).some(Boolean)) editError.value = say(response);
     } else {
       editError.value = say(response);
     }

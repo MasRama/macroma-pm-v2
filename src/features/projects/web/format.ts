@@ -23,9 +23,9 @@ export const STATUS_BAR_COLOR: Record<TaskStatus, string> = { ...STATUS_COLOR, b
 const PROJECT_COLORS = ['var(--c-ongoing)', 'var(--c-done)', 'var(--c-revisi)', 'var(--c-review)', 'var(--c-gold)'];
 
 /** The project colour square: picked from the project id, the API stores no colour. */
-export function projectColor(id: string): string {
+export function projectColor(id: string | number): string {
   let hash = 0;
-  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  for (const char of String(id)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return PROJECT_COLORS[hash % PROJECT_COLORS.length]!;
 }
 
