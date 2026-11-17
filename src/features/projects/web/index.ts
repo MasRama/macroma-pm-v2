@@ -21,10 +21,12 @@ export {
   TASK_PRIORITIES,
 } from '../contract';
 export type {
+  ActiveRelease,
   AddProjectMemberInput,
   Batch,
   BatchRef,
   BoardQuery,
+  ChangelogEntry as ChangelogEntryData,
   ColumnCounts,
   CreateBatchInput,
   CreateCommentInput,
@@ -40,6 +42,9 @@ export type {
   ProjectPersonRef,
   ProjectsError,
   ProjectSummary as ProjectSummaryData,
+  Release,
+  ReleaseContributor,
+  ReleaseStats,
   Task,
   TaskAttachment,
   TaskColumn,

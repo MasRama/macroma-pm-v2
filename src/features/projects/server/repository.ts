@@ -398,6 +398,89 @@ export function countsByBatch(projectId: string): Map<string, ColumnCounts> {
   return counts;
 }
 
+// --- Releases ---------------------------------------------------------------
+
+/** A batch as the releases view sees it, placed among the project's batches in opening order. */
+export interface ReleaseRow {
+  id: string;
+  project_id: string;
+  major: number;
+  minor: number;
+  label: string | null;
+  is_active: 0 | 1;
+  created_at: number;
+  /** The next batch's opening. */
+  next_opened_at: number | null;
+  previous_major: number | null;
+  task_count: number;
+}
+
+/** The project's batches, newest first, each with the next batch's opening, the previous major and its task count. */
+export function listReleases(projectId: string): ReleaseRow[] {
+  return getDatabase()
+    .prepare(
+      `SELECT b.id, b.project_id, b.major, b.minor, b.label, b.is_active, b.created_at,
+         LEAD(b.created_at) OVER opening AS next_opened_at,
+         LAG(b.major) OVER opening AS previous_major,
+         COALESCE(t.task_count, 0) AS task_count
+       FROM project_batches b
+       LEFT JOIN (
+         SELECT batch_id, COUNT(*) AS task_count FROM tasks WHERE project_id = ? AND batch_id IS NOT NULL GROUP BY batch_id
+       ) t ON t.batch_id = b.id
+       WHERE b.project_id = ?
+       WINDOW opening AS (ORDER BY b.created_at, b.major, b.minor)
+       ORDER BY b.created_at DESC, b.major DESC, b.minor DESC`,
+    )
+    .all(projectId, projectId) as ReleaseRow[];
+}
+
+/** How many of the batch's tasks moved to `revisi` at least once. */
+export function revisiTaskCount(batchId: string): number {
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT COUNT(DISTINCT l.task_id) AS count FROM task_logs l JOIN tasks t ON t.id = l.task_id
+         WHERE t.batch_id = ? AND l.column_to = 'revisi'`,
+      )
+      .get(batchId) as { count: number }
+  ).count;
+}
+
+export interface ChangelogRow {
+  id: string;
+  title: string;
+  priority: TaskPriority;
+  version_major: number;
+  version_minor: number;
+  version_patch: number;
+  assignee_id: string | null;
+  column_id: TaskColumn;
+}
+
+/** The batch's tasks, latest version first. */
+export function changelogRows(batchId: string): ChangelogRow[] {
+  return getDatabase()
+    .prepare(
+      `SELECT id, title, priority, version_major, version_minor, version_patch, assignee_id, column_id FROM tasks
+       WHERE batch_id = ? ORDER BY version_major DESC, version_minor DESC, version_patch DESC, created_at DESC, id`,
+    )
+    .all(batchId) as ChangelogRow[];
+}
+
+/** Each account assigned to, or with a logged change on, the batch's tasks, with how many distinct tasks. */
+export function contributorCounts(batchId: string): Array<{ user_id: string; task_count: number }> {
+  return getDatabase()
+    .prepare(
+      `SELECT user_id, COUNT(DISTINCT task_id) AS task_count FROM (
+         SELECT id AS task_id, assignee_id AS user_id FROM tasks WHERE batch_id = ? AND assignee_id IS NOT NULL
+         UNION
+         SELECT l.task_id, l.created_by FROM task_logs l JOIN tasks t ON t.id = l.task_id
+         WHERE t.batch_id = ? AND l.created_by IS NOT NULL
+       ) GROUP BY user_id`,
+    )
+    .all(batchId, batchId) as Array<{ user_id: string; task_count: number }>;
+}
+
 function setActiveBatch(projectId: string, batchId: string, now: number): void {
   const database = getDatabase();
   database.prepare('UPDATE project_batches SET is_active = 0, updated_at = ? WHERE project_id = ? AND is_active = 1').run(now, projectId);

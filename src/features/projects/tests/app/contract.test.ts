@@ -23,7 +23,7 @@ describe('projects web client contract', () => {
   });
 
   it('answers every method in the declared success shape', async () => {
-    await browser.signUp();
+    const account = await browser.signUp();
     const teammate = await signUp('Contract Teammate');
 
     const id = schemas.projectSaved.parse(await client.create({ name: 'Contract Project', description: 'About' })).data.project.id;
@@ -36,6 +36,7 @@ describe('projects web client contract', () => {
     const second = schemas.batchSaved.parse(await client.createBatch(id, { bump_major: true })).data.batch;
     schemas.batchSaved.parse(await client.activateBatch(id, second.id));
     schemas.batches.parse(await client.batches(id));
+    expect(schemas.releases.parse(await client.releases(id)).data.active?.id).toBe(second.id);
 
     const task = schemas.taskSaved.parse(
       await client.createTask(id, { title: 'Contract task', priority: 'high', assignee_id: teammate.id, batch_id: batch.id }),
@@ -47,6 +48,9 @@ describe('projects web client contract', () => {
     schemas.tasks.parse(await client.tasks(id, { batch_id: batch.id }));
     expect(schemas.taskDetailFound.parse(await client.task(task.id)).data.task.revisi_count).toBe(1);
     schemas.taskLogs.parse(await client.taskLogs(task.id));
+    const release = schemas.releaseDetail.parse(await client.release(id, batch.id)).data;
+    expect(release.changelog.map((entry) => entry.task_id)).toEqual([task.id]);
+    expect(release.contributors.map((entry) => entry.user.id).sort()).toEqual([account.id, teammate.id].sort());
     const comment = schemas.commentAdded.parse(await client.addComment(task.id, { content: 'Contract comment' })).data.comment;
     schemas.comments.parse(await client.comments(task.id));
     const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#336699' } }).png().toBuffer();
@@ -85,6 +89,8 @@ describe('projects web client contract', () => {
     });
     expect(schemas.error.parse(await client.activateBatch(id, randomUUID()))).toMatchObject({ code: 'BATCH_NOT_FOUND' });
     expect(schemas.error.parse(await client.tasks(id, { batch_id: randomUUID() }))).toMatchObject({ code: 'BATCH_NOT_FOUND' });
+    expect(schemas.error.parse(await client.release(id, randomUUID()))).toMatchObject({ code: 'BATCH_NOT_FOUND' });
+    expect(schemas.error.parse(await client.releases(randomUUID()))).toMatchObject({ code: 'PROJECT_NOT_FOUND' });
 
     const task = schemas.taskSaved.parse(await client.createTask(id, { title: 'Refused' })).data.task;
     expect(schemas.error.parse(await client.moveTask(task.id, { column_id: 'backlog' }))).toMatchObject({ code: 'TASK_ALREADY_IN_COLUMN' });

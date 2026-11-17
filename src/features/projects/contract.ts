@@ -326,6 +326,48 @@ export function projectsResponseSchemas() {
     meta: z.record(z.string(), z.unknown()).nullable(),
     created_at: z.number(),
   });
+  /**
+   * A batch on the releases (Rilis) view. Batches are ordered by opening
+   * (`created_at`, then version); a batch closes when the next one opens.
+   */
+  const release = z.strictObject({
+    ...batchRef.shape,
+    opened_at: z.number(),
+    /** The next batch's opening; `null` while no later batch exists, and for the active batch. */
+    closed_at: z.number().nullable(),
+    task_count: z.number(),
+    /** The major version differs from the previous batch's; `false` for the first batch. */
+    major_bump: z.boolean(),
+  });
+  const activeRelease = z.strictObject({
+    ...batchRef.shape,
+    opened_at: z.number(),
+    counts,
+    total: z.number(),
+    done: z.number(),
+    /** `done` as a whole percentage of `total`, rounded; 0 for an empty batch. */
+    progress: z.number(),
+  });
+  const releaseStats = z.strictObject({
+    task_count: z.number(),
+    /** Whole days from opening to closing, rounded up; `null` while the batch is not closed. */
+    duration_days: z.number().nullable(),
+    /** Tasks of the batch that moved to `revisi` at least once. */
+    revisi_task_count: z.number(),
+  });
+  const changelogEntry = z.strictObject({
+    task_id: z.string(),
+    title: z.string(),
+    priority: z.enum(TASK_PRIORITIES),
+    version,
+    assignee: personRef.nullable(),
+    column_id: column,
+  });
+  const contributor = z.strictObject({
+    user: person,
+    /** Distinct tasks of the batch the account is assigned to or logged a change on. */
+    task_count: z.number(),
+  });
   const error = z.strictObject({
     success: z.literal(false),
     message: z.string(),
@@ -348,6 +390,11 @@ export function projectsResponseSchemas() {
     comment,
     attachment,
     activityEntry: activity,
+    release,
+    activeRelease,
+    releaseStats,
+    changelogEntry,
+    contributor,
     error,
     /** 409 for a project edit based on an older revision; `current` is the project as it is now. */
     staleProject: z.strictObject({ ...error.shape, code: z.literal(STALE_REVISION), current: project }),
@@ -379,6 +426,23 @@ export function projectsResponseSchemas() {
     attachments: success(z.strictObject({ attachments: z.array(attachment) })),
     /** Some files may fail while others upload; `errors` names each failed file and why. */
     attachmentsUploaded: success(z.strictObject({ attachments: z.array(attachment), errors: z.array(z.string()) })),
+    releases: success(
+      z.strictObject({
+        active: activeRelease.nullable(),
+        /** Every batch but the active one, newest first. */
+        closed: z.array(release),
+      }),
+    ),
+    releaseDetail: success(
+      z.strictObject({
+        batch: z.strictObject({ ...release.shape, is_active: z.boolean() }),
+        stats: releaseStats,
+        /** The batch's tasks, latest version first. */
+        changelog: z.array(changelogEntry),
+        /** Most tasks first. */
+        contributors: z.array(contributor),
+      }),
+    ),
   };
 }
 
@@ -399,6 +463,11 @@ export type TaskDetail = Infer<'taskDetail'>;
 export type TaskComment = Infer<'comment'>;
 export type TaskAttachment = Infer<'attachment'>;
 export type ProjectActivity = Infer<'activityEntry'>;
+export type Release = Infer<'release'>;
+export type ActiveRelease = Infer<'activeRelease'>;
+export type ReleaseStats = Infer<'releaseStats'>;
+export type ChangelogEntry = Infer<'changelogEntry'>;
+export type ReleaseContributor = Infer<'contributor'>;
 export type ProjectsError = Infer<'error'>;
 export type StaleProjectError = Infer<'staleProject'>;
 export type StaleTaskError = Infer<'staleTask'>;
@@ -419,6 +488,8 @@ export type CommentsSuccess = Infer<'comments'>;
 export type CommentAddedSuccess = Infer<'commentAdded'>;
 export type AttachmentsSuccess = Infer<'attachments'>;
 export type AttachmentsUploadedSuccess = Infer<'attachmentsUploaded'>;
+export type ReleasesSuccess = Infer<'releases'>;
+export type ReleaseDetailSuccess = Infer<'releaseDetail'>;
 
 export type ProjectsResponse = ProjectsSuccess | ProjectsError;
 export type ProjectSavedResponse = ProjectSavedSuccess | ProjectsError;
@@ -438,4 +509,6 @@ export type CommentAddedResponse = CommentAddedSuccess | ProjectsError;
 export type AttachmentsResponse = AttachmentsSuccess | ProjectsError;
 export type AttachmentsUploadedResponse = AttachmentsUploadedSuccess | ProjectsError;
 export type TaskDetailResponse = TaskDetailSuccess | ProjectsError;
+export type ReleasesResponse = ReleasesSuccess | ProjectsError;
+export type ReleaseDetailResponse = ReleaseDetailSuccess | ProjectsError;
 export type TaskLogsResponse = TaskLogsSuccess | ProjectsError;
