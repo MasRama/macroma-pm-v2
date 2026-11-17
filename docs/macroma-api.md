@@ -367,7 +367,10 @@ project). Live: `projects.changed`.
 - **Edit** is a form edit with `revision`; `assignee_id: null` unassigns.
 - **Move.** `revisi` needs a `note` (what has to change). Moving into the
   column the task is in answers `409 TASK_ALREADY_IN_COLUMN`. Without
-  `sort_order` the task goes last.
+  `sort_order` the task goes last. A move sends a `task_moved` notification
+  (see Notifications) to the task's assignee and its creator, once each,
+  never to the account that moved it. A refused move sends none, and
+  creating, editing or deleting a task sends none.
 
 Codes: `PROJECT_NOT_FOUND` (board and create), `TASK_NOT_FOUND`,
 `BATCH_NOT_FOUND`, `TASK_ALREADY_IN_COLUMN`, `STALE_REVISION`. Live: `projects.board-changed`.
@@ -462,6 +465,26 @@ object whose fields depend on `type` (see Workspaces for
 `workspace_invitation` and `invitation_accepted`). Code:
 `NOTIFICATION_NOT_FOUND`; someone else's notification is `403 FORBIDDEN`.
 Live: `notifications.changed`.
+
+`task_moved` (Projects, `PROJECTS_NOTIFICATION_TYPES.taskMoved`) is sent when
+`PATCH /api/tasks/:id/move` succeeds, in the same transaction as the move, to
+the task's assignee and its creator (who wrote its first task log), once each
+when they are the same account, never to the account that moved it, and only
+to accounts that still exist and can open the project. Each recipient alone
+gets `notifications.changed`. Its `data` (`TaskMovedNotificationData`, schema
+`projectsResponseSchemas().taskMovedNotificationData`):
+
+| Field | Type | Value |
+|---|---|---|
+| `project_id` | string | the task's project |
+| `project_name` | string | the project's name at the time of the move |
+| `task_id` | string | the moved task |
+| `task_title` | string | the task's title at the time of the move |
+| `version` | string | the task's new version, like `v1.2.3` (the move's log `version`) |
+| `column_from` | `backlog` · `ongoing` · `revisi` · `review` · `done` | the column it left |
+| `column_to` | same as `column_from` | the column it entered |
+| `actor_id` | string | the account that moved it |
+| `actor_name` | string | that account's name, or its email when the name is empty |
 
 ## V1 pages → V2 endpoints
 

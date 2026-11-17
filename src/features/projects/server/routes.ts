@@ -66,6 +66,7 @@ import { removeStoredImages, storeImages, uploadedFiles } from './attachments';
 import { dashboardData } from './dashboard';
 import type { ProjectsServerHost } from './host';
 import { announceBoardChange, announceProjectChange, projectsBoardChangedTopic, projectsChangedTopic } from './live';
+import { noticeTaskMoved } from './notices';
 import {
   activateBatch,
   activeBatches,
@@ -553,7 +554,11 @@ export function createTaskRoutes(host: ProjectsServerHost) {
       if (input.column_id === task.column_id) {
         return refuse(context, 409, 'TASK_ALREADY_IN_COLUMN', 'The task is already in this column');
       }
-      const moved = moveTask(task, { column: input.column_id, note: input.note ?? '', sortOrder: input.sort_order }, actor.id);
+      const moved = getDatabase().transaction(() => {
+        const result = moveTask(task, { column: input.column_id, note: input.note ?? '', sortOrder: input.sort_order }, actor.id);
+        noticeTaskMoved(host, project, task, result.log, actor);
+        return result;
+      })();
       const people = personRefs(host, [moved.task.assignee_id, actor.id]);
       announceBoardChange(projectAudience(host, project));
       return context.json({
