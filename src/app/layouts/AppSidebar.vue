@@ -10,7 +10,7 @@ const props = withDefaults(
   defineProps<{
     user: ShellUser | null;
     workspaces?: ShellWorkspace[];
-    currentWorkspaceId?: number | null;
+    currentWorkspaceId?: string | null;
     projects?: ShellProject[];
     chatUnread?: number;
     chatOpen?: boolean;

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw, type RouterScrollB
 import { ChangePasswordPage, rolesAccess, RolesPage, SecurityPage, useAuthSession } from '../features/auth/web';
 import { ActivityPage, BoardPage, DashboardPage, ReleasesPage } from '../features/projects/web';
 import { WorkspacePage } from '../features/workspaces/web';
+import { workspacesClient } from './api-clients';
 import activityWebRoutes from './bindings/activity.web';
 import usersWebRoutes from './bindings/users.web';
 import { canEnter } from './navigation';
@@ -42,7 +43,11 @@ export const appRoutes = [
     path: '/workspaces/:workspaceId',
     name: 'workspace',
     component: WorkspacePage,
-    props: true,
+    props: (route) => ({
+      workspaceId: String(route.params.workspaceId),
+      client: workspacesClient,
+      meId: authSession.user.value?.id ?? null,
+    }),
     meta: signedIn,
   },
   { path: '/projects/:projectId', redirect: (to) => ({ name: 'project-board', params: to.params }) },

@@ -2,18 +2,25 @@
 import { formatAgoLong, UiAvatar, UiButton, UiIcon } from '../../../../shared/ui';
 import type { PendingInvite, WorkspaceMember } from '../view';
 
+
 withDefaults(
   defineProps<{
     members: WorkspaceMember[];
     invites?: PendingInvite[];
     /** Id of the signed-in person, marked "(kamu)". */
     meId?: string | number | null;
+    /** Owner: may cancel invitations and remove members. */
     canManage?: boolean;
+    /** Any member may invite. */
+    canInvite?: boolean;
+    busy?: boolean;
     now?: Date;
   }>(),
-  { invites: () => [], meId: null, canManage: false, now: () => new Date() },
+  { invites: () => [], meId: null, canManage: false, canInvite: false, busy: false, now: () => new Date() },
 );
-const emit = defineEmits<{ invite: []; cancelInvite: [id: number] }>();
+const emit = defineEmits<{ invite: []; cancelInvite: [id: string]; removeMember: [userId: string] }>();
+
+const isMe = (member: WorkspaceMember, meId: string | number | null) => meId !== null && String(member.person.id) === String(meId);
 
 /** "dikirim kemarin", "dikirim 2 hari lalu", "dikirim 4 Nov". */
 function sentLabel(iso: string, now: Date): string {
@@ -26,14 +33,24 @@ function sentLabel(iso: string, now: Date): string {
   <section class="panel members" aria-labelledby="members-title">
     <div class="members__head">
       <h2 id="members-title" class="h2 members__title">Anggota</h2>
-      <UiButton v-if="canManage" size="sm" icon="mail" class="members__invite" @click="emit('invite')">Undang</UiButton>
+      <UiButton v-if="canInvite" size="sm" icon="mail" class="members__invite" data-testid="invite-member" @click="emit('invite')">Undang</UiButton>
     </div>
     <ul class="members__list">
-      <li v-for="member in members" :key="member.person.id" class="member">
+      <li v-for="member in members" :key="member.person.id" class="member" :data-member-id="member.person.id">
         <UiAvatar :person="member.person" :size="30" />
         <div class="member__who">
-          <b>{{ member.person.name }} <span v-if="String(member.person.id) === String(meId)">(kamu)</span></b>
+          <b>{{ member.person.name }} <span v-if="isMe(member, meId)">(kamu)</span></b>
           <small>{{ member.email }}</small>
+          <button
+            v-if="member.role !== 'owner' && (isMe(member, meId) || canManage)"
+            type="button"
+            class="link member__remove"
+            :data-testid="isMe(member, meId) ? 'leave-workspace' : `remove-member-${member.person.id}`"
+            :disabled="busy"
+            @click="emit('removeMember', String(member.person.id))"
+          >
+            {{ isMe(member, meId) ? 'Keluar dari workspace' : 'Keluarkan' }}
+          </button>
         </div>
         <span class="member__role" :class="`member__role--${member.role}`">{{ member.role === 'owner' ? 'Owner' : 'Member' }}</span>
       </li>
@@ -47,7 +64,16 @@ function sentLabel(iso: string, now: Date): string {
             <b>{{ invite.email }}</b>
             <small>dikirim {{ sentLabel(invite.sentAt, now) }}</small>
           </div>
-          <button v-if="canManage" type="button" class="link member__cancel" @click="emit('cancelInvite', invite.id)">Batal</button>
+          <button
+            v-if="canManage"
+            type="button"
+            class="link member__cancel"
+            :data-testid="`cancel-invite-${invite.id}`"
+            :disabled="busy"
+            @click="emit('cancelInvite', invite.id)"
+          >
+            Batal
+          </button>
         </li>
       </ul>
     </template>
@@ -132,5 +158,10 @@ function sentLabel(iso: string, now: Date): string {
 }
 .member__cancel {
   font-size: 12px;
+}
+.member__remove {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--mute);
 }
 </style>

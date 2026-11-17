@@ -28,7 +28,8 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ close: []; send: [body: string] }>();
 
-const draft = ref('');
+/** The text being typed; the parent clears it once the message is saved, so a refused one is not lost. */
+const draft = defineModel<string>('draft', { default: '' });
 const scroller = ref<HTMLElement | null>(null);
 
 const days = computed(() => {
@@ -58,7 +59,6 @@ function send(): void {
   const body = draft.value.trim();
   if (!body || props.sending) return;
   emit('send', body);
-  draft.value = '';
 }
 </script>
 
@@ -100,7 +100,7 @@ function send(): void {
     <form class="chat__compose" @submit.prevent="send">
       <label class="chat__field">
         <span class="sr-only">Pesan</span>
-        <input v-model="draft" type="text" placeholder="Tulis pesan…" autocomplete="off" />
+        <input v-model="draft" type="text" placeholder="Tulis pesan…" autocomplete="off" maxlength="2000" data-testid="chat-input" />
         <button type="submit" class="chat__send focus-ring" :disabled="!draft.trim() || sending" aria-label="Kirim">
           <UiIcon name="arrow" :size="15" :stroke="2.2" />
         </button>

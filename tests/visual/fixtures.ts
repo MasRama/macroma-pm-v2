@@ -25,12 +25,12 @@ export const dimas = { id: 3, name: 'Dimas' };
 export const salsa = { id: 4, name: 'Salsa' };
 export const team = [ren, azka, dimas, salsa];
 
-export const workspace = { id: 1, name: 'Wajom Studio', description: 'Tim produk Wajom' };
+export const workspace = { id: 'w1', name: 'Wajom Studio', description: 'Tim produk Wajom', role: 'owner' as const, memberCount: 4, projectCount: 4, revision: 1 };
 
 export const workspaces = [
-  { id: 1, name: 'Wajom Studio' },
-  { id: 2, name: 'Nara Labs' },
-  { id: 3, name: 'Freelance' },
+  { id: 'w1', name: 'Wajom Studio' },
+  { id: 'w2', name: 'Nara Labs' },
+  { id: 'w3', name: 'Freelance' },
 ];
 
 export const sidebarProjects = [
@@ -190,13 +190,13 @@ export const members: WorkspaceMember[] = [
   { person: dimas, email: 'dimas@wajom.co', role: 'member' },
   { person: salsa, email: 'salsa@wajom.co', role: 'member' },
 ];
-export const invites: PendingInvite[] = [{ id: 1, email: 'fajar@wajom.co', sentAt: at(15, '10:20') }];
+export const invites: PendingInvite[] = [{ id: 'i1', email: 'fajar@wajom.co', sentAt: at(15, '10:20') }];
 
 export const messages: ChatMessage[] = [
-  { id: 1, author: azka, body: 'Checkout Safari iOS aku balikin ke revisi ya, masih gagal di iPhone 12.', at: at(17, '09:41') },
-  { id: 2, author: salsa, body: 'Oke aku cek. Kayaknya redirect 3DS-nya ke-block.', at: at(17, '09:44') },
-  { id: 3, author: ren, body: 'Sip. Pairing code udah aku push v2.3.4, tolong review siang ini.', at: at(17, '10:15') },
-  { id: 4, author: dimas, body: 'Siap, abis makan siang.', at: at(17, '10:17') },
+  { id: 'm1', author: azka, body: 'Checkout Safari iOS aku balikin ke revisi ya, masih gagal di iPhone 12.', at: at(17, '09:41') },
+  { id: 'm2', author: salsa, body: 'Oke aku cek. Kayaknya redirect 3DS-nya ke-block.', at: at(17, '09:44') },
+  { id: 'm3', author: ren, body: 'Sip. Pairing code udah aku push v2.3.4, tolong review siang ini.', at: at(17, '10:15') },
+  { id: 'm4', author: dimas, body: 'Siap, abis makan siang.', at: at(17, '10:17') },
 ];
 
 export const notifications: NotificationItem[] = [

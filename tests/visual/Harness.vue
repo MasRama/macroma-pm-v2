@@ -16,7 +16,7 @@ import {
   NewTaskModal,
   ReleasesPage,
 } from '../../src/features/projects/web';
-import { ChatDrawer, WorkspacePage } from '../../src/features/workspaces/web';
+import { ChatDrawer, WorkspaceView } from '../../src/features/workspaces/web';
 import { ConfirmDialog } from '../../src/shared/ui';
 import * as f from './fixtures';
 import { screenName } from './screens';
@@ -39,7 +39,7 @@ const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm'
     <AppFrame
       :user="f.shellUser"
       :workspaces="f.workspaces"
-      :current-workspace-id="1"
+      :current-workspace-id="'w1'"
       :projects="f.sidebarProjects"
       :chat-unread="3"
       :chat-open="chatOpen"
@@ -80,15 +80,16 @@ const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm'
         :activity="f.activity"
         :can-create-project="true"
       />
-      <WorkspacePage
+      <WorkspaceView
         v-else-if="screen === 'workspace' || screen === 'chat'"
-        workspace-id="1"
         :workspace="f.workspace"
         :projects="f.wsProjects"
         :members="f.members"
         :invites="f.invites"
         :me-id="1"
         :can-manage="true"
+        :can-invite="true"
+        :can-create-project="true"
         :now="f.NOW"
       />
       <ActivityPage v-else-if="screen === 'feed'" :entries="f.activity" :now="f.NOW" />

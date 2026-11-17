@@ -27,7 +27,7 @@ function submit(): void {
 </script>
 
 <template>
-  <UiModal :open="open" title="Undang anggota" :subtitle="`Undangan masuk ke notifikasi dan email mereka, untuk ${workspaceName}.`" :width="440" @close="emit('close')">
+  <UiModal :open="open" title="Undang anggota" :subtitle="`Undangan masuk ke notifikasi akun mereka di Macroma, untuk ${workspaceName}.`" :width="440" @close="emit('close')">
     <form id="invite-form" novalidate @submit.prevent="submit">
       <TextField id="invite-email" v-model="email" type="email" label="Email" placeholder="nama@domain.com" :error="localError ?? emailError" autocomplete="email" />
     </form>

@@ -1,18 +1,28 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { csrfHeaders, ensureCsrfToken, useAuthSession } from '../../features/auth/web';
 import { createNotificationsClient, createNotificationsFeed } from '../../features/notifications/web';
-import { ChatDrawer, createWorkspacesClient, NewWorkspaceModal, workspacesRefusalText } from '../../features/workspaces/web';
+import {
+  ChatDrawer,
+  createWorkspaceChat,
+  createWorkspacesList,
+  NewWorkspaceModal,
+  type NewWorkspaceInput,
+  workspacesFieldTexts,
+  workspacesRefusalText,
+} from '../../features/workspaces/web';
+import { workspacesClient } from '../api-clients';
 import { navigationLinks } from '../navigation';
 import AppFrame from './AppFrame.vue';
 import type { ShellLink } from './shell-types';
 
 /*
- * Wires the frame to the session: who is signed in, admin links the session
- * may open, sign-out, the chat drawer (`?chat=1`), and the live notification
- * bell with its invitation answers. Workspaces, projects and chat are empty
- * until those pages are wired to the Macroma API.
+ * Wires the frame to the session and the Workspaces API: who is signed in,
+ * admin links the session may open, sign-out, the workspace switcher and
+ * "Workspace baru", the chat drawer (`?chat=1`) of the workspace in view with
+ * its unread badge, and the live notification bell with its invitation
+ * answers. Projects are still empty here until their screens are wired.
  */
 const ADMIN_LABELS: Record<string, string> = {
   '/users': 'Pengguna',
@@ -26,10 +36,87 @@ const router = useRouter();
 const loggingOut = ref(false);
 const error = ref('');
 const newWorkspaceOpen = ref(false);
+const newWorkspaceBusy = ref(false);
+const newWorkspaceError = ref<string | undefined>();
+
+const meId = () => authSession.user.value?.id ?? null;
+const workspaceList = createWorkspacesList(workspacesClient);
+const chat = createWorkspaceChat(workspacesClient, meId);
+const chatDraft = ref('');
+
+/** This browser's last workspace, so the switcher and chat open where the person left off. */
+const LAST_WORKSPACE_KEY = 'macroma.workspace';
+function remembered(): string | null {
+  try {
+    return localStorage.getItem(LAST_WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+function remember(id: string): void {
+  try {
+    localStorage.setItem(LAST_WORKSPACE_KEY, id);
+  } catch {
+    // Storage blocked: the first workspace is used next time.
+  }
+}
+
+const workspaces = computed(() => workspaceList.items.value);
+/** The workspace in view: the open workspace page, else the last one used, else the first. */
+const currentWorkspaceId = computed<string | null>(() => {
+  const ids = workspaces.value.map((workspace) => workspace.id);
+  const onPage = route.name === 'workspace' ? String(route.params.workspaceId) : null;
+  if (onPage && ids.includes(onPage)) return onPage;
+  const last = remembered();
+  return last && ids.includes(last) ? last : (ids[0] ?? null);
+});
+const currentWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === currentWorkspaceId.value) ?? null);
+watch(currentWorkspaceId, (id) => {
+  if (id) remember(id);
+  void chat.select(id);
+});
+
+let stopLive: (() => void) | undefined;
+onMounted(() => {
+  const stopList = workspaceList.start();
+  const stopChat = chat.start();
+  stopLive = () => {
+    stopList();
+    stopChat();
+  };
+});
+onBeforeUnmount(() => stopLive?.());
+
+async function createWorkspace(input: NewWorkspaceInput): Promise<void> {
+  if (newWorkspaceBusy.value) return;
+  newWorkspaceBusy.value = true;
+  newWorkspaceError.value = undefined;
+  try {
+    const response = await workspacesClient.create({ name: input.name, description: input.description || null });
+    if (!response.success) {
+      newWorkspaceError.value = workspacesFieldTexts(response.errors).name ?? workspacesRefusalText(response.code);
+      return;
+    }
+    newWorkspaceOpen.value = false;
+    await workspaceList.load();
+    await router.push({ name: 'workspace', params: { workspaceId: response.data.workspace.id } });
+  } catch (cause) {
+    console.error(cause);
+    newWorkspaceError.value = 'Workspace belum bisa dibuat. Coba lagi.';
+  } finally {
+    newWorkspaceBusy.value = false;
+  }
+}
+
+async function sendMessage(body: string): Promise<void> {
+  if (await chat.send(body)) {
+    chatDraft.value = '';
+    chat.markSeen();
+  }
+}
 
 const csrf = { headers: (extra?: HeadersInit) => csrfHeaders(extra), ensureToken: () => ensureCsrfToken() };
 const feed = createNotificationsFeed(createNotificationsClient({ csrf }));
-const workspacesClient = createWorkspacesClient({ csrf });
 const notificationsBusy = ref(false);
 let stopFeed: (() => void) | undefined;
 onMounted(() => {
@@ -67,7 +154,10 @@ function answerInvitation(token: string, action: 'accept' | 'decline'): Promise<
 
 const user = computed(() => {
   const current = authSession.user.value;
-  return current ? { id: current.id, name: current.name, avatar: current.avatar, caption: current.email } : null;
+  if (!current) return null;
+  const role = currentWorkspace.value?.role;
+  const caption = role === 'owner' ? 'Owner' : role === 'member' ? 'Member' : current.email;
+  return { id: current.id, name: current.name, avatar: current.avatar, caption };
 });
 const adminLinks = computed<ShellLink[]>(() =>
   navigationLinks(router.options.routes, authSession.allows)
@@ -75,6 +165,13 @@ const adminLinks = computed<ShellLink[]>(() =>
     .map((link) => ({ to: link.to, label: ADMIN_LABELS[link.to]! })),
 );
 const chatOpen = computed(() => route.query.chat === '1');
+// While the chat is on screen, everything in it counts as read.
+watch(
+  () => [chatOpen.value, chat.messages.value.length] as const,
+  ([open]) => {
+    if (open) chat.markSeen();
+  },
+);
 
 function toggleChat(): void {
   const query = { ...route.query };
@@ -107,6 +204,9 @@ async function logout(): Promise<void> {
 <template>
   <AppFrame
     :user="user"
+    :workspaces="workspaces"
+    :current-workspace-id="currentWorkspaceId"
+    :chat-unread="chatOpen ? 0 : chat.unread.value"
     :chat-open="chatOpen"
     :admin-links="adminLinks"
     :logging-out="loggingOut"
@@ -120,11 +220,31 @@ async function logout(): Promise<void> {
     @decline-invite="answerInvitation($event, 'decline')"
     @read-notification="busyWith(() => feed.markRead($event))"
     @mark-notifications-read="busyWith(() => feed.markAllRead())"
-    @new-workspace="newWorkspaceOpen = true"
+    @new-workspace="
+      newWorkspaceError = undefined;
+      newWorkspaceOpen = true;
+    "
     @logout="logout"
   >
     <slot />
   </AppFrame>
-  <ChatDrawer :open="chatOpen" workspace-name="Workspace" :me-id="user?.id ?? null" @close="toggleChat" />
-  <NewWorkspaceModal :open="newWorkspaceOpen" @close="newWorkspaceOpen = false" @submit="newWorkspaceOpen = false" />
+  <ChatDrawer
+    v-model:draft="chatDraft"
+    :open="chatOpen"
+    :workspace-name="currentWorkspace?.name ?? 'Belum ada workspace'"
+    :members="chat.members.value"
+    :messages="chat.messages.value"
+    :me-id="user?.id ?? null"
+    :sending="chat.sending.value || !currentWorkspace"
+    :error="chat.error.value || (workspaceList.loaded.value && !currentWorkspace ? 'Buat atau terima undangan workspace dulu untuk mulai chat.' : '')"
+    @close="toggleChat"
+    @send="sendMessage"
+  />
+  <NewWorkspaceModal
+    :open="newWorkspaceOpen"
+    :busy="newWorkspaceBusy"
+    :name-error="newWorkspaceError"
+    @close="newWorkspaceOpen = false"
+    @submit="createWorkspace"
+  />
 </template>

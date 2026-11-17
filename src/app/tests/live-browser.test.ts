@@ -431,3 +431,184 @@ describe('the notification bell in the open tab', () => {
     expect(unread.count).toBe(0);
   });
 });
+
+describe('workspaces and chat in the open tab', () => {
+  /** Creates a workspace as `owner`; returns its id. */
+  async function createWorkspace(owner: { cookie: string }, name = 'Wajom Studio'): Promise<string> {
+    expect((await asDevice(owner.cookie, '/api/workspaces', 'POST', { name, description: 'Tim produk' })).status).toBe(201);
+    return (getDatabase().prepare('SELECT id FROM workspaces WHERE name = ? ORDER BY created_at DESC LIMIT 1').get(name) as { id: string }).id;
+  }
+
+  async function join(owner: { cookie: string }, member: { email: string; cookie: string }, workspaceId: string): Promise<void> {
+    expect((await asDevice(owner.cookie, `/api/workspaces/${workspaceId}/invitations`, 'POST', { email: member.email })).status).toBe(201);
+    const { token } = getDatabase().prepare("SELECT token FROM workspace_invitations WHERE workspace_id = ? AND status = 'pending'").get(workspaceId) as {
+      token: string;
+    };
+    expect((await asDevice(member.cookie, `/api/invitations/${token}/respond`, 'POST', { action: 'accept' })).status).toBe(200);
+  }
+
+  const page = () => container.querySelector('[data-testid="workspace-page"]');
+  const memberIds = () => [...container.querySelectorAll('[data-member-id]')].map((row) => row.getAttribute('data-member-id'));
+  const isMember = (workspaceId: string, userId: string) =>
+    getDatabase().prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, userId) !== undefined;
+
+  async function submit(selector: string): Promise<void> {
+    document.querySelector<HTMLFormElement>(selector)!.requestSubmit();
+    await settle();
+  }
+
+  function typeIn(selector: string, value: string): void {
+    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
+    expect(field).not.toBeNull();
+    field!.value = value;
+    field!.dispatchEvent(new Event('input'));
+  }
+
+  it('opens a workspace with its members and pending invitations, and shows the owner its actions', async () => {
+    const owner = await register('Ren Owner');
+    const pending = await register('Fajar Pending');
+    const workspaceId = await createWorkspace(owner);
+    expect((await asDevice(owner.cookie, `/api/workspaces/${workspaceId}/invitations`, 'POST', { email: pending.email })).status).toBe(201);
+
+    await openTab(owner.cookie, `/workspaces/${workspaceId}`);
+    expect(page()?.textContent).toContain('Wajom Studio');
+    expect(page()?.textContent).toContain('Tim produk · 1 anggota · 0 project');
+    expect(memberIds()).toEqual([owner.id]);
+    expect(page()?.textContent).toContain('Ren Owner (kamu)');
+    expect(page()?.textContent).toContain(pending.email);
+    expect(container.querySelector('[data-testid="edit-workspace"]')).not.toBeNull();
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Wajom Studio');
+    expect(container.querySelector('.me__text')?.textContent).toContain('Owner');
+  });
+
+  it('creates a workspace from the switcher and lands on it', async () => {
+    const owner = await register('Ren Owner');
+    await openTab(owner.cookie, '/profile');
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Pilih workspace');
+
+    await click('.ws');
+    await click('.menu-item--add');
+    await submit('#new-workspace-form');
+    expect(document.body.textContent).toContain('Nama wajib diisi');
+
+    // The server's 422 is worded in Indonesian by field, not shown as its English message.
+    typeIn('#workspace-name', 'x'.repeat(256));
+    await submit('#new-workspace-form');
+    expect(document.body.textContent).toContain('Nama wajib diisi, maksimal 255 karakter.');
+    expect(document.body.textContent).not.toContain('Name must be at most');
+    expect(getDatabase().prepare('SELECT 1 FROM workspaces WHERE owner_id = ?').get(owner.id)).toBeUndefined();
+
+    typeIn('#workspace-name', 'Nara Labs');
+    await submit('#new-workspace-form');
+    const created = getDatabase().prepare('SELECT id FROM workspaces WHERE owner_id = ?').get(owner.id) as { id: string };
+    expect(router.currentRoute.value).toMatchObject({ name: 'workspace', params: { workspaceId: created.id } });
+    expect(page()?.textContent).toContain('Nara Labs');
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Nara Labs');
+  });
+
+  it('invites by email, says by code when no account uses it, and cancels a pending invitation', async () => {
+    const owner = await register('Ren Owner');
+    const invitee = await register('Ayu Invitee');
+    const workspaceId = await createWorkspace(owner);
+    await openTab(owner.cookie, `/workspaces/${workspaceId}`);
+
+    await click('[data-testid="invite-member"]');
+    typeIn('#invite-email', `${randomUUID()}@example.com`);
+    await submit('#invite-form');
+    expect(document.querySelector('#invite-form')?.textContent).toContain('Belum ada akun dengan email ini');
+
+    typeIn('#invite-email', invitee.email);
+    await submit('#invite-form');
+    expect(document.querySelector('#invite-form')).toBeNull();
+    expect(page()?.textContent).toContain(invitee.email);
+
+    const invitation = getDatabase().prepare("SELECT id FROM workspace_invitations WHERE workspace_id = ? AND status = 'pending'").get(workspaceId) as { id: string };
+    await click(`[data-testid="cancel-invite-${invitation.id}"]`);
+    expect(page()?.textContent).not.toContain(invitee.email);
+    expect(getDatabase().prepare('SELECT 1 FROM workspace_invitations WHERE id = ?').get(invitation.id)).toBeUndefined();
+  });
+
+  it('shows a member joining live, hides owner actions from a member, and lets a member leave', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const workspaceId = await createWorkspace(owner);
+    await openTab(owner.cookie, `/workspaces/${workspaceId}`);
+    expect(memberIds()).toEqual([owner.id]);
+
+    await join(owner, member, workspaceId);
+    await settle();
+    expect(memberIds()).toEqual([owner.id, member.id]);
+    expect(container.querySelector(`[data-testid="remove-member-${member.id}"]`)).not.toBeNull();
+
+    application?.unmount();
+    application = undefined;
+    await openTab(member.cookie, `/workspaces/${workspaceId}`);
+    expect(container.querySelector('[data-testid="edit-workspace"]')).toBeNull();
+    expect(container.querySelector(`[data-testid="remove-member-${owner.id}"]`)).toBeNull();
+    expect(container.querySelector('[data-testid="invite-member"]')).not.toBeNull();
+
+    await click('[data-testid="leave-workspace"]');
+    document.querySelector<HTMLButtonElement>('[role="alertdialog"] .btn--danger')!.click();
+    await settle();
+    expect(isMember(workspaceId, member.id)).toBe(false);
+    expect(router.currentRoute.value.name).toBe('dashboard');
+  });
+
+  it('merges an edit saved elsewhere into the open form and asks only about the field both changed', async () => {
+    const owner = await register('Ren Owner');
+    const workspaceId = await createWorkspace(owner);
+    await openTab(owner.cookie, `/workspaces/${workspaceId}`);
+
+    await click('[data-testid="edit-workspace"]');
+    typeIn('#edit-workspace-description', 'Deskripsi punyaku');
+    typeIn('#edit-workspace-name', 'Nama punyaku');
+    await settle();
+    expect((await asDevice(owner.cookie, `/api/workspaces/${workspaceId}`, 'PATCH', { revision: 1, name: 'Nama mereka' })).status).toBe(200);
+
+    await submit('#edit-workspace-form');
+    expect(document.querySelector('[data-testid="workspace-merge-notice"]')?.textContent).toContain('disimpan orang lain');
+    const conflicts = [...document.querySelectorAll('[data-testid="workspace-conflicts"] [data-conflict-field]')].map((row) => row.getAttribute('data-conflict-field'));
+    expect(conflicts).toEqual(['name']);
+    expect((document.querySelector('#edit-workspace-description') as HTMLTextAreaElement).value).toBe('Deskripsi punyaku');
+
+    document.querySelector<HTMLButtonElement>('[data-testid="use-theirs-name"]')!.click();
+    await settle();
+    await submit('#edit-workspace-form');
+    expect(document.querySelector('#edit-workspace-form')).toBeNull();
+    expect(getDatabase().prepare('SELECT name, description, revision FROM workspaces WHERE id = ?').get(workspaceId)).toEqual({
+      name: 'Nama mereka',
+      description: 'Deskripsi punyaku',
+      revision: 3,
+    });
+  });
+
+  it('counts chat messages from others while the chat is closed, then shows and sends in the drawer', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const workspaceId = await createWorkspace(owner);
+    await join(owner, member, workspaceId);
+    await openTab(owner.cookie, `/workspaces/${workspaceId}`);
+    const chatButton = () => [...container.querySelectorAll<HTMLButtonElement>('button.nav__a')].find((button) => button.textContent?.includes('Chat'))!;
+    expect(chatButton().querySelector('.badge')).toBeNull();
+
+    expect((await asDevice(member.cookie, `/api/workspaces/${workspaceId}/messages`, 'POST', { message: 'Halo tim' })).status).toBe(201);
+    expect((await asDevice(member.cookie, `/api/workspaces/${workspaceId}/messages`, 'POST', { message: 'Ada yang review?' })).status).toBe(201);
+    await settle();
+    expect(chatButton().querySelector('.badge')?.textContent).toBe('2');
+
+    chatButton().click();
+    await settle();
+    const drawer = () => document.querySelector('[role="dialog"][aria-label="Chat Wajom Studio"]');
+    expect(drawer()?.textContent).toContain('Halo tim');
+    expect(drawer()?.textContent).toContain('Ada yang review?');
+    expect(chatButton().querySelector('.badge')).toBeNull();
+
+    typeIn('[data-testid="chat-input"]', 'Aku cek siang ini');
+    await settle();
+    await submit('.chat__compose');
+    expect((document.querySelector('[data-testid="chat-input"]') as HTMLInputElement).value).toBe('');
+    expect(drawer()?.textContent).toContain('Aku cek siang ini');
+    const saved = getDatabase().prepare('SELECT message FROM workspace_messages WHERE workspace_id = ? AND user_id = ?').all(workspaceId, owner.id);
+    expect(saved).toEqual([{ message: 'Aku cek siang ini' }]);
+  });
+});
