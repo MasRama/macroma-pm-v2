@@ -54,7 +54,7 @@ jobs:
 
       - name: Fast pull request check
         if: github.event_name == 'pull_request'
-        run: npm run check:fast
+        run: npm run verify
 
       - name: Full main tests
         if: github.event_name == 'push'

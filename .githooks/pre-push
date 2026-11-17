@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs what pull-request CI runs, so a push never turns CI red.
+# Enable once per clone: git config core.hooksPath .githooks
+exec npm run verify

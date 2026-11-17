@@ -43,6 +43,7 @@
     "architecture:doctor": "npx ts-node -r tsconfig-paths/register src/cli/index.ts doctor",
     "architecture:doctor:build": "node build/src/cli/index.js doctor",
     "check:fast": "npm run check:frontend && npm run test:fast && npm run build && npm run architecture:doctor:build",
+    "verify": "npm run check:fast",
     "check": "npm run lint && npm run check:frontend && npm test && npm run architecture:doctor"
   },
   "author": "MasRama",
