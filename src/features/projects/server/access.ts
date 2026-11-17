@@ -7,11 +7,13 @@ import type {
   Project,
   ProjectPersonRef,
   Release,
+  ReleaseBatch,
   ReleaseStats,
   Task,
   TaskAttachment,
   TaskComment,
   TaskLog,
+  UpcomingRelease,
 } from '../contract';
 import type { ProjectsServerHost } from './host';
 import {
@@ -86,15 +88,47 @@ function countsTotal(columns: ColumnCounts): number {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** A batch on the releases view; the active batch is never closed. */
-export function releaseView(row: ReleaseRow): Release {
+function majorBump(row: ReleaseRow): boolean {
+  return row.previous_major !== null && row.previous_major !== row.major;
+}
+
+/** One batch on the releases view; only a released batch that is no longer active is closed. */
+export function releaseBatchView(row: ReleaseRow): ReleaseBatch {
   return {
     ...batchRef(row),
-    opened_at: row.created_at,
-    closed_at: row.is_active === 1 ? null : row.next_opened_at,
+    created_at: row.created_at,
+    opened_at: row.activated_at,
+    closed_at: row.is_active === 1 || row.activated_at === null ? null : row.next_activated_at,
     task_count: row.task_count,
-    major_bump: row.previous_major !== null && row.previous_major !== row.major,
+    major_bump: majorBump(row),
+    is_active: row.is_active === 1,
   };
+}
+
+/** The released batches that are no longer active, in the rows' order. */
+export function closedReleases(rows: readonly ReleaseRow[]): Release[] {
+  return rows.flatMap((row) =>
+    row.is_active !== 1 && row.activated_at !== null && row.next_activated_at !== null
+      ? [
+          {
+            ...batchRef(row),
+            opened_at: row.activated_at,
+            closed_at: row.next_activated_at,
+            task_count: row.task_count,
+            major_bump: majorBump(row),
+          },
+        ]
+      : [],
+  );
+}
+
+/** The planned batches, never activated, in the rows' order. */
+export function upcomingReleases(rows: readonly ReleaseRow[]): UpcomingRelease[] {
+  return rows.flatMap((row) =>
+    row.activated_at === null && row.is_active !== 1
+      ? [{ ...batchRef(row), created_at: row.created_at, task_count: row.task_count, major_bump: majorBump(row) }]
+      : [],
+  );
 }
 
 export function activeReleaseView(row: ReleaseRow, counts: ColumnCounts | undefined): ActiveRelease {
@@ -102,7 +136,7 @@ export function activeReleaseView(row: ReleaseRow, counts: ColumnCounts | undefi
   const total = countsTotal(columns);
   return {
     ...batchRef(row),
-    opened_at: row.created_at,
+    opened_at: row.activated_at ?? row.created_at,
     counts: columns,
     total,
     done: columns.done,
@@ -110,10 +144,11 @@ export function activeReleaseView(row: ReleaseRow, counts: ColumnCounts | undefi
   };
 }
 
-export function releaseStatsView(release: Release, revisiTasks: number): ReleaseStats {
+export function releaseStatsView(batch: ReleaseBatch, revisiTasks: number): ReleaseStats {
   return {
-    task_count: release.task_count,
-    duration_days: release.closed_at === null ? null : Math.ceil((release.closed_at - release.opened_at) / DAY_MS),
+    task_count: batch.task_count,
+    duration_days:
+      batch.opened_at === null || batch.closed_at === null ? null : Math.ceil((batch.closed_at - batch.opened_at) / DAY_MS),
     revisi_task_count: revisiTasks,
   };
 }

@@ -327,17 +327,38 @@ export function projectsResponseSchemas() {
     created_at: z.number(),
   });
   /**
-   * A batch on the releases (Rilis) view. Batches are ordered by opening
-   * (`created_at`, then version); a batch closes when the next one opens.
+   * A released batch on the releases (Rilis) view. A batch is released when
+   * it becomes active and closes when another batch is activated after it.
+   * Batches run in release order: activated ones by activation, then planned
+   * ones by creation.
    */
   const release = z.strictObject({
     ...batchRef.shape,
+    /** When the batch became active (its latest activation). */
     opened_at: z.number(),
-    /** The next batch's opening; `null` while no later batch exists, and for the active batch. */
+    /** When the next batch was activated. */
+    closed_at: z.number(),
+    task_count: z.number(),
+    /** The major version differs from the previous batch's in release order; `false` for the first batch. */
+    major_bump: z.boolean(),
+  });
+  /** A planned batch: opened without being activated, so not released yet. */
+  const upcomingRelease = z.strictObject({
+    ...batchRef.shape,
+    created_at: z.number(),
+    task_count: z.number(),
+    major_bump: z.boolean(),
+  });
+  const releaseBatch = z.strictObject({
+    ...batchRef.shape,
+    created_at: z.number(),
+    /** `null` for a planned batch that was never active. */
+    opened_at: z.number().nullable(),
+    /** `null` for the active batch and for a planned one. */
     closed_at: z.number().nullable(),
     task_count: z.number(),
-    /** The major version differs from the previous batch's; `false` for the first batch. */
     major_bump: z.boolean(),
+    is_active: z.boolean(),
   });
   const activeRelease = z.strictObject({
     ...batchRef.shape,
@@ -392,6 +413,8 @@ export function projectsResponseSchemas() {
     activityEntry: activity,
     release,
     activeRelease,
+    upcomingRelease,
+    releaseBatch,
     releaseStats,
     changelogEntry,
     contributor,
@@ -429,13 +452,15 @@ export function projectsResponseSchemas() {
     releases: success(
       z.strictObject({
         active: activeRelease.nullable(),
-        /** Every batch but the active one, newest first. */
+        /** Released batches that are no longer active, latest activation first. */
         closed: z.array(release),
+        /** Planned batches, never activated, oldest first. */
+        upcoming: z.array(upcomingRelease),
       }),
     ),
     releaseDetail: success(
       z.strictObject({
-        batch: z.strictObject({ ...release.shape, is_active: z.boolean() }),
+        batch: releaseBatch,
         stats: releaseStats,
         /** The batch's tasks, latest version first. */
         changelog: z.array(changelogEntry),
@@ -465,6 +490,8 @@ export type TaskAttachment = Infer<'attachment'>;
 export type ProjectActivity = Infer<'activityEntry'>;
 export type Release = Infer<'release'>;
 export type ActiveRelease = Infer<'activeRelease'>;
+export type UpcomingRelease = Infer<'upcomingRelease'>;
+export type ReleaseBatch = Infer<'releaseBatch'>;
 export type ReleaseStats = Infer<'releaseStats'>;
 export type ChangelogEntry = Infer<'changelogEntry'>;
 export type ReleaseContributor = Infer<'contributor'>;

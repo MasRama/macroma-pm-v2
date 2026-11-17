@@ -43,6 +43,7 @@ export type {
   ProjectsError,
   ProjectSummary as ProjectSummaryData,
   Release,
+  ReleaseBatch,
   ReleaseContributor,
   ReleaseStats,
   Task,
@@ -51,6 +52,7 @@ export type {
   TaskComment as TaskCommentData,
   TaskDetail,
   TaskLog,
+  UpcomingRelease,
   UpdateProjectInput,
   UpdateTaskInput,
 } from '../contract';

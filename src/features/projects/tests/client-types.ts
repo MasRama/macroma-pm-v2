@@ -19,9 +19,10 @@ export async function projectsRouteTypes(): Promise<void> {
 
   const releases = await (await projects[':id'].releases.$get({ param: { id: 'p' } })).json();
   if (releases.success) {
-    const closedAt: number | null = releases.data.closed[0].closed_at;
+    const closedAt: number = releases.data.closed[0].closed_at;
     const progress: number | undefined = releases.data.active?.progress;
-    void [closedAt, progress];
+    const planned: number = releases.data.upcoming[0].created_at;
+    void [closedAt, progress, planned];
   }
   const release = await (await projects[':id'].releases[':batchId'].$get({ param: { id: 'p', batchId: 'b' } })).json();
   if (release.success) {

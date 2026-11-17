@@ -36,7 +36,8 @@ describe('projects web client contract', () => {
     const second = schemas.batchSaved.parse(await client.createBatch(id, { bump_major: true })).data.batch;
     schemas.batchSaved.parse(await client.activateBatch(id, second.id));
     schemas.batches.parse(await client.batches(id));
-    expect(schemas.releases.parse(await client.releases(id)).data.active?.id).toBe(second.id);
+    const releases = schemas.releases.parse(await client.releases(id)).data;
+    expect([releases.active?.id, releases.closed.map((entry) => entry.id), releases.upcoming]).toEqual([second.id, [batch.id], []]);
 
     const task = schemas.taskSaved.parse(
       await client.createTask(id, { title: 'Contract task', priority: 'high', assignee_id: teammate.id, batch_id: batch.id }),
