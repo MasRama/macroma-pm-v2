@@ -879,6 +879,11 @@ onUnmounted(() => stopEditing?.());
   text-align: right;
   white-space: nowrap;
 }
+/* Centre the text button and the icon-only trash button on each other; on the
+   baseline the text one sits a few pixels lower. */
+.table__acts > * {
+  vertical-align: middle;
+}
 .table__acts > * + * {
   margin-left: 6px;
 }
@@ -1139,9 +1144,18 @@ onUnmounted(() => stopEditing?.());
     grid-column: 1 / 4;
     grid-row: 1;
   }
-  .table__acts {
+  /* `.table td` above makes cells blocks; the actions are a flex row instead,
+     so Edit and the trash button sit centred on one line. */
+  .table .table__acts {
     grid-column: 4;
     grid-row: 1;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+  }
+  .table__acts > * + * {
+    margin-left: 0;
   }
   .table__phone {
     grid-column: 1;
