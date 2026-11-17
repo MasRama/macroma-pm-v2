@@ -39,8 +39,7 @@ export function createNotificationRoutes(host: NotificationsServerHost) {
         );
       }
       if (owner !== actor.id) return forbidden(context, 'This notification belongs to another account');
-      markRead(id);
-      announceNotifications([actor.id]);
+      if (markRead(id)) announceNotifications([actor.id]);
       return context.json({ success: true as const, message: 'Marked as read' } satisfies NotificationsMarkSuccess);
     });
 }

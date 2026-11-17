@@ -80,8 +80,9 @@ export function insertNotification(input: {
   return fromRow(row);
 }
 
-export function markRead(id: string, now = Date.now()): void {
-  getDatabase().prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL').run(now, id);
+/** Marks one notification read; returns whether it was unread. */
+export function markRead(id: string, now = Date.now()): boolean {
+  return getDatabase().prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL').run(now, id).changes > 0;
 }
 
 export function markAllRead(userId: string, now = Date.now()): number {
