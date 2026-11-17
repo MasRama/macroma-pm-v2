@@ -20,6 +20,8 @@ import type {
   ProjectSavedResponse,
   ProjectsDoneResponse,
   ProjectsResponse,
+  ReleaseDetailResponse,
+  ReleasesResponse,
   TaskDetailResponse,
   TaskLogsResponse,
   TaskMovedResponse,
@@ -52,6 +54,10 @@ export interface ProjectsClient {
   batches(id: string): Promise<BatchesResponse>;
   createBatch(id: string, input: CreateBatchInput): Promise<BatchSavedResponse>;
   activateBatch(id: string, batchId: string): Promise<BatchSavedResponse>;
+  /** The releases view: the active batch's progress and every other batch, newest first. */
+  releases(id: string): Promise<ReleasesResponse>;
+  /** One batch's changelog, stats and contributors. */
+  release(id: string, batchId: string): Promise<ReleaseDetailResponse>;
   /** The board: every task of the project, or of one batch. */
   tasks(id: string, query?: BoardQuery): Promise<TasksResponse>;
   createTask(id: string, input: CreateTaskInput): Promise<TaskSavedResponse>;
@@ -105,6 +111,8 @@ export function createProjectsClient(options: ProjectsClientOptions = {}): Proje
     createBatch: async (id, input) => (await projects[':id'].batches.$post({ param: { id }, json: input })).json(),
     activateBatch: async (id, batchId) =>
       (await projects[':id'].batches[':batchId'].activate.$patch({ param: { id, batchId } })).json(),
+    releases: async (id) => (await projects[':id'].releases.$get({ param: { id } })).json(),
+    release: async (id, batchId) => (await projects[':id'].releases[':batchId'].$get({ param: { id, batchId } })).json(),
     tasks: async (id, query = {}) => (await projects[':id'].tasks.$get({ param: { id }, query })).json(),
     createTask: async (id, input) => (await projects[':id'].tasks.$post({ param: { id }, json: input })).json(),
     task: async (taskId) => (await tasks[':id'].$get({ param: { id: taskId } })).json(),

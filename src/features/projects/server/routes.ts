@@ -32,6 +32,8 @@ import {
   type ProjectsRefusalCode,
   type ProjectsSuccess,
   type ProjectSummary,
+  type ReleaseDetailSuccess,
+  type ReleasesSuccess,
   type TaskDetailSuccess,
   type TaskLogsSuccess,
   type TaskMovedSuccess,
@@ -41,15 +43,19 @@ import {
 import { getDatabase } from '../../../shared/database';
 import { createGuard, forbidden, jsonInput, queryInput, type RoutePolicy } from '../../../shared/security';
 import {
+  activeReleaseView,
   attachmentView,
   batchRef,
   batchView,
   canOpenProject,
+  changelogView,
   commentView,
   logView,
   personRefs,
   projectAudience,
   projectAudiences,
+  releaseStatsView,
+  releaseView,
   taskView,
   taskViews,
 } from './access';
@@ -61,6 +67,8 @@ import {
   activeBatches,
   addAttachments,
   addProjectMember,
+  changelogRows,
+  contributorCounts,
   countsByBatch,
   createBatch,
   createComment,
@@ -83,9 +91,11 @@ import {
   listComments,
   listLogs,
   listProjectsFor,
+  listReleases,
   listTasks,
   moveTask,
   removeProjectMember,
+  revisiTaskCount,
   taskCountsByProject,
   unassignTasks,
   updateProject,
@@ -363,6 +373,54 @@ export function createProjectRoutes(host: ProjectsServerHost) {
         message: 'Batch activated',
         data: { batch: savedBatch(activated) },
       } satisfies BatchSavedSuccess);
+    })
+    .get('/:id/releases', guard.signedIn, projectAccess('member'), (context) => {
+      const project = current(context);
+      const releases = listReleases(project.id);
+      const active = releases.find((row) => row.is_active === 1);
+      return context.json({
+        success: true as const,
+        message: 'OK',
+        data: {
+          active: active ? activeReleaseView(active, countsByBatch(project.id).get(active.id)) : null,
+          closed: releases.filter((row) => row.is_active !== 1).map(releaseView),
+        },
+      } satisfies ReleasesSuccess);
+    })
+    .get('/:id/releases/:batchId', guard.signedIn, projectAccess('member'), (context) => {
+      const project = current(context);
+      const batchId = context.req.param('batchId');
+      const row = listReleases(project.id).find((release) => release.id === batchId);
+      if (!row) return batchNotFound(context);
+      const release = releaseView(row);
+      const changelog = changelogRows(row.id);
+      const contributions = contributorCounts(row.id);
+      // One account lookup for the changelog's assignees and the contributors.
+      const ids = new Set([...changelog.flatMap((entry) => entry.assignee_id ?? []), ...contributions.map((entry) => entry.user_id)]);
+      const accounts = new Map(host.findAccountsByIds([...ids]).map((account) => [account.id, account]));
+      const people = new Map(
+        [...accounts.values()].map((account) => [account.id, { id: account.id, name: account.name, avatar: account.avatar }]),
+      );
+      const contributors = contributions
+        .flatMap(({ user_id, task_count }) => {
+          const account = accounts.get(user_id);
+          if (!account) return [];
+          return [{ user: { id: account.id, name: account.name, email: account.email, avatar: account.avatar }, task_count }];
+        })
+        .sort(
+          (left, right) =>
+            right.task_count - left.task_count || left.user.name.localeCompare(right.user.name) || left.user.id.localeCompare(right.user.id),
+        );
+      return context.json({
+        success: true as const,
+        message: 'OK',
+        data: {
+          batch: { ...release, is_active: row.is_active === 1 },
+          stats: releaseStatsView(release, revisiTaskCount(row.id)),
+          changelog: changelog.map((entry) => changelogView(entry, people)),
+          contributors,
+        },
+      } satisfies ReleaseDetailSuccess);
     })
     .get('/:id/tasks', guard.signedIn, projectAccess('member'), queryInput(boardQuerySchema), (context) => {
       const project = current(context);

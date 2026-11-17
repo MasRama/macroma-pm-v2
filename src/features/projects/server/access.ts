@@ -1,4 +1,18 @@
-import type { Batch, BatchRef, ColumnCounts, Project, ProjectPersonRef, Task, TaskAttachment, TaskComment, TaskLog } from '../contract';
+import type {
+  ActiveRelease,
+  Batch,
+  BatchRef,
+  ChangelogEntry,
+  ColumnCounts,
+  Project,
+  ProjectPersonRef,
+  Release,
+  ReleaseStats,
+  Task,
+  TaskAttachment,
+  TaskComment,
+  TaskLog,
+} from '../contract';
 import type { ProjectsServerHost } from './host';
 import {
   directMemberIdsByProject,
@@ -6,7 +20,9 @@ import {
   emptyCounts,
   type AttachmentRow,
   type BatchRow,
+  type ChangelogRow,
   type CommentRow,
+  type ReleaseRow,
   type TaskLogRow,
   type TaskRow,
 } from './repository';
@@ -47,7 +63,7 @@ export function personRefs(host: ProjectsServerHost, userIds: Iterable<string | 
   return new Map(host.findAccountsByIds(ids).map((person) => [person.id, { id: person.id, name: person.name, avatar: person.avatar }]));
 }
 
-export function batchRef(row: BatchRow): BatchRef {
+export function batchRef(row: Pick<BatchRow, 'id' | 'major' | 'minor' | 'label'>): BatchRef {
   return { id: row.id, major: row.major, minor: row.minor, label: row.label };
 }
 
@@ -60,7 +76,56 @@ export function batchView(row: BatchRow, counts: ColumnCounts | undefined): Batc
     created_at: row.created_at,
     updated_at: row.updated_at,
     counts: columns,
-    total: columns.backlog + columns.ongoing + columns.revisi + columns.review + columns.done,
+    total: countsTotal(columns),
+  };
+}
+
+function countsTotal(columns: ColumnCounts): number {
+  return columns.backlog + columns.ongoing + columns.revisi + columns.review + columns.done;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A batch on the releases view; the active batch is never closed. */
+export function releaseView(row: ReleaseRow): Release {
+  return {
+    ...batchRef(row),
+    opened_at: row.created_at,
+    closed_at: row.is_active === 1 ? null : row.next_opened_at,
+    task_count: row.task_count,
+    major_bump: row.previous_major !== null && row.previous_major !== row.major,
+  };
+}
+
+export function activeReleaseView(row: ReleaseRow, counts: ColumnCounts | undefined): ActiveRelease {
+  const columns = counts ?? emptyCounts();
+  const total = countsTotal(columns);
+  return {
+    ...batchRef(row),
+    opened_at: row.created_at,
+    counts: columns,
+    total,
+    done: columns.done,
+    progress: total === 0 ? 0 : Math.round((columns.done * 100) / total),
+  };
+}
+
+export function releaseStatsView(release: Release, revisiTasks: number): ReleaseStats {
+  return {
+    task_count: release.task_count,
+    duration_days: release.closed_at === null ? null : Math.ceil((release.closed_at - release.opened_at) / DAY_MS),
+    revisi_task_count: revisiTasks,
+  };
+}
+
+export function changelogView(row: ChangelogRow, people: Map<string, ProjectPersonRef>): ChangelogEntry {
+  return {
+    task_id: row.id,
+    title: row.title,
+    priority: row.priority,
+    version: { major: row.version_major, minor: row.version_minor, patch: row.version_patch },
+    assignee: row.assignee_id ? (people.get(row.assignee_id) ?? null) : null,
+    column_id: row.column_id,
   };
 }
 

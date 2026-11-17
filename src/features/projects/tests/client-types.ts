@@ -17,6 +17,19 @@ export async function projectsRouteTypes(): Promise<void> {
     void counts;
   }
 
+  const releases = await (await projects[':id'].releases.$get({ param: { id: 'p' } })).json();
+  if (releases.success) {
+    const closedAt: number | null = releases.data.closed[0].closed_at;
+    const progress: number | undefined = releases.data.active?.progress;
+    void [closedAt, progress];
+  }
+  const release = await (await projects[':id'].releases[':batchId'].$get({ param: { id: 'p', batchId: 'b' } })).json();
+  if (release.success) {
+    const duration: number | null = release.data.stats.duration_days;
+    const email: string = release.data.contributors[0].user.email;
+    void [duration, email];
+  }
+
   // @ts-expect-error an edit carries the revision it was based on
   await projects[':id'].$patch({ param: { id: 'p' }, json: { name: 'No revision' } });
   // @ts-expect-error a comment is text under `content`
