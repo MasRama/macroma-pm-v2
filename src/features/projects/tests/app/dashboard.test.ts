@@ -116,8 +116,9 @@ describe('dashboard', () => {
           name: 'Alpha',
           workspace_id: workspaceId,
           active_batch: { id: batchId, major: 0, minor: 1, label: 'Sprint' },
-          counts: { backlog: 1, ongoing: 1, revisi: 1, review: 0, done: 1 },
-          total: 4,
+          // The task created before Alpha's first batch moved into it.
+          counts: { backlog: 2, ongoing: 1, revisi: 1, review: 0, done: 1 },
+          total: 5,
           done: 1,
         },
         {
