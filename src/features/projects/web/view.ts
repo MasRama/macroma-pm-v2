@@ -82,6 +82,15 @@ export interface ProjectSummary {
 
 export interface TaskLogEntry {
   id: string;
+  /**
+   * `move`: the task went from one column to another (or was created).
+   * `adopt`: the project's first Bump versi took this batch-less task into the
+   * new batch. The API marks it `kind: "batch_adopted"`; entries without a
+   * `kind` show it by the same column on both sides, which a real move never
+   * has (same-column moves are refused).
+   * `note`: a note on the task (`kind: "note"`), with no move to show.
+   */
+  kind: 'move' | 'adopt' | 'note';
   version: TaskVersion;
   from: TaskStatus | null;
   to: TaskStatus;
@@ -313,9 +322,17 @@ export function toTaskCard(row: TaskRow): TaskCardData {
   };
 }
 
+function taskLogKind(row: TaskLogRow): TaskLogEntry['kind'] {
+  if (row.kind === 'batch_adopted') return 'adopt';
+  if (row.kind === 'note') return 'note';
+  if (row.kind === undefined && row.column_from !== null && row.column_from === row.column_to) return 'adopt';
+  return 'move';
+}
+
 export function toTaskLog(row: TaskLogRow): TaskLogEntry {
   return {
     id: row.id,
+    kind: taskLogKind(row),
     version: parseTaskVersion(row.version),
     from: row.column_from,
     to: row.column_to,

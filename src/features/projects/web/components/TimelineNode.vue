@@ -2,9 +2,14 @@
 import { formatStamp, UiAvatar, UiIcon } from '../../../../shared/ui';
 import StatusBlock from './StatusBlock.vue';
 import VersionText from './VersionText.vue';
+import { formatVersion } from '../format';
 import type { TaskLogEntry } from '../view';
 
-/** One version in a task's history: square node (filled when latest), from → to, timestamp, note card. */
+/**
+ * One version in a task's history: square node (filled when latest), from → to,
+ * timestamp, note card. An entry where the first Bump versi took the task into
+ * its batch reads "Masuk batch v0.1" instead, with no move and no note.
+ */
 withDefaults(defineProps<{ entry: TaskLogEntry; latest?: boolean; last?: boolean }>(), { latest: false, last: false });
 </script>
 
@@ -17,7 +22,10 @@ withDefaults(defineProps<{ entry: TaskLogEntry; latest?: boolean; last?: boolean
     <div class="node__body">
       <div class="node__head">
         <VersionText class="node__ver" :class="{ 'node__ver--latest': latest }" :version="entry.version" />
-        <div class="node__move">
+        <div v-if="entry.kind === 'adopt'" class="node__move" data-testid="log-adopt">
+          <span class="node__created">Masuk batch <span class="node__batch mono">{{ formatVersion({ major: entry.version.major, minor: entry.version.minor }) }}</span></span>
+        </div>
+        <div v-else-if="entry.kind === 'move'" class="node__move">
           <template v-if="entry.from">
             <StatusBlock :status="entry.from" />
             <span class="node__arrow"><UiIcon name="arrow" :size="14" :stroke="2.2" /></span>
@@ -27,7 +35,7 @@ withDefaults(defineProps<{ entry: TaskLogEntry; latest?: boolean; last?: boolean
         </div>
         <time class="node__when" :datetime="entry.at">{{ formatStamp(entry.at) }}</time>
       </div>
-      <div class="node__note">
+      <div v-if="entry.kind !== 'adopt'" class="node__note">
         <UiAvatar :person="entry.author" :size="22" />
         <p><b>{{ entry.author.name }}</b> <span>{{ entry.note }}</span></p>
       </div>
@@ -99,6 +107,10 @@ withDefaults(defineProps<{ entry: TaskLogEntry; latest?: boolean; last?: boolean
   font-size: 12px;
   font-weight: 600;
   color: var(--mute);
+}
+.node__batch {
+  font-weight: 700;
+  color: var(--ink);
 }
 .node__when {
   margin-left: auto;

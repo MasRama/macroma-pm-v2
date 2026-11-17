@@ -108,11 +108,11 @@ export const detail: TaskDetailData = {
   createdBy: azka,
   updatedAt: at(17, '10:12'),
   logs: [
-    { id: 'l5', version: v(4), from: 'revisi', to: 'ongoing', note: 'Fix: input kode sekarang auto-uppercase, timeout dinaikkan ke 60 detik.', author: ren, at: at(17, '10:12') },
-    { id: 'l4', version: v(3), from: 'review', to: 'revisi', note: 'Kode expired sebelum user selesai ngetik di Android lama. Tolong cek timeout.', author: azka, at: at(16, '16:40') },
-    { id: 'l3', version: v(2), from: 'ongoing', to: 'review', note: 'Pairing code jalan di Chrome + Safari. Siap direview.', author: ren, at: at(16, '11:05') },
-    { id: 'l2', version: v(1), from: 'backlog', to: 'ongoing', note: 'Mulai dikerjakan, pakai endpoint pairing baru dari Baileys.', author: ren, at: at(13, '09:30') },
-    { id: 'l1', version: v(0), from: null, to: 'backlog', note: 'Task dibuat di batch v2.3.', author: azka, at: at(4, '14:02') },
+    { id: 'l5', kind: 'move', version: v(4), from: 'revisi', to: 'ongoing', note: 'Fix: input kode sekarang auto-uppercase, timeout dinaikkan ke 60 detik.', author: ren, at: at(17, '10:12') },
+    { id: 'l4', kind: 'move', version: v(3), from: 'review', to: 'revisi', note: 'Kode expired sebelum user selesai ngetik di Android lama. Tolong cek timeout.', author: azka, at: at(16, '16:40') },
+    { id: 'l3', kind: 'move', version: v(2), from: 'ongoing', to: 'review', note: 'Pairing code jalan di Chrome + Safari. Siap direview.', author: ren, at: at(16, '11:05') },
+    { id: 'l2', kind: 'move', version: v(1), from: 'backlog', to: 'ongoing', note: 'Mulai dikerjakan, pakai endpoint pairing baru dari Baileys.', author: ren, at: at(13, '09:30') },
+    { id: 'l1', kind: 'move', version: v(0), from: null, to: 'backlog', note: 'Task dibuat di batch v2.3.', author: azka, at: at(4, '14:02') },
   ],
 };
 export const detailComments: TaskComment[] = Array.from({ length: 6 }, (_, index) => ({
