@@ -357,12 +357,14 @@ export function createProjectRoutes(host: ProjectsServerHost) {
       const project = current(context);
       const input = context.req.valid('json');
       if (input.activate && project.owner_id !== actor.id) return forbidden(context, 'Only the project owner can activate a batch');
-      const batch = createBatch(
+      const { batch, adopted } = createBatch(
         project.id,
         { label: input.label ?? null, bumpMajor: input.bump_major === true, activate: input.activate === true },
         actor.id,
       );
-      announceProjectChange(projectAudience(host, project));
+      const audience = projectAudience(host, project);
+      announceProjectChange(audience);
+      if (adopted > 0) announceBoardChange(audience);
       return context.json(
         { success: true as const, message: 'Batch created', data: { batch: savedBatch(batch) } } satisfies BatchSavedSuccess,
         201,

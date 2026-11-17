@@ -107,7 +107,7 @@ const TASK_SELECT = `SELECT t.id, t.project_id, t.batch_id, t.title, t.descripti
     COALESCE(a.attachment_count, 0) AS attachment_count
   FROM tasks t
   LEFT JOIN (
-    SELECT task_id, COUNT(*) AS revisi_count FROM task_logs WHERE column_to = 'revisi' GROUP BY task_id
+    SELECT task_id, COUNT(*) AS revisi_count FROM task_logs WHERE column_to = 'revisi' AND column_from IS NOT column_to GROUP BY task_id
   ) r ON r.task_id = t.id
   LEFT JOIN (SELECT task_id, COUNT(*) AS comment_count FROM task_comments GROUP BY task_id) c ON c.task_id = t.id
   LEFT JOIN (SELECT task_id, COUNT(*) AS attachment_count FROM task_attachments GROUP BY task_id) a ON a.task_id = t.id`;
@@ -424,6 +424,12 @@ export function countsByBatchIds(batchIds: readonly string[]): Map<string, Colum
   return counts;
 }
 
+/**
+ * A task log that moved the task (or created it), not a version entry that
+ * stayed in its column, like a first batch adopting it.
+ */
+const MOVED = 'l.column_from IS NOT l.column_to';
+
 /** Tasks of the projects now in `done` whose latest move into `done` falls in [from, to). */
 export function doneBetween(projectIds: readonly string[], from: number, to: number): number {
   if (projectIds.length === 0) return 0;
@@ -432,8 +438,8 @@ export function doneBetween(projectIds: readonly string[], from: number, to: num
       .prepare(
         `SELECT COUNT(*) AS count FROM tasks t
          WHERE t.project_id IN (${placeholders(projectIds)}) AND t.column_id = 'done'
-           AND (SELECT MAX(l.created_at) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'done') >= ?
-           AND (SELECT MAX(l.created_at) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'done') < ?`,
+           AND (SELECT MAX(l.created_at) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'done' AND ${MOVED}) >= ?
+           AND (SELECT MAX(l.created_at) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'done' AND ${MOVED}) < ?`,
       )
       .get(...projectIds, from, to) as { count: number }
   ).count;
@@ -460,7 +466,7 @@ export function revisiRepeatedCount(projectIds: readonly string[]): number {
       .prepare(
         `SELECT COUNT(*) AS count FROM tasks t
          WHERE t.project_id IN (${placeholders(projectIds)}) AND t.column_id = 'revisi'
-           AND (SELECT COUNT(*) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'revisi') > 1`,
+           AND (SELECT COUNT(*) FROM task_logs l WHERE l.task_id = t.id AND l.column_to = 'revisi' AND ${MOVED}) > 1`,
       )
       .get(...projectIds) as { count: number }
   ).count;
@@ -550,7 +556,7 @@ export function revisiTaskCount(batchId: string): number {
     getDatabase()
       .prepare(
         `SELECT COUNT(DISTINCT l.task_id) AS count FROM task_logs l JOIN tasks t ON t.id = l.task_id
-         WHERE t.batch_id = ? AND l.column_to = 'revisi'`,
+         WHERE t.batch_id = ? AND l.column_to = 'revisi' AND ${MOVED}`,
       )
       .get(batchId) as { count: number }
   ).count;
@@ -600,15 +606,16 @@ function setActiveBatch(projectId: string, batchId: string, now: number): void {
 /**
  * Opens the next batch: the next minor version, or the next major one with
  * `bumpMajor`, with its own patch counter at zero. With `activate`, the
- * batch also becomes the active one.
+ * batch also becomes the active one. A project's first batch adopts the
+ * tasks created before it (see `adoptBatchlessTasks`); `adopted` counts them.
  */
 export function createBatch(
   projectId: string,
   input: { label: string | null; bumpMajor: boolean; activate: boolean },
   actorId: string,
-): BatchRow {
+): { batch: BatchRow; adopted: number } {
   const database = getDatabase();
-  return database.transaction((): BatchRow => {
+  return database.transaction((): { batch: BatchRow; adopted: number } => {
     const latest = database
       .prepare('SELECT major, minor FROM project_batches WHERE project_id = ? ORDER BY major DESC, minor DESC LIMIT 1')
       .get(projectId) as { major: number; minor: number } | undefined;
@@ -631,6 +638,7 @@ export function createBatch(
          VALUES (@id, @project_id, @major, @minor, @label, @is_active, @created_at, @updated_at)`,
       )
       .run(batch);
+    const adopted = latest ? 0 : adoptBatchlessTasks(projectId, batch, actorId, now);
     logActivity({
       projectId,
       eventType: 'batch.created',
@@ -638,6 +646,7 @@ export function createBatch(
       actorId,
       batchId: batch.id,
       batchVersion: batchVersion(batch),
+      meta: adopted > 0 ? { adopted_task_count: adopted } : null,
     });
     if (input.activate) {
       setActiveBatch(projectId, batch.id, now);
@@ -651,8 +660,45 @@ export function createBatch(
         batchVersion: batchVersion(batch),
       });
     }
-    return batch;
+    return { batch, adopted };
   })();
+}
+
+/**
+ * Moves every task the project created before its first batch (batch-less,
+ * v0.0.x) into that batch, oldest version first. Each becomes a new version
+ * of the batch (its next patch, as `nextVersion` takes it) with a version-log
+ * entry that stays in its column, and its revision goes up. Runs inside
+ * `createBatch`'s transaction.
+ */
+function adoptBatchlessTasks(projectId: string, batch: BatchRow, actorId: string, now: number): number {
+  const database = getDatabase();
+  const tasks = database
+    .prepare(
+      `SELECT id, column_id FROM tasks WHERE project_id = ? AND batch_id IS NULL
+       ORDER BY version_major, version_minor, version_patch, created_at, id`,
+    )
+    .all(projectId) as Array<{ id: string; column_id: TaskColumn }>;
+  const update = database.prepare(
+    `UPDATE tasks SET batch_id = ?, version_major = ?, version_minor = ?, version_patch = ?, revision = revision + 1, updated_at = ?
+     WHERE id = ?`,
+  );
+  const note = `Moved into batch ${versionString(batch.major, batch.minor)}`;
+  for (const task of tasks) {
+    const version = nextVersion(projectId, batch.id, now);
+    update.run(batch.id, version.major, version.minor, version.patch, now, task.id);
+    insertLog({
+      id: randomUUID(),
+      task_id: task.id,
+      version: versionString(version.major, version.minor, version.patch),
+      column_from: task.column_id,
+      column_to: task.column_id,
+      note,
+      created_by: actorId,
+      created_at: now,
+    });
+  }
+  return tasks.length;
 }
 
 /** Makes the batch the project's only active one. */
