@@ -19,6 +19,7 @@
     "setup": "node -r ts-node/register -r tsconfig-paths/register scripts/setup.ts",
     "bootstrap:admin": "node -r ts-node/register -r tsconfig-paths/register scripts/bootstrap-admin.ts",
     "db:backup": "node -r ts-node/register -r tsconfig-paths/register scripts/database.ts db:backup",
+    "import:v1": "node -r ts-node/register -r tsconfig-paths/register scripts/import-v1.ts",
     "db:check": "node -r ts-node/register -r tsconfig-paths/register scripts/database.ts db:check",
     "test": "vitest run",
     "test:fast": "vitest run --project tooling --project pure --project app --project browser",

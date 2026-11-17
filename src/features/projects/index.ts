@@ -5,6 +5,7 @@ export {
   PROJECTS_BOARD_CHANGED_EVENT,
   PROJECTS_CHANGED_EVENT,
   PROJECTS_REFUSAL_CODES,
+  projectsResponseSchemas,
   TASK_ATTACHMENT_ALLOWED_MIME_TYPES,
   TASK_ATTACHMENT_MAX_FILE_SIZE_BYTES,
   TASK_ATTACHMENT_MAX_FILE_SIZE_MB,
@@ -23,3 +24,6 @@ export {
   TASK_ATTACHMENT_ROUTE_POLICIES,
 } from './server/routes';
 export { detachWorkspace, forgetAccounts, workspaceMembersLeft, workspaceProjectCounts } from './server/membership';
+export { countProjectRows, importProjectRows } from './server/repository';
+export type { ProjectImport } from './server/repository';
+export { taskAttachmentStorageKey } from './server/attachments';

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getDatabase } from '../../../shared/database';
 import { syncUserRoles } from './access';
 import { accountsChanged, rolesChanged, sessionsChanged } from './live';
@@ -295,4 +296,49 @@ export function deleteAccounts(userIds: string[]): number {
   sessionsChanged(userIds);
   if (deleted > 0) rolesChanged();
   return deleted;
+}
+
+/** An account carried over from another installation, as it was there. */
+export interface ImportedAccount {
+  id: string;
+  name: AccountRecord['name'];
+  email: AccountRecord['email'];
+  /** A hash in this feature's `salt:hash` PBKDF2 format, so the account keeps its password. */
+  passwordHash: string;
+  avatar: AccountRecord['avatar'];
+  phone: AccountRecord['phone'];
+  verified: AccountRecord['verified'];
+  createdAt: number;
+  updatedAt: number;
+  roleIds: readonly string[];
+}
+
+/**
+ * Writes imported accounts with their ids, hashes, timestamps and roles. It
+ * runs inside the caller's transaction and announces nothing: no page is
+ * open for accounts that did not exist a moment ago.
+ */
+export function importAccounts(accounts: readonly ImportedAccount[]): void {
+  const database = getDatabase();
+  const insertAccount = database.prepare(
+    `INSERT INTO users (id, name, email, password, avatar, phone, verified, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const grant = database.prepare('INSERT INTO user_roles (id, user_id, role_id, created_at) VALUES (?, ?, ?, ?)');
+  database.transaction(() => {
+    for (const account of accounts) {
+      insertAccount.run(
+        account.id,
+        account.name,
+        account.email,
+        account.passwordHash,
+        account.avatar,
+        account.phone,
+        account.verified ? 1 : 0,
+        account.createdAt,
+        account.updatedAt,
+      );
+      for (const roleId of new Set(account.roleIds)) grant.run(randomUUID(), account.id, roleId, account.createdAt);
+    }
+  })();
 }

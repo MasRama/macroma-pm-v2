@@ -323,3 +323,50 @@ export function forgetAccountRows(userIds: readonly string[]): { workspaces: str
   database.prepare(`DELETE FROM workspace_messages WHERE user_id IN (${list})`).run(...userIds);
   return { workspaces: owned, invitationTokens: [...tokens] };
 }
+
+/** Workspaces, members, invitations and chat carried over from another installation, as table rows. */
+export interface WorkspaceImport {
+  workspaces: ReadonlyArray<Omit<Workspace, 'revision'>>;
+  members: ReadonlyArray<MemberRow & { id: string; workspace_id: string }>;
+  invitations: readonly InvitationRow[];
+  messages: ReadonlyArray<MessageRow & { updated_at: number }>;
+}
+
+/** How many rows the Workspaces tables hold; an import only goes into empty ones. */
+export function countWorkspaceRows(): number {
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM workspaces) + (SELECT COUNT(*) FROM workspace_members)
+           + (SELECT COUNT(*) FROM workspace_invitations) + (SELECT COUNT(*) FROM workspace_messages) AS count`,
+      )
+      .get() as { count: number }
+  ).count;
+}
+
+/** Writes imported rows with their ids and timestamps, inside the caller's transaction; announces nothing. */
+export function importWorkspaceRows(rows: WorkspaceImport): void {
+  const database = getDatabase();
+  const workspace = database.prepare(
+    `INSERT INTO workspaces (id, name, description, owner_id, created_at, updated_at)
+     VALUES (@id, @name, @description, @owner_id, @created_at, @updated_at)`,
+  );
+  const member = database.prepare(
+    `INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at)
+     VALUES (@id, @workspace_id, @user_id, @role, @created_at)`,
+  );
+  const invitation = database.prepare(
+    `INSERT INTO workspace_invitations (id, workspace_id, inviter_id, invitee_email, token, status, expires_at, created_at, updated_at)
+     VALUES (@id, @workspace_id, @inviter_id, @invitee_email, @token, @status, @expires_at, @created_at, @updated_at)`,
+  );
+  const message = database.prepare(
+    `INSERT INTO workspace_messages (id, workspace_id, user_id, message, created_at, updated_at)
+     VALUES (@id, @workspace_id, @user_id, @message, @created_at, @updated_at)`,
+  );
+  database.transaction(() => {
+    for (const row of rows.workspaces) workspace.run(row);
+    for (const row of rows.members) member.run(row);
+    for (const row of rows.invitations) invitation.run(row);
+    for (const row of rows.messages) message.run(row);
+  })();
+}

@@ -1034,3 +1034,119 @@ export function deleteAttachment(task: TaskRow, attachment: AttachmentRow, actor
     });
   })();
 }
+
+/**
+ * Projects and everything in them carried over from another installation, as
+ * table rows. The counters and activation times are derived on import.
+ */
+export interface ProjectImport {
+  projects: ReadonlyArray<Omit<Project, 'revision'>>;
+  members: ReadonlyArray<MemberRow & { id: string; project_id: string }>;
+  batches: readonly BatchRow[];
+  tasks: ReadonlyArray<Omit<TaskRow, 'revision' | 'revisi_count' | 'comment_count' | 'attachment_count'>>;
+  taskLogs: readonly TaskLogRow[];
+  activity: readonly ActivityRow[];
+  comments: readonly CommentRow[];
+  attachments: readonly AttachmentRow[];
+}
+
+/** How many rows the Projects tables hold; an import only goes into empty ones. */
+export function countProjectRows(): number {
+  return (
+    getDatabase()
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM project_members) + (SELECT COUNT(*) FROM project_batches)
+           + (SELECT COUNT(*) FROM tasks) + (SELECT COUNT(*) FROM task_logs) + (SELECT COUNT(*) FROM project_activity_logs)
+           + (SELECT COUNT(*) FROM task_comments) + (SELECT COUNT(*) FROM task_attachments) AS count`,
+      )
+      .get() as { count: number }
+  ).count;
+}
+
+/**
+ * Writes imported rows with their ids, versions and timestamps, inside the
+ * caller's transaction, and announces nothing. Then, per project:
+ * - each batch continues after the highest patch its tasks carry in its own
+ *   version line, and the project counter after its unbatched v0.0 tasks;
+ * - a batch's `activated_at` is its latest `batch.activated` activity entry.
+ *   A batch without one counts as activated at its creation when it is the
+ *   active batch or was opened before it (the rule of migration 0304), and
+ *   the active batch always ends up with the latest activation.
+ */
+export function importProjectRows(rows: ProjectImport): void {
+  const database = getDatabase();
+  const insert = (table: string, columns: readonly string[]) =>
+    database.prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((column) => `@${column}`).join(', ')})`);
+  const project = insert('projects', ['id', 'name', 'description', 'owner_id', 'workspace_id', 'created_at', 'updated_at']);
+  const member = insert('project_members', ['id', 'project_id', 'user_id', 'role', 'created_at']);
+  const batch = insert('project_batches', ['id', 'project_id', 'major', 'minor', 'label', 'is_active', 'created_at', 'updated_at']);
+  const task = insert('tasks', [
+    'id', 'project_id', 'batch_id', 'title', 'description', 'priority', 'assignee_id', 'column_id', 'sort_order',
+    'version_major', 'version_minor', 'version_patch', 'created_at', 'updated_at',
+  ]);
+  const taskLog = insert('task_logs', ['id', 'task_id', 'version', 'column_from', 'column_to', 'note', 'created_by', 'created_at']);
+  const activity = insert('project_activity_logs', [
+    'id', 'project_id', 'event_type', 'description', 'actor_id', 'task_id', 'batch_id', 'meta', 'created_at',
+  ]);
+  const comment = insert('task_comments', ['id', 'task_id', 'user_id', 'content', 'created_at', 'updated_at']);
+  const attachment = insert('task_attachments', [
+    'id', 'task_id', 'storage_key', 'name', 'mime_type', 'size', 'uploaded_by', 'created_at', 'updated_at',
+  ]);
+  const counter = database.prepare(
+    `INSERT INTO project_version_counters (project_id, patch_counter, updated_at)
+     SELECT p.id, COALESCE((
+       SELECT MAX(t.version_patch) FROM tasks t
+       WHERE t.project_id = p.id AND t.batch_id IS NULL AND t.version_major = 0 AND t.version_minor = 0
+     ), 0), p.updated_at
+     FROM projects p WHERE p.id = ?`,
+  );
+  const batchCounters = database.prepare(
+    `UPDATE project_batches
+     SET patch_counter = COALESCE((
+       SELECT MAX(t.version_patch) FROM tasks t
+       WHERE t.batch_id = project_batches.id AND t.version_major = project_batches.major AND t.version_minor = project_batches.minor
+     ), 0)
+     WHERE project_id = ?`,
+  );
+  const loggedActivations = database.prepare(
+    `UPDATE project_batches
+     SET activated_at = (
+       SELECT MAX(a.created_at) FROM project_activity_logs a
+       WHERE a.batch_id = project_batches.id AND a.event_type = 'batch.activated'
+     )
+     WHERE project_id = ?`,
+  );
+  const unloggedActivations = database.prepare(
+    `UPDATE project_batches
+     SET activated_at = created_at
+     WHERE project_id = ? AND activated_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM project_batches active
+         WHERE active.project_id = project_batches.project_id AND active.is_active = 1
+           AND (project_batches.created_at, project_batches.major, project_batches.minor) <= (active.created_at, active.major, active.minor)
+       )`,
+  );
+  const activeIsLatest = database.prepare(
+    `UPDATE project_batches
+     SET activated_at = (SELECT MAX(other.activated_at) + 1 FROM project_batches other WHERE other.project_id = project_batches.project_id AND other.id <> project_batches.id)
+     WHERE project_id = ? AND is_active = 1
+       AND activated_at <= (SELECT MAX(other.activated_at) FROM project_batches other WHERE other.project_id = project_batches.project_id AND other.id <> project_batches.id)`,
+  );
+  database.transaction(() => {
+    for (const row of rows.projects) project.run(row);
+    for (const row of rows.members) member.run(row);
+    for (const row of rows.batches) batch.run(row);
+    for (const row of rows.tasks) task.run(row);
+    for (const row of rows.taskLogs) taskLog.run(row);
+    for (const row of rows.activity) activity.run(row);
+    for (const row of rows.comments) comment.run(row);
+    for (const row of rows.attachments) attachment.run(row);
+    for (const { id } of rows.projects) {
+      counter.run(id);
+      batchCounters.run(id);
+      loggedActivations.run(id);
+      unloggedActivations.run(id);
+      activeIsLatest.run(id);
+    }
+  })();
+}

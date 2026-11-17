@@ -10,6 +10,11 @@ import type { ProjectsServerHost } from './host';
 
 const STORAGE_PREFIX = 'task-attachments';
 
+/** Where the image of the attachment `id` is stored. */
+export function taskAttachmentStorageKey(id: string): string {
+  return `${STORAGE_PREFIX}/${id}.webp`;
+}
+
 const IMAGE_MAGIC_BYTES: Record<string, number[]> = {
   'image/jpeg': [0xff, 0xd8, 0xff],
   'image/png': [0x89, 0x50, 0x4e, 0x47],
@@ -90,7 +95,7 @@ export async function storeImages(host: ProjectsServerHost, files: readonly File
         .webp({ quality: 82 })
         .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
         .toBuffer();
-      const storageKey = `${STORAGE_PREFIX}/${id}.webp`;
+      const storageKey = taskAttachmentStorageKey(id);
       await host.assetStorage.put({ key: storageKey, data: image, contentType: 'image/webp' });
       stored.push({ id, storageKey, name, size: image.length });
     } catch {

@@ -6,15 +6,17 @@ export {
   findAccountByEmail,
   findAccountById,
   findAccountsByIds,
+  importAccounts,
   isDuplicateEmailError,
   listAccounts,
   onAccountsDeleted,
   resetAccountPassword,
   updateAccountWithRoles,
 } from './server/accounts';
+export type { ImportedAccount } from './server/accounts';
 export { ensureAdministrator } from './server/administrator';
 export type { AdministratorInput, AdministratorResult } from './server/administrator';
-export { currentUser as getCurrentUser, hashPassword, liveListener, SESSION_COOKIE_NAME } from './server/service';
+export { comparePassword, currentUser as getCurrentUser, hashPassword, liveListener, SESSION_COOKIE_NAME } from './server/service';
 export { resetLoginThrottle } from './server/login-throttle';
 export { AUTH_MAINTENANCE } from './server/maintenance';
 export { cleanupExpiredSessions } from './server/repository';
