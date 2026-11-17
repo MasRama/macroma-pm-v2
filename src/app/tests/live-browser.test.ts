@@ -1298,10 +1298,11 @@ describe('the dashboard in the open tab', () => {
 
     await openTab(owner.cookie, '/dashboard');
     expect(container.querySelector('h1')?.textContent).toMatch(/, Ren$/);
-    expect(container.textContent).toContain('0 workspace, 2 project jalan.');
+    // Stoko only has a backlog task, so only Wajom Portal counts as a project with active tasks.
+    expect(container.textContent).toContain('0 workspace, 1 project jalan.');
     expect([0, 1, 2, 3].map(statValue)).toEqual(['2', '1', '1', '1']);
     expect([0, 1, 2, 3].map(statNote)).toEqual([
-      'di 2 project',
+      'di 1 project',
       '1 punya kamu',
       '1 balik lebih dari sekali',
       'naik 1 dari minggu lalu',

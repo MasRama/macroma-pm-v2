@@ -428,7 +428,7 @@ export function toDashboard(data: DashboardSuccess['data']): DashboardData {
     workspaceCount: stats.workspace_count,
     stats: {
       activeTasks: stats.counts.ongoing + stats.counts.revisi + stats.counts.review,
-      activeProjects: stats.project_count,
+      activeProjects: stats.active_project_count,
       ongoing: stats.counts.ongoing,
       ongoingMine: stats.ongoing_mine,
       revisi: stats.counts.revisi,
