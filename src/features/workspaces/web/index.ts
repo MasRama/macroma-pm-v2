@@ -1,6 +1,6 @@
 /*
- * Browser boundary of the workspaces Feature: the typed API client, the
- * workspace page, the chat drawer the app shell opens, the create/invite
+ * Browser boundary of the workspaces Feature: the typed API client, live
+ * list and chat state, the workspace page (and its presentational view), the chat drawer the app shell opens, the create/invite
  * modals, and their view types. API shapes whose names the view types use
  * are exported with a `Data` suffix.
  */
@@ -30,6 +30,9 @@ export type {
   WorkspaceSummary as WorkspaceSummaryData,
 } from '../contract';
 export { default as WorkspacePage } from './pages/WorkspacePage.vue';
+export { default as WorkspaceView } from './components/WorkspaceView.vue';
+export { createWorkspaceChat, createWorkspacesList } from './live';
+export type { WorkspaceChat, WorkspacesList } from './live';
 export { default as ChatDrawer } from './components/ChatDrawer.vue';
 export { default as InviteMemberModal } from './components/InviteMemberModal.vue';
 export { default as MembersPanel } from './components/MembersPanel.vue';

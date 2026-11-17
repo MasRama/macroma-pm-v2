@@ -4,7 +4,7 @@ import type { PersonRef } from '../../shared/ui';
 /* What the shell shows. AppShell fills these from the session (and, with the backend port, from the API). */
 
 export interface ShellWorkspace {
-  id: number;
+  id: string;
   name: string;
 }
 
