@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app, resetSecurityState } from '../../../../app/server';
 import { callApi } from '../../../../app/tests/api';
 import { signUp, type Persona } from '../../../../app/tests/personas';
@@ -22,16 +22,24 @@ async function move(persona: Persona, taskId: string, column: string): Promise<v
   expect((await callApi(persona, 'PATCH', `/api/tasks/${taskId}/move`, { column_id: column, note: 'Dashboard move' })).status).toBe(200);
 }
 
-/** The local calendar date, as the dashboard names its days. */
-function isoDay(time: number): string {
-  const date = new Date(time);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
+/** Wednesday 18 November 2026, 10:00 in Jakarta (the default APP_TIMEZONE). */
+const NOW = Date.parse('2026-11-18T03:00:00Z');
+const serverZone = process.env.TZ;
 
 const zeroCounts = { backlog: 0, ongoing: 0, revisi: 0, review: 0, done: 0 };
 
 describe('dashboard', () => {
-  beforeEach(() => resetSecurityState());
+  beforeEach(() => {
+    resetSecurityState();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (serverZone === undefined) delete process.env.TZ;
+    else process.env.TZ = serverZone;
+  });
 
   it('sums up the projects the account can open', async () => {
     const owner = await signUp('Dashboard Owner');
@@ -53,13 +61,16 @@ describe('dashboard', () => {
     await move(owner, bounced, 'revisi');
     await createTask(owner, alpha, { title: 'Waiting' });
 
+    // A minute later, so Beta is the newer project.
+    vi.setSystemTime(NOW + 60_000);
     const beta = await createProject(owner, { name: 'Beta' });
     await createTask(owner, beta, { title: 'Beta backlog' });
     const lastWeek = await createTask(owner, beta, { title: 'Finished last week' });
     await move(owner, lastWeek, 'done');
     const database = getDatabase();
-    database.prepare('UPDATE task_logs SET created_at = ? WHERE task_id = ? AND column_from IS NULL').run(Date.now() - 12 * DAY, lastWeek);
-    database.prepare("UPDATE task_logs SET created_at = ? WHERE task_id = ? AND column_to = 'done'").run(Date.now() - 10 * DAY, lastWeek);
+    database.prepare('UPDATE task_logs SET created_at = ? WHERE task_id = ? AND column_from IS NULL').run(NOW - 12 * DAY, lastWeek);
+    // Tuesday 10 November: last week, which ran from Monday the 9th.
+    database.prepare("UPDATE task_logs SET created_at = ? WHERE task_id = ? AND column_to = 'done'").run(NOW - 8 * DAY, lastWeek);
 
     const hidden = await createProject(outsider, { name: 'Hidden' });
     await createTask(outsider, hidden, { title: 'Not for the owner' });
@@ -80,13 +91,15 @@ describe('dashboard', () => {
     });
 
     expect(data.trends).toHaveLength(7);
-    expect(data.trends.map((day: { day: string }) => day.day)).toEqual(
-      Array.from({ length: 7 }, (_, index) => {
-        const date = new Date();
-        date.setDate(date.getDate() - (6 - index));
-        return isoDay(date.getTime());
-      }),
-    );
+    expect(data.trends.map((day: { day: string }) => day.day)).toEqual([
+      '2026-11-12',
+      '2026-11-13',
+      '2026-11-14',
+      '2026-11-15',
+      '2026-11-16',
+      '2026-11-17',
+      '2026-11-18',
+    ]);
     // Before today only Beta's backdated task existed, already done; the projects were created today.
     expect(data.trends[0]).toMatchObject({ workspace: 0, project: 0, active: 0, done: 1 });
     expect(data.trends[6]).toMatchObject({ workspace: 1, project: 2, active: 2, done: 2 });
@@ -135,6 +148,46 @@ describe('dashboard', () => {
       { id: beta, name: 'Beta', workspace_id: null },
       { id: alpha, name: 'Alpha', workspace_id: workspaceId },
     ]);
+  });
+
+  it('counts days and Monday weeks in the app time zone on a server running in UTC', async () => {
+    process.env.TZ = 'UTC';
+    // Wednesday 18 November, 03:30 in Jakarta; still Tuesday the 17th in UTC.
+    const now = Date.parse('2026-11-17T20:30:00Z');
+    vi.setSystemTime(now);
+    const owner = await signUp('Dashboard Zone Owner');
+    const project = await createProject(owner, { name: 'Zoned' });
+    const doneAt = (taskId: string, time: number) =>
+      getDatabase().prepare("UPDATE task_logs SET created_at = ? WHERE task_id = ? AND column_to = 'done'").run(time, taskId);
+    const finish = async (title: string, time: number) => {
+      const task = await createTask(owner, project, { title });
+      await move(owner, task, 'done');
+      doneAt(task, time);
+    };
+    // Monday 16 November 00:30 in Jakarta: this week, though still Sunday in UTC.
+    await finish('Monday morning', Date.parse('2026-11-15T17:30:00Z'));
+    // Sunday 15 November 23:30 in Jakarta: last week.
+    await finish('Sunday night', Date.parse('2026-11-15T16:30:00Z'));
+    // Sunday 8 November 23:30 in Jakarta: the week before last.
+    await finish('Two weeks ago', Date.parse('2026-11-08T16:30:00Z'));
+    getDatabase().prepare('UPDATE task_logs SET created_at = ? WHERE column_from IS NULL AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)').run(
+      Date.parse('2026-11-01T00:00:00Z'),
+      project,
+    );
+
+    const data = (await callApi(owner, 'GET', '/api/dashboard')).body.data;
+    expect(data.stats).toMatchObject({ done_this_week: 1, done_last_week: 1 });
+    expect(data.trends.map((day: { day: string }) => day.day)).toEqual([
+      '2026-11-12',
+      '2026-11-13',
+      '2026-11-14',
+      '2026-11-15',
+      '2026-11-16',
+      '2026-11-17',
+      '2026-11-18',
+    ]);
+    // The 15th ends at 23:59:59.999 in Jakarta: the Sunday-night task is done by then, the Monday one is not.
+    expect(data.trends.map((day: { done: number }) => day.done)).toEqual([1, 1, 1, 2, 3, 3, 3]);
   });
 
   it('answers an account without projects with empty parts', async () => {

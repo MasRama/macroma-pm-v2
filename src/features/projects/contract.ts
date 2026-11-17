@@ -395,9 +395,9 @@ export function projectsResponseSchemas() {
     /** Every task of the account's projects per column. */
     counts,
     total: z.number(),
-    /** Tasks in `done` whose latest move into `done` falls in the last 7 days. */
+    /** Tasks in `done` whose latest move into `done` falls in this week: since Monday 00:00 in the app time zone. */
     done_this_week: z.number(),
-    /** The same, 7 to 14 days ago. */
+    /** The same, in last week (Monday to Monday). */
     done_last_week: z.number(),
     /** Tasks in `ongoing` assigned to the signed-in account. */
     ongoing_mine: z.number(),
@@ -406,7 +406,7 @@ export function projectsResponseSchemas() {
   });
   /** One day of the trends, each value counted as it stood at the end of that day. */
   const trendDay = z.strictObject({
-    /** The server-local calendar date, `YYYY-MM-DD`. */
+    /** The calendar date in the app time zone (`APP_TIMEZONE`), `YYYY-MM-DD`. */
     day: z.string(),
     workspace: z.number(),
     project: z.number(),

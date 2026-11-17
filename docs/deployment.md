@@ -28,6 +28,8 @@ APP_URL=https://app.example.com
 HOST=127.0.0.1
 TRUST_PROXY=true
 TRUST_PROXY_HOPS=1
+
+APP_TIMEZONE=Asia/Jakarta
 ```
 
 - `APP_URL` is the public address visitors type, with `https://`.
@@ -45,6 +47,13 @@ TRUST_PROXY_HOPS=1
   the header itself and choose its own address.
 - `TRUST_PROXY_HOPS` is the number of proxies between the visitor and the
   application: `1` for Caddy alone.
+- `APP_TIMEZONE` is the IANA time zone (`Asia/Jakarta`, `Asia/Makassar`,
+  `UTC`) whose calendar the dashboard counts in: its 7 trend days and its
+  this-week / last-week counts, with weeks starting on Monday 00:00. It
+  defaults to `Asia/Jakarta` and does not depend on the server's own time
+  zone, so a VPS running in UTC still starts the day at midnight WIB. The
+  application refuses to start with a name the runtime does not know, or with
+  an offset such as `+07:00`.
 
 Create the first administrator with a password of your own, never the
 development default:

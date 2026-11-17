@@ -1,6 +1,8 @@
+import { env } from '../../../shared/config';
 import type { ColumnCounts, DashboardSuccess, Project, TaskColumn } from '../contract';
 import { TASK_COLUMNS } from '../contract';
 import { batchRef, personRefs } from './access';
+import { dashboardCalendar } from './calendar';
 import type { ProjectsServerHost } from './host';
 import {
   activeBatches,
@@ -14,7 +16,6 @@ import {
   taskCountsByProject,
 } from './repository';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const TREND_DAYS = 7;
 const RECENT_ACTIVITY_LIMIT = 8;
 const ACTIVE_COLUMNS: readonly TaskColumn[] = ['ongoing', 'revisi', 'review'];
@@ -23,40 +24,33 @@ function total(counts: ColumnCounts): number {
   return TASK_COLUMNS.reduce((sum, column) => sum + counts[column], 0);
 }
 
-/** The server-local calendar date, `YYYY-MM-DD`. */
-function isoDay(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-/** The ends of the last `days` server-local days, oldest first, today last. */
-function dayEnds(now: Date, days: number): Date[] {
-  return Array.from({ length: days }, (_, index) => {
-    const end = new Date(now);
-    end.setDate(end.getDate() - (days - 1 - index));
-    end.setHours(23, 59, 59, 999);
-    return end;
-  });
-}
-
-/** The dashboard of the account, over the projects it can open (newest first). */
-export function dashboardData(host: ProjectsServerHost, userId: string, projects: readonly Project[], now = new Date()): DashboardSuccess['data'] {
+/**
+ * The dashboard of the account, over the projects it can open (newest first).
+ * Days and weeks (from Monday) are the calendar's in `timeZone`.
+ */
+export function dashboardData(
+  host: ProjectsServerHost,
+  userId: string,
+  projects: readonly Project[],
+  now = new Date(),
+  timeZone = env.APP_TIMEZONE,
+): DashboardSuccess['data'] {
   const projectIds = projects.map((project) => project.id);
   const perProject = taskCountsByProject(projectIds);
   const counts = emptyCounts();
   for (const projectCounts of perProject.values()) for (const column of TASK_COLUMNS) counts[column] += projectCounts[column];
 
   const at = now.getTime();
-  const ends = dayEnds(now, TREND_DAYS);
+  const calendar = dashboardCalendar(at, timeZone, TREND_DAYS);
   const columnsAt = columnCountsAt(
     projectIds,
-    ends.map((end) => end.getTime()),
+    calendar.days.map(({ end }) => end),
   );
   const openings = host.workspaceOpenings(userId);
-  const trends = ends.map((end) => {
-    const moment = end.getTime();
+  const trends = calendar.days.map(({ day, end: moment }) => {
     const columns = columnsAt.get(moment) ?? emptyCounts();
     return {
-      day: isoDay(end),
+      day,
       workspace: openings.filter((opened) => opened <= moment).length,
       project: projects.filter((project) => project.created_at <= moment).length,
       active: ACTIVE_COLUMNS.reduce((sum, column) => sum + columns[column], 0),
@@ -92,8 +86,8 @@ export function dashboardData(host: ProjectsServerHost, userId: string, projects
       project_count: projects.length,
       counts,
       total: total(counts),
-      done_this_week: doneBetween(projectIds, at - TREND_DAYS * DAY_MS, at + 1),
-      done_last_week: doneBetween(projectIds, at - 2 * TREND_DAYS * DAY_MS, at - TREND_DAYS * DAY_MS),
+      done_this_week: doneBetween(projectIds, calendar.weekStart, at + 1),
+      done_last_week: doneBetween(projectIds, calendar.lastWeekStart, calendar.weekStart),
       ongoing_mine: ongoingAssignedTo(projectIds, userId),
       revisi_repeated: revisiRepeatedCount(projectIds),
     },
