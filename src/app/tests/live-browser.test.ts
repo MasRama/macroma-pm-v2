@@ -984,6 +984,77 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(newTask()?.disabled).toBe(true);
   });
 
+  it('shows released batches on Rilis, keeps the chosen one in the URL and bumps from there', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const projectId = await createProject(owner);
+    await addMember(owner, projectId, member);
+    await openBatch(owner, projectId, { label: 'Template pesan', activate: true });
+    const greeting = await createTask(owner, projectId, 'Pesan sambutan', { priority: 'high', assignee_id: member.id });
+    await move(owner, greeting, 'done');
+    await openBatch(owner, projectId, { label: 'Billing', activate: true });
+    await createTask(owner, projectId, 'Invoice PDF');
+    const batchId = (minor: number) =>
+      (db().prepare('SELECT id FROM project_batches WHERE project_id = ? AND minor = ?').get(projectId, minor) as { id: string }).id;
+
+    await openTab(owner.cookie, `/projects/${projectId}/releases`);
+    const activeBlock = () => container.querySelector('[data-testid="release-active"]');
+    const items = () => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="release-item"]')];
+    const detail = () => container.querySelector('[data-testid="release-detail"]');
+    const flat = (node: Element | null | undefined) => node?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(flat(activeBlock())).toContain('v0.2');
+    expect(flat(activeBlock())).toContain('Billing');
+    expect(flat(activeBlock())).toContain('0 /1');
+    expect(items().map((item) => item.dataset.releaseId)).toEqual([batchId(1)]);
+    expect(flat(items()[0])).toContain('Template pesan');
+    // Without ?release= the latest closed release is the one shown.
+    expect(items()[0]!.getAttribute('aria-pressed')).toBe('true');
+    expect(flat(detail())).toContain('v0.1');
+    expect(flat(detail())).toMatch(/Rilis \d+ \w+/);
+    expect(flat(detail())).toContain('Pesan sambutan');
+
+    const contributors = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="release-detail"] [role="tab"]')].find((tab) =>
+      tab.textContent?.includes('Kontributor'),
+    );
+    contributors!.click();
+    await settle();
+    const people = [...container.querySelectorAll('[data-testid="contributor-row"]')].map(flat);
+    expect(people.some((row) => row.includes('Ayu Member'))).toBe(true);
+
+    // A task made elsewhere reaches the active block live.
+    await createTask(member, projectId, 'Reminder jatuh tempo');
+    await settle();
+    expect(flat(activeBlock())).toContain('0 /2');
+
+    await click('[data-testid="bump-version"]');
+    const minor = document.querySelector<HTMLButtonElement>('[data-testid="bump-minor"]')!;
+    expect(minor.textContent).toContain('v0.2 → v0.3');
+    expect(minor.textContent).toContain('Batch v0.2 ditutup.');
+    minor.click();
+    await settle();
+    expect(flat(activeBlock())).toContain('v0.3');
+    expect(items().map((item) => item.dataset.releaseId)).toEqual([batchId(2), batchId(1)]);
+    expect(router.currentRoute.value.query.release).toBeUndefined();
+    expect(flat(detail())).toContain('Invoice PDF');
+
+    items()[1]!.click();
+    await settle();
+    expect(router.currentRoute.value.query.release).toBe(batchId(1));
+    expect(items()[1]!.getAttribute('aria-pressed')).toBe('true');
+    expect(flat(detail())).toContain('Pesan sambutan');
+
+    // A member opens the linked release and has no Bump versi.
+    application?.unmount();
+    application = undefined;
+    await openTab(member.cookie, `/projects/${projectId}/releases?release=${batchId(1)}`);
+    expect(flat(detail())).toContain('Pesan sambutan');
+    expect(container.querySelector('[data-testid="bump-version"]')).toBeNull();
+
+    await router.push(`/projects/${projectId}/releases?release=missing`);
+    await settle();
+    expect(container.querySelector('[data-testid="release-detail-empty"]')?.textContent).toContain('Rilis ini sudah tidak ada.');
+  });
+
   it('merges a task edit saved elsewhere and asks only about the field both changed', async () => {
     const owner = await register('Ren Owner');
     const projectId = await createProject(owner);

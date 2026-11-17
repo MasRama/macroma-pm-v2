@@ -91,7 +91,7 @@ export const appRoutes = [
     path: '/projects/:projectId/releases',
     name: 'project-releases',
     component: ReleasesPage,
-    props: true,
+    props: (route: RouteLocationNormalized) => ({ projectId: String(route.params.projectId), client: projectsClient, workspaceNameOf }),
     meta: signedIn,
   },
   {
