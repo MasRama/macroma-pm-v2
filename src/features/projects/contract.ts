@@ -10,6 +10,19 @@ export const PROJECTS_CHANGED_EVENT = 'projects.changed';
 /** Live update topic: a task of a project the account can open changed; refetch the open board and task. */
 export const PROJECTS_BOARD_CHANGED_EVENT = 'projects.board-changed';
 
+/**
+ * Notification types Projects sends, with the data each carries (the
+ * `taskMovedNotificationData` response schema).
+ */
+export const PROJECTS_NOTIFICATION_TYPES = {
+  /**
+   * To the task's assignee and creator, never the account that moved it:
+   * `{ project_id, project_name, task_id, task_title, version, column_from,
+   * column_to, actor_id, actor_name }`.
+   */
+  taskMoved: 'task_moved',
+} as const;
+
 /** Kanban columns, in board order. */
 export const TASK_COLUMNS = ['backlog', 'ongoing', 'revisi', 'review', 'done'] as const;
 export type TaskColumn = (typeof TASK_COLUMNS)[number];
@@ -517,6 +530,18 @@ export function projectsResponseSchemas() {
         contributors: z.array(contributor),
       }),
     ),
+    /** The flat `data` of a `task_moved` notification; `version` is the task's new one, like `v1.2.3`. */
+    taskMovedNotificationData: z.strictObject({
+      project_id: z.string(),
+      project_name: z.string(),
+      task_id: z.string(),
+      task_title: z.string(),
+      version: z.string(),
+      column_from: column,
+      column_to: column,
+      actor_id: z.string(),
+      actor_name: z.string(),
+    }),
     dashboard: success(
       z.strictObject({
         stats: dashboardStats,
@@ -553,6 +578,7 @@ export type TaskAttachment = Infer<'attachment'>;
 export type ProjectActivity = Infer<'activityEntry'>;
 export type Release = Infer<'release'>;
 export type ActiveRelease = Infer<'activeRelease'>;
+export type TaskMovedNotificationData = Infer<'taskMovedNotificationData'>;
 export type UpcomingRelease = Infer<'upcomingRelease'>;
 export type ReleaseBatch = Infer<'releaseBatch'>;
 export type ReleaseStats = Infer<'releaseStats'>;

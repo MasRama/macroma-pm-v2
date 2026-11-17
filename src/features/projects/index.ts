@@ -4,6 +4,7 @@ export {
   PROJECT_ACTIVITY_LIMIT,
   PROJECTS_BOARD_CHANGED_EVENT,
   PROJECTS_CHANGED_EVENT,
+  PROJECTS_NOTIFICATION_TYPES,
   PROJECTS_REFUSAL_CODES,
   projectsResponseSchemas,
   TASK_ATTACHMENT_ALLOWED_MIME_TYPES,
@@ -14,7 +15,7 @@ export {
   TASK_COMMENT_MAX_LENGTH,
   TASK_PRIORITIES,
 } from './contract';
-export type { FeatureName, ProjectPerson } from './contract';
+export type { FeatureName, ProjectPerson, TaskMovedNotificationData } from './contract';
 export type { ProjectsServerHost } from './server/host';
 export {
   createDashboardRoutes,

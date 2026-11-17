@@ -1,5 +1,5 @@
 import type { AssetStorage } from '../../../shared/storage';
-import type { ProjectPerson } from '../contract';
+import type { PROJECTS_NOTIFICATION_TYPES, ProjectPerson, TaskMovedNotificationData } from '../contract';
 
 /**
  * What Projects needs but does not own. The application binding supplies
@@ -23,4 +23,6 @@ export interface ProjectsServerHost {
   workspaceOpenings(userId: string): number[];
   /** Where task images are stored, under `task-attachments/`. */
   readonly assetStorage: AssetStorage;
+  /** Creates a notification for the account and tells its open pages; runs inside the caller's transaction. */
+  notify(userId: string, type: typeof PROJECTS_NOTIFICATION_TYPES.taskMoved, data: TaskMovedNotificationData): void;
 }
