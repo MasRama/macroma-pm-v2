@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { TextArea, UiButton, UiIcon, UiModal } from '../../../../shared/ui';
 import VersionText from './VersionText.vue';
 import { STATUS_COLOR, STATUS_LABEL } from '../format';
-import { TASK_STATUSES, type MoveTaskInput, type TaskCardData, type TaskStatus } from '../view';
+import { TASK_STATUSES, type MoveTaskInput, type TaskCardData, type TaskStatus, type TaskVersion } from '../view';
 
 const props = withDefaults(
   defineProps<{
@@ -11,11 +11,15 @@ const props = withDefaults(
     task: TaskCardData | null;
     /** Preselected target (dragging a card onto a column opens this with that column). */
     initialTarget?: TaskStatus | null;
+    /** The version the move will give the task, by the API's versioning rule. */
+    nextVersion?: TaskVersion | null;
     busy?: boolean;
     /** Server-side error for the note, shown under the field. */
     noteError?: string;
+    /** A refusal that is not about the note. */
+    error?: string;
   }>(),
-  { initialTarget: null, busy: false, noteError: undefined },
+  { initialTarget: null, nextVersion: null, busy: false, noteError: undefined, error: undefined },
 );
 const emit = defineEmits<{ close: []; submit: [input: MoveTaskInput] }>();
 
@@ -33,8 +37,6 @@ watch(
   },
   { immediate: true },
 );
-
-const nextVersion = computed(() => (props.task ? { ...props.task.version, patch: props.task.version.patch + 1 } : null));
 
 function submit(): void {
   if (!props.task || !target.value) return;
@@ -79,6 +81,7 @@ function submit(): void {
         :error="missingNote ? 'Catatan wajib diisi' : noteError"
         required
       />
+      <p v-if="error" role="alert" class="move__error" data-testid="move-task-error">{{ error }}</p>
     </form>
     <template #footer>
       <UiButton variant="ghost" @click="emit('close')">Batal</UiButton>
@@ -90,6 +93,11 @@ function submit(): void {
 </template>
 
 <style scoped>
+.move__error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--alert);
+}
 .move {
   display: flex;
   flex-direction: column;

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
-import { AvatarStack } from '../../../../shared/ui';
 import { projectColor, VersionText } from '../../../projects/web';
 import type { WorkspaceProjectCard } from '../view';
 
@@ -10,7 +9,7 @@ const percent = computed(() => (props.project.total === 0 ? 0 : Math.round((prop
 </script>
 
 <template>
-  <RouterLink class="pcard panel focus-ring" :to="{ name: 'project-board', params: { projectId: project.id } }">
+  <RouterLink class="pcard panel focus-ring" :data-project-id="project.id" :to="{ name: 'project-board', params: { projectId: project.id } }">
     <div class="pcard__head" :style="{ background: projectColor(project.id) }">
       <b>{{ project.name }}</b>
       <VersionText v-if="project.batch" class="pcard__ver" :version="project.batch" />
@@ -29,7 +28,7 @@ const percent = computed(() => (props.project.total === 0 ? 0 : Math.round((prop
       </div>
       <div class="pcard__foot">
         <span class="pcard__count"><b>{{ project.done }}</b><span>/{{ project.total }} selesai</span></span>
-        <AvatarStack class="pcard__people" :people="project.members" :size="24" :overlap="6" ring="var(--card)" />
+        <span class="pcard__people">{{ project.memberCount }} anggota</span>
       </div>
     </div>
   </RouterLink>
@@ -90,5 +89,8 @@ const percent = computed(() => (props.project.total === 0 ? 0 : Math.round((prop
 }
 .pcard__people {
   margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--mute);
 }
 </style>

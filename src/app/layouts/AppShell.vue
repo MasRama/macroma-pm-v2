@@ -6,13 +6,13 @@ import { createNotificationsClient, createNotificationsFeed } from '../../featur
 import {
   ChatDrawer,
   createWorkspaceChat,
-  createWorkspacesList,
   NewWorkspaceModal,
   type NewWorkspaceInput,
   workspacesFieldTexts,
   workspacesRefusalText,
 } from '../../features/workspaces/web';
 import { workspacesClient } from '../api-clients';
+import { currentWorkspace, currentWorkspaceId, newWorkspaceOpen, projectList, workspaceList } from '../shell-state';
 import { navigationLinks } from '../navigation';
 import AppFrame from './AppFrame.vue';
 import type { ShellLink } from './shell-types';
@@ -20,9 +20,9 @@ import type { ShellLink } from './shell-types';
 /*
  * Wires the frame to the session and the Workspaces API: who is signed in,
  * admin links the session may open, sign-out, the workspace switcher and
- * "Workspace baru", the chat drawer (`?chat=1`) of the workspace in view with
- * its unread badge, and the live notification bell with its invitation
- * answers. Projects are still empty here until their screens are wired.
+ * "Workspace baru", the sidebar's project list, the chat drawer (`?chat=1`)
+ * of the workspace in view with its unread badge, and the live notification
+ * bell with its invitation answers.
  */
 const ADMIN_LABELS: Record<string, string> = {
   '/users': 'Pengguna',
@@ -35,12 +35,10 @@ const route = useRoute();
 const router = useRouter();
 const loggingOut = ref(false);
 const error = ref('');
-const newWorkspaceOpen = ref(false);
 const newWorkspaceBusy = ref(false);
 const newWorkspaceError = ref<string | undefined>();
 
 const meId = () => authSession.user.value?.id ?? null;
-const workspaceList = createWorkspacesList(workspacesClient);
 const chat = createWorkspaceChat(workspacesClient, meId);
 const chatDraft = ref('');
 
@@ -63,25 +61,37 @@ function remember(id: string): void {
 
 const workspaces = computed(() => workspaceList.items.value);
 /** The workspace in view: the open workspace page, else the last one used, else the first. */
-const currentWorkspaceId = computed<string | null>(() => {
+const workspaceInView = computed<string | null>(() => {
   const ids = workspaces.value.map((workspace) => workspace.id);
   const onPage = route.name === 'workspace' ? String(route.params.workspaceId) : null;
   if (onPage && ids.includes(onPage)) return onPage;
   const last = remembered();
   return last && ids.includes(last) ? last : (ids[0] ?? null);
 });
-const currentWorkspace = computed(() => workspaces.value.find((workspace) => workspace.id === currentWorkspaceId.value) ?? null);
-watch(currentWorkspaceId, (id) => {
-  if (id) remember(id);
-  void chat.select(id);
+watch(
+  workspaceInView,
+  (id) => {
+    currentWorkspaceId.value = id;
+    if (id) remember(id);
+    void chat.select(id);
+  },
+  { immediate: true },
+);
+watch(newWorkspaceOpen, (open) => {
+  if (open) newWorkspaceError.value = undefined;
 });
+const projects = computed(() =>
+  projectList.items.value.map((project) => ({ id: project.id, name: project.name, batch: project.batch ?? null })),
+);
 
 let stopLive: (() => void) | undefined;
 onMounted(() => {
   const stopList = workspaceList.start();
+  const stopProjects = projectList.start();
   const stopChat = chat.start();
   stopLive = () => {
     stopList();
+    stopProjects();
     stopChat();
   };
 });
@@ -206,6 +216,7 @@ async function logout(): Promise<void> {
     :user="user"
     :workspaces="workspaces"
     :current-workspace-id="currentWorkspaceId"
+    :projects="projects"
     :chat-unread="chatOpen ? 0 : chat.unread.value"
     :chat-open="chatOpen"
     :admin-links="adminLinks"
@@ -220,10 +231,7 @@ async function logout(): Promise<void> {
     @decline-invite="answerInvitation($event, 'decline')"
     @read-notification="busyWith(() => feed.markRead($event))"
     @mark-notifications-read="busyWith(() => feed.markAllRead())"
-    @new-workspace="
-      newWorkspaceError = undefined;
-      newWorkspaceOpen = true;
-    "
+    @new-workspace="newWorkspaceOpen = true"
     @logout="logout"
   >
     <slot />

@@ -17,7 +17,7 @@ export interface WorkspacesList {
   readonly loaded: Readonly<Ref<boolean>>;
   readonly error: Ref<string>;
   load(): Promise<void>;
-  /** Loads now and on every `workspaces.changed`; returns the stop function. */
+  /** Loads now and on every `workspaces.changed`; returns the stop function, which empties the list. */
   start(): () => void;
 }
 
@@ -48,7 +48,14 @@ export function createWorkspacesList(client: WorkspacesClient): WorkspacesList {
   function start(): () => void {
     const stop = onServerEvent(WORKSPACES_CHANGED_EVENT, () => void load());
     void load();
-    return stop;
+    // The next account to sign in in this tab starts from an empty list.
+    return () => {
+      stop();
+      latest++;
+      items.value = [];
+      loaded.value = false;
+      error.value = '';
+    };
   }
 
   return { items: computed(() => items.value), loaded: computed(() => loaded.value), error, load, start };

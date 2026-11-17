@@ -15,7 +15,7 @@ withDefaults(
   }>(),
   { lifted: false, size: 'md', draggable: false },
 );
-defineEmits<{ open: [id: number] }>();
+defineEmits<{ open: [id: string] }>();
 </script>
 
 <template>

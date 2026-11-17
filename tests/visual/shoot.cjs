@@ -24,6 +24,7 @@ const SCREENS = [
   ['task-detail'],
   ['new-task'],
   ['move-task'],
+  ['edit-task'],
   ['confirm'],
   ['bump', (page) => clickIfShown(page.getByRole('button', { name: 'Bump versi' }))],
   ['notifications', (page) => clickIfShown(page.locator('.bell'))],

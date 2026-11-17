@@ -3,21 +3,39 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { mergeEdit, onServerEvent } from '../../../../shared/realtime/browser';
 import { ConfirmDialog, TextArea, TextField, UiButton, UiModal } from '../../../../shared/ui';
+import {
+  NewProjectModal,
+  PROJECTS_BOARD_CHANGED_EVENT,
+  PROJECTS_CHANGED_EVENT,
+  type NewProjectInput,
+  type ProjectsClient,
+} from '../../../projects/web';
 import { WORKSPACES_CHANGED_EVENT, type Workspace, type WorkspacesError } from '../../contract';
 import type { WorkspacesClient } from '../client';
 import { workspacesFieldTexts, workspacesRefusalText } from '../refusals';
 import InviteMemberModal from '../components/InviteMemberModal.vue';
 import WorkspaceView from '../components/WorkspaceView.vue';
-import { toPendingInvite, toWorkspaceMember, toWorkspaceSummary, type PendingInvite, type WorkspaceMember, type WorkspaceSummary } from '../view';
+import {
+  toPendingInvite,
+  toWorkspaceMember,
+  toWorkspaceProjectCard,
+  toWorkspaceSummary,
+  type PendingInvite,
+  type WorkspaceMember,
+  type WorkspaceProjectCard,
+  type WorkspaceSummary,
+} from '../view';
 
 /**
  * The workspace page on the Workspaces API: loads the workspace with its
- * members and pending invitations, follows `workspaces.changed`, and runs the
- * invite, cancel, remove/leave, edit and delete actions. The server decides
+ * members and pending invitations, and its projects from the Projects API;
+ * follows `workspaces.changed`, `projects.changed` and
+ * `projects.board-changed`; and runs Project baru and the invite, cancel,
+ * remove/leave, edit and delete actions. The server decides
  * who may do what; the page hides what the account's role cannot do and
  * still says why when the server refuses.
  */
-const props = defineProps<{ workspaceId: string; client: WorkspacesClient; meId?: string | null }>();
+const props = defineProps<{ workspaceId: string; client: WorkspacesClient; projectsClient: ProjectsClient; meId?: string | null }>();
 const router = useRouter();
 
 type Code = WorkspacesError['code'];
@@ -26,6 +44,7 @@ const say = (response: { code: Code }) => workspacesRefusalText(response.code);
 const workspace = ref<WorkspaceSummary | null>(null);
 const members = ref<WorkspaceMember[]>([]);
 const invites = ref<PendingInvite[]>([]);
+const projects = ref<WorkspaceProjectCard[]>([]);
 /** The workspace cannot be shown: it is gone, or the account left it. */
 const gone = ref('');
 const loading = ref(true);
@@ -62,6 +81,19 @@ async function load(): Promise<void> {
   }
 }
 
+let projectsTicket = 0;
+async function loadProjects(): Promise<void> {
+  const ticket = ++projectsTicket;
+  const id = props.workspaceId;
+  try {
+    const response = await props.projectsClient.list({ workspace_id: id });
+    if (ticket !== projectsTicket) return;
+    projects.value = response.success ? response.data.projects.map(toWorkspaceProjectCard) : [];
+  } catch (cause) {
+    console.error(cause);
+  }
+}
+
 /** Runs one action: says the refusal (or failure) and reloads either way. */
 async function act(work: () => Promise<{ success: true } | { success: false; code: Code; message: string }>, failed: string): Promise<boolean> {
   if (busy.value) return false;
@@ -84,8 +116,14 @@ async function act(work: () => Promise<{ success: true } | { success: false; cod
 
 let stopLive: (() => void) | undefined;
 onMounted(() => {
-  stopLive = onServerEvent(WORKSPACES_CHANGED_EVENT, () => void load());
+  const stops = [
+    onServerEvent(WORKSPACES_CHANGED_EVENT, () => void load()),
+    onServerEvent(PROJECTS_CHANGED_EVENT, () => void loadProjects()),
+    onServerEvent(PROJECTS_BOARD_CHANGED_EVENT, () => void loadProjects()),
+  ];
+  stopLive = () => stops.forEach((stop) => stop());
   void load();
+  void loadProjects();
 });
 onBeforeUnmount(() => stopLive?.());
 watch(
@@ -93,9 +131,43 @@ watch(
   () => {
     loading.value = true;
     notice.value = '';
+    projects.value = [];
     void load();
+    void loadProjects();
   },
 );
+
+/* Project baru */
+const newProjectOpen = ref(false);
+const newProjectError = ref<string | undefined>();
+function openNewProject(): void {
+  newProjectError.value = undefined;
+  newProjectOpen.value = true;
+}
+async function createProject(input: NewProjectInput): Promise<void> {
+  if (busy.value) return;
+  busy.value = true;
+  newProjectError.value = undefined;
+  try {
+    const response = await props.projectsClient.create({
+      name: input.name,
+      description: input.description || null,
+      workspace_id: props.workspaceId,
+    });
+    if (response.success) {
+      newProjectOpen.value = false;
+      await router.push({ name: 'project-board', params: { projectId: response.data.project.id } });
+      return;
+    }
+    newProjectError.value =
+      response.errors?.name?.[0] ?? (response.code === 'FORBIDDEN' ? 'Kamu bukan anggota workspace ini lagi.' : response.message);
+  } catch (cause) {
+    console.error(cause);
+    newProjectError.value = 'Project belum bisa dibuat. Coba lagi.';
+  } finally {
+    busy.value = false;
+  }
+}
 
 /* Invite */
 const inviteOpen = ref(false);
@@ -239,12 +311,15 @@ async function confirmDelete(): Promise<void> {
     v-else
     data-testid="workspace-page"
     :workspace="workspace"
+    :projects="projects"
     :members="members"
     :invites="invites"
     :me-id="meId ?? null"
     :can-manage="isOwner"
     :can-invite="workspace !== null"
+    :can-create-project="workspace !== null"
     :busy="busy"
+    @new-project="openNewProject"
     @invite="
       inviteError = undefined;
       inviteOpen = true;
@@ -259,6 +334,14 @@ async function confirmDelete(): Promise<void> {
     </template>
   </WorkspaceView>
 
+  <NewProjectModal
+    :open="newProjectOpen"
+    :workspace-name="workspace?.name"
+    :busy="busy"
+    :name-error="newProjectError"
+    @close="newProjectOpen = false"
+    @submit="createProject"
+  />
   <InviteMemberModal
     :open="inviteOpen"
     :workspace-name="workspace?.name ?? 'workspace ini'"

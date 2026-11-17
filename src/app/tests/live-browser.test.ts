@@ -612,3 +612,240 @@ describe('workspaces and chat in the open tab', () => {
     expect(saved).toEqual([{ message: 'Aku cek siang ini' }]);
   });
 });
+
+describe('projects, the board and the dashboard in the open tab', () => {
+  const db = () => getDatabase();
+
+  async function createProject(owner: { cookie: string }, name = 'Wajom Portal', workspaceId?: string): Promise<string> {
+    const body = workspaceId ? { name, workspace_id: workspaceId } : { name };
+    expect((await asDevice(owner.cookie, '/api/projects', 'POST', body)).status).toBe(201);
+    return (db().prepare('SELECT id FROM projects WHERE name = ? ORDER BY created_at DESC LIMIT 1').get(name) as { id: string }).id;
+  }
+
+  async function openBatch(owner: { cookie: string }, projectId: string, input: Record<string, unknown> = { activate: true }): Promise<void> {
+    expect((await asDevice(owner.cookie, `/api/projects/${projectId}/batches`, 'POST', input)).status).toBe(201);
+  }
+
+  async function createTask(actor: { cookie: string }, projectId: string, title: string, extra: Record<string, unknown> = {}): Promise<string> {
+    expect((await asDevice(actor.cookie, `/api/projects/${projectId}/tasks`, 'POST', { title, ...extra })).status).toBe(201);
+    return (db().prepare('SELECT id FROM tasks WHERE project_id = ? AND title = ?').get(projectId, title) as { id: string }).id;
+  }
+
+  async function move(actor: { cookie: string }, taskId: string, column: string, note = 'Catatan'): Promise<void> {
+    expect((await asDevice(actor.cookie, `/api/tasks/${taskId}/move`, 'PATCH', { column_id: column, note })).status).toBe(200);
+  }
+
+  async function addMember(owner: { cookie: string }, projectId: string, member: { email: string }): Promise<void> {
+    expect((await asDevice(owner.cookie, `/api/projects/${projectId}/members`, 'POST', { email: member.email })).status).toBe(201);
+  }
+
+  const column = (status: string) => container.querySelector(`.board [data-status="${status}"]`);
+  const cardIn = (status: string, taskId: string) => column(status)?.querySelector(`[data-task-id="${taskId}"]`) ?? null;
+  const taskRow = (taskId: string) =>
+    db().prepare('SELECT column_id, version_major, version_minor, version_patch, title, description FROM tasks WHERE id = ?').get(taskId) as {
+      column_id: string;
+      version_major: number;
+      version_minor: number;
+      version_patch: number;
+      title: string;
+      description: string | null;
+    };
+
+  async function submit(selector: string): Promise<void> {
+    document.querySelector<HTMLFormElement>(selector)!.requestSubmit();
+    await settle();
+  }
+
+  function typeIn(selector: string, value: string): void {
+    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
+    expect(field).not.toBeNull();
+    field!.value = value;
+    field!.dispatchEvent(new Event('input'));
+  }
+
+  /** Clicks a button in a modal (modals render under document.body). */
+  async function press(selector: string): Promise<void> {
+    const button = document.querySelector<HTMLButtonElement>(selector);
+    expect(button).not.toBeNull();
+    button!.click();
+    await settle();
+  }
+
+  function tile(label: string): HTMLButtonElement {
+    const found = [...document.querySelectorAll<HTMLButtonElement>('.move__tile')].find((button) => button.textContent?.trim() === label);
+    expect(found).toBeDefined();
+    return found!;
+  }
+
+  it('creates a project from the workspace page, lists it in the sidebar and on the workspace cards', async () => {
+    const owner = await register('Ren Owner');
+    expect((await asDevice(owner.cookie, '/api/workspaces', 'POST', { name: 'Wajom Studio' })).status).toBe(201);
+    const workspaceId = (db().prepare('SELECT id FROM workspaces WHERE owner_id = ?').get(owner.id) as { id: string }).id;
+    await openTab(owner.cookie, `/workspaces/${workspaceId}`);
+    expect(container.querySelector('[data-testid="workspace-page"]')?.textContent).toContain('Belum ada project');
+
+    await click('[data-testid="workspace-new-project"]');
+    typeIn('#project-name', 'Wajom Portal');
+    typeIn('#project-description', 'Portal client WhatsApp gateway.');
+    await settle();
+    await submit('#new-project-form');
+    const projectId = (db().prepare('SELECT id, workspace_id FROM projects WHERE owner_id = ?').get(owner.id) as { id: string; workspace_id: string });
+    expect(projectId.workspace_id).toBe(workspaceId);
+    expect(router.currentRoute.value).toMatchObject({ name: 'project-board', params: { projectId: projectId.id } });
+    expect(container.querySelector('.proj__name')?.textContent).toBe('Wajom Portal');
+    // The breadcrumb names the project's workspace.
+    expect(container.querySelector('[data-testid="board-page"]')?.textContent).toContain('Wajom Studio');
+
+    await router.push(`/workspaces/${workspaceId}`);
+    await settle();
+    const card = container.querySelector(`.pcard[data-project-id="${projectId.id}"]`);
+    expect(card?.textContent).toContain('Portal client WhatsApp gateway.');
+    expect(card?.textContent).toContain('0/0 selesai');
+    expect(card?.textContent).toContain('1 anggota');
+  });
+
+  it('shows the active batch, its five columns and a card that came back from review', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId, { label: 'Pairing flow', activate: true });
+    const taskId = await createTask(owner, projectId, 'Checkout Midtrans gagal di Safari iOS', { priority: 'high' });
+    await move(owner, taskId, 'review');
+    await move(owner, taskId, 'revisi', 'Masih gagal di iPhone 12');
+
+    await openTab(owner.cookie, `/projects/${projectId}/board`);
+    expect([...container.querySelectorAll('.board [data-status]')].map((node) => node.getAttribute('data-status'))).toEqual([
+      'backlog',
+      'ongoing',
+      'revisi',
+      'review',
+      'done',
+    ]);
+    expect(container.querySelector('.batch')?.textContent).toContain('Pairing flow');
+    const card = cardIn('revisi', taskId);
+    expect(card?.textContent).toContain('Balik dari review · 1x');
+    expect(card?.textContent).toContain('v0.1.3');
+  });
+
+  it('creates a task from Task baru and moves it with a required note, previewing its next version', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    await createTask(owner, projectId, 'Halaman 404');
+    await openTab(owner.cookie, `/projects/${projectId}/board`);
+
+    await click('[data-testid="new-task"]');
+    expect(document.body.textContent).toContain('mulai di v0.1.2');
+    typeIn('#new-task-title', 'Export riwayat broadcast ke CSV');
+    await settle();
+    await submit('#new-task-form');
+    const taskId = (db().prepare('SELECT id FROM tasks WHERE title = ?').get('Export riwayat broadcast ke CSV') as { id: string }).id;
+    expect(cardIn('backlog', taskId)?.textContent).toContain('v0.1.2');
+
+    (cardIn('backlog', taskId) as HTMLElement).click();
+    await settle();
+    expect(router.currentRoute.value).toMatchObject({ name: 'project-task', params: { taskId } });
+    await press('[data-testid="task-move"]');
+    tile('Review').click();
+    await settle();
+    expect(document.querySelector('.move__to')?.textContent).toContain('v0.1.3');
+    await submit('#move-task-form');
+    expect(document.body.textContent).toContain('Catatan wajib diisi');
+    expect(taskRow(taskId).column_id).toBe('backlog');
+
+    typeIn('#move-task-note', 'Siap direview');
+    await settle();
+    await submit('#move-task-form');
+    expect(document.querySelector('#move-task-form')).toBeNull();
+    expect(taskRow(taskId)).toMatchObject({ column_id: 'review', version_patch: 3 });
+    expect(cardIn('review', taskId)).not.toBeNull();
+    // The detail's version history now has the move.
+    expect(document.body.textContent).toContain('Riwayat versi 2');
+  });
+
+  it('lets the owner bump the version and hides owner actions from a member', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    await addMember(owner, projectId, member);
+    const taskId = await createTask(owner, projectId, 'Webhook retry');
+
+    await openTab(owner.cookie, `/projects/${projectId}/board`);
+    await click('[aria-haspopup="menu"]');
+    const minor = [...container.querySelectorAll<HTMLButtonElement>('.bump')].find((button) => button.textContent?.includes('Minor'));
+    minor!.click();
+    await settle();
+    const active = db().prepare('SELECT major, minor FROM project_batches WHERE project_id = ? AND is_active = 1').get(projectId);
+    expect(active).toEqual({ major: 0, minor: 2 });
+    expect(container.querySelector('.batch')?.textContent).toContain('v0.2');
+
+    application?.unmount();
+    application = undefined;
+    await openTab(member.cookie, `/projects/${projectId}/tasks/${taskId}`);
+    expect(container.querySelector('[aria-haspopup="menu"]')).toBeNull();
+    expect(document.querySelector('[data-testid="task-edit"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="task-delete"]')).toBeNull();
+  });
+
+  it('merges a task edit saved elsewhere and asks only about the field both changed', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const taskId = await createTask(owner, projectId, 'Pairing code');
+    await openTab(owner.cookie, `/projects/${projectId}/tasks/${taskId}`);
+
+    await press('[data-testid="task-edit"]');
+    typeIn('#edit-task-title', 'Judul punyaku');
+    typeIn('#edit-task-description', 'Deskripsi punyaku');
+    await settle();
+    expect((await asDevice(owner.cookie, `/api/tasks/${taskId}`, 'PATCH', { revision: 1, title: 'Judul mereka' })).status).toBe(200);
+
+    await submit('#edit-task-form');
+    expect(document.querySelector('[data-testid="task-merge-notice"]')?.textContent).toContain('disimpan orang lain');
+    const conflicts = [...document.querySelectorAll('[data-testid="task-conflicts"] [data-conflict-field]')].map((row) => row.getAttribute('data-conflict-field'));
+    expect(conflicts).toEqual(['title']);
+
+    document.querySelector<HTMLButtonElement>('[data-testid="task-keep-mine-title"]')!.click();
+    await settle();
+    await submit('#edit-task-form');
+    expect(document.querySelector('#edit-task-form')).toBeNull();
+    expect(taskRow(taskId)).toMatchObject({ title: 'Judul punyaku', description: 'Deskripsi punyaku' });
+  });
+
+  it('deletes a task as the owner and follows tasks made on another device', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const taskId = await createTask(owner, projectId, 'Logo baru');
+    await openTab(owner.cookie, `/projects/${projectId}/tasks/${taskId}`);
+
+    await press('[data-testid="task-delete"]');
+    document.querySelector<HTMLButtonElement>('[role="alertdialog"] .btn--danger')!.click();
+    await settle();
+    expect(db().prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)).toBeUndefined();
+    expect(router.currentRoute.value.name).toBe('project-board');
+    expect(container.querySelector(`.board [data-task-id="${taskId}"]`)).toBeNull();
+
+    const otherId = await createTask(owner, projectId, 'Dibuat di HP');
+    await settle();
+    expect(cardIn('backlog', otherId)?.textContent).toContain('Dibuat di HP');
+  });
+
+  it('shows the dashboard stats and board health from the API', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const first = await createTask(owner, projectId, 'Satu', { assignee_id: owner.id });
+    await createTask(owner, projectId, 'Dua');
+    await move(owner, first, 'ongoing');
+
+    await openTab(owner.cookie, '/dashboard');
+    const values = [...container.querySelectorAll('.stat__value')].map((node) => node.textContent?.trim());
+    expect(values).toEqual(['1', '1', '0', '0']);
+    expect(container.querySelector('.stat')?.textContent).toContain('di 1 project');
+    const row = container.querySelector(`[data-project-id="${projectId}"]`);
+    expect(row?.textContent).toContain('Wajom Portal');
+    expect(row?.textContent).toContain('0/2');
+    expect(container.querySelector('.feed__list')?.textContent).toContain('mindahin task di Wajom Portal');
+  });
+});

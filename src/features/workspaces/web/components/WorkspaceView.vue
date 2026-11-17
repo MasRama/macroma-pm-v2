@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { PageHead, ShellTopBar, TopCrumb, UiButton } from '../../../../shared/ui';
-import { NewProjectModal, type NewProjectInput } from '../../../projects/web';
 import MembersPanel from './MembersPanel.vue';
 import ProjectCard from './ProjectCard.vue';
 import type { PendingInvite, WorkspaceMember, WorkspaceProjectCard, WorkspaceSummary } from '../view';
@@ -36,7 +35,7 @@ const props = withDefaults(
   },
 );
 const emit = defineEmits<{
-  createProject: [input: NewProjectInput];
+  newProject: [];
   invite: [];
   cancelInvite: [id: string];
   removeMember: [userId: string];
@@ -44,7 +43,6 @@ const emit = defineEmits<{
   delete: [];
 }>();
 
-const newProjectOpen = ref(false);
 const name = computed(() => props.workspace?.name ?? 'Workspace');
 const projectCount = computed(() => props.workspace?.projectCount ?? props.projects.length);
 const memberCount = computed(() => props.workspace?.memberCount ?? props.members.length);
@@ -67,7 +65,16 @@ const summary = computed(() =>
       <section aria-labelledby="ws-projects">
         <div class="ws__bar">
           <h2 id="ws-projects" class="h2">Project</h2>
-          <UiButton v-if="canCreateProject" class="ws__new" variant="primary" size="sm" icon="plus" @click="newProjectOpen = true">
+          <UiButton
+            v-if="canCreateProject"
+            class="ws__new"
+            variant="primary"
+            size="sm"
+            icon="plus"
+            data-testid="workspace-new-project"
+            :disabled="busy"
+            @click="emit('newProject')"
+          >
             Project baru
           </UiButton>
         </div>
@@ -89,16 +96,6 @@ const summary = computed(() =>
         @remove-member="emit('removeMember', $event)"
       />
     </div>
-    <NewProjectModal
-      :open="newProjectOpen"
-      :workspace-name="workspace?.name"
-      :busy="busy"
-      @close="newProjectOpen = false"
-      @submit="
-        emit('createProject', $event);
-        newProjectOpen = false;
-      "
-    />
   </div>
 </template>
 

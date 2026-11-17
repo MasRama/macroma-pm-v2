@@ -19,13 +19,13 @@ const props = withDefaults(
     activeBatch?: BatchSummary | null;
     releases?: ReleaseSummary[];
     /** Id of the release shown on the right. */
-    selectedId?: number | null;
+    selectedId?: string | null;
     detail?: ReleaseDetail | null;
     canBump?: boolean;
   }>(),
   { project: null, activeBatch: null, releases: () => [], selectedId: null, detail: null, canBump: false },
 );
-const emit = defineEmits<{ 'update:selectedId': [id: number]; bump: [kind: BumpKind] }>();
+const emit = defineEmits<{ 'update:selectedId': [id: string]; bump: [kind: BumpKind] }>();
 
 const tab = ref('changelog');
 const showAll = ref(false);

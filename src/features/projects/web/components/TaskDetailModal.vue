@@ -20,7 +20,7 @@ import StatusBlock from './StatusBlock.vue';
 import TimelineNode from './TimelineNode.vue';
 import VersionText from './VersionText.vue';
 import { formatVersion } from '../format';
-import type { TaskDetailData, TaskDetailTab } from '../view';
+import type { TaskComment, TaskDetailData, TaskDetailTab, TaskImage } from '../view';
 
 const PRIORITY_LABEL = { low: 'Low', medium: 'Medium', high: 'High' } as const;
 
@@ -28,13 +28,17 @@ const props = withDefaults(
   defineProps<{
     open: boolean;
     task: TaskDetailData | null;
+    /** The task's comments; `null` leaves the Komentar tab out. */
+    comments?: TaskComment[] | null;
+    /** The task's images; `null` leaves the Gambar tab out. */
+    images?: TaskImage[] | null;
     initialTab?: TaskDetailTab;
     canEdit?: boolean;
     canDelete?: boolean;
     deleting?: boolean;
     commentError?: string;
   }>(),
-  { initialTab: 'detail', canEdit: true, canDelete: true, deleting: false, commentError: undefined },
+  { comments: null, images: null, initialTab: 'detail', canEdit: true, canDelete: true, deleting: false, commentError: undefined },
 );
 const emit = defineEmits<{
   close: [];
@@ -53,7 +57,7 @@ watch(
   () => [props.open, props.task?.id] as const,
   ([open]) => {
     if (!open) return;
-    tab.value = props.initialTab;
+    tab.value = tabs.value.some((option) => option.value === props.initialTab) ? props.initialTab : 'detail';
     draft.value = '';
     confirmDelete.value = false;
   },
@@ -61,10 +65,12 @@ watch(
 
 const tabs = computed<TabOption[]>(() => [
   { value: 'detail', label: 'Detail' },
-  { value: 'comments', label: 'Komentar', count: props.task?.comments.length ?? 0 },
+  ...(props.comments ? [{ value: 'comments', label: 'Komentar', count: props.comments.length }] : []),
   { value: 'history', label: 'Riwayat versi', count: props.task?.logs.length ?? 0 },
-  { value: 'images', label: 'Gambar', count: props.task?.images.length ?? 0 },
+  ...(props.images ? [{ value: 'images', label: 'Gambar', count: props.images.length }] : []),
 ]);
+const comments = computed(() => props.comments ?? []);
+const images = computed(() => props.images ?? []);
 
 /** Newest version first, the way the timeline reads. */
 const logs = computed(() => [...(props.task?.logs ?? [])].sort((a, b) => b.at.localeCompare(a.at)));
@@ -85,7 +91,7 @@ function sendComment(): void {
           <div class="td__meta">
             <StatusBlock :status="task.status" />
             <VersionText class="td__ver" :version="task.version" />
-            <span class="td__where">· {{ task.projectName }} / batch {{ formatVersion(task.batch) }}</span>
+            <span class="td__where">· {{ task.projectName }}<template v-if="task.batch"> / batch {{ formatVersion(task.batch) }}</template></span>
           </div>
           <h2 class="td__title">{{ task.title }}</h2>
         </div>
@@ -102,8 +108,8 @@ function sendComment(): void {
             </template>
 
             <template v-else-if="tab === 'comments'">
-              <ul v-if="task.comments.length" class="td__comments">
-                <li v-for="comment in task.comments" :key="comment.id" class="td__comment">
+              <ul v-if="comments.length" class="td__comments">
+                <li v-for="comment in comments" :key="comment.id" class="td__comment">
                   <UiAvatar :person="comment.author" :size="28" />
                   <div class="td__bubble">
                     <div class="td__who">
@@ -134,8 +140,8 @@ function sendComment(): void {
             </template>
 
             <template v-else>
-              <ul v-if="task.images.length" class="td__images">
-                <li v-for="image in task.images" :key="image.id">
+              <ul v-if="images.length" class="td__images">
+                <li v-for="image in images" :key="image.id">
                   <a :href="image.url" target="_blank" rel="noopener" class="td__image focus-ring">
                     <img :src="image.url" :alt="image.name" loading="lazy" />
                   </a>
@@ -157,21 +163,23 @@ function sendComment(): void {
                 <span v-else class="td__none">Belum ada</span>
               </dd>
             </div>
-            <div><dt>Batch</dt><dd class="mono">{{ formatVersion(task.batch) }}</dd></div>
+            <div><dt>Batch</dt><dd class="mono">{{ task.batch ? formatVersion(task.batch) : '—' }}</dd></div>
             <div><dt>Versi</dt><dd class="mono">{{ formatVersion(task.version) }}</dd></div>
             <div>
               <dt>Pindah ke revisi</dt>
               <dd :class="{ 'td__rev': task.revisiCount > 0 }">{{ task.revisiCount }}x</dd>
             </div>
-            <div><dt>Dibuat</dt><dd>{{ formatDay(task.createdAt) }} · {{ task.createdBy.name }}</dd></div>
+            <div><dt>Dibuat</dt><dd>{{ formatDay(task.createdAt) }}<template v-if="task.createdBy"> · {{ task.createdBy.name }}</template></dd></div>
             <div><dt>Update</dt><dd>{{ formatDayTime(task.updatedAt) }}</dd></div>
           </dl>
           <div class="td__actions">
-            <UiButton variant="primary" block @click="emit('move')">
+            <UiButton variant="primary" block data-testid="task-move" @click="emit('move')">
               <UiIcon name="arrow" :size="14" :stroke="2.2" />Pindah task
             </UiButton>
-            <UiButton v-if="canEdit" variant="ghost" block @click="emit('edit')">Edit task</UiButton>
-            <button v-if="canDelete" type="button" class="td__delete focus-ring" @click="confirmDelete = true">Hapus task</button>
+            <UiButton v-if="canEdit" variant="ghost" block data-testid="task-edit" @click="emit('edit')">Edit task</UiButton>
+            <button v-if="canDelete" type="button" class="td__delete focus-ring" data-testid="task-delete" @click="confirmDelete = true">
+              Hapus task
+            </button>
           </div>
         </aside>
       </div>

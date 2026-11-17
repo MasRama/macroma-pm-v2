@@ -1,5 +1,5 @@
 import type { PersonRef } from '../../../shared/ui';
-import type { BatchVersion } from '../../projects/web';
+import type { BatchVersion, ProjectSummaryData } from '../../projects/web';
 import type {
   WorkspaceInvitation as WorkspaceInvitationRow,
   WorkspaceMember as WorkspaceMemberRow,
@@ -41,13 +41,15 @@ export interface PendingInvite {
 }
 
 export interface WorkspaceProjectCard {
-  id: number;
+  id: string;
   name: string;
   description?: string | null;
   batch?: BatchVersion | null;
+  /** Tasks in Done, of every task of the project. */
   done: number;
   total: number;
-  members: PersonRef[];
+  /** Accounts that can open the project. */
+  memberCount: number;
 }
 
 export interface ChatMessage {
@@ -86,6 +88,20 @@ export function toWorkspaceMember(row: WorkspaceMemberRow): WorkspaceMember {
 
 export function toPendingInvite(row: WorkspaceInvitationRow): PendingInvite {
   return { id: row.id, email: row.invitee_email, sentAt: iso(row.created_at) };
+}
+
+/** A project of the workspace, as its card shows it: progress over every task of the project. */
+export function toWorkspaceProjectCard(row: ProjectSummaryData): WorkspaceProjectCard {
+  const counts = row.task_counts;
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    batch: row.active_batch ? { major: row.active_batch.major, minor: row.active_batch.minor } : null,
+    done: counts.done,
+    total: counts.backlog + counts.ongoing + counts.revisi + counts.review + counts.done,
+    memberCount: row.member_count,
+  };
 }
 
 /** A message whose author's account was deleted keeps its text under a placeholder name. */

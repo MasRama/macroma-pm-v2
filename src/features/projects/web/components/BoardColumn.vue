@@ -10,21 +10,21 @@ const props = withDefaults(
     tasks: TaskCardData[];
     /** Show the dashed drop placeholder (a card is being dragged over this column). */
     dropTarget?: boolean;
-    liftedTaskId?: number | null;
+    liftedTaskId?: string | null;
     canAdd?: boolean;
   }>(),
   { dropTarget: false, liftedTaskId: null, canAdd: true },
 );
 const emit = defineEmits<{
   add: [status: TaskStatus];
-  open: [id: number];
-  dragTask: [id: number | null];
+  open: [id: string];
+  dragTask: [id: string | null];
   dragOver: [status: TaskStatus];
   dropTask: [status: TaskStatus];
 }>();
 
-function onDragStart(event: DragEvent, id: number): void {
-  event.dataTransfer?.setData('text/plain', String(id));
+function onDragStart(event: DragEvent, id: string): void {
+  event.dataTransfer?.setData('text/plain', id);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
   emit('dragTask', id);
 }
@@ -34,7 +34,7 @@ function onDragOver(): void {
 </script>
 
 <template>
-  <section class="col" :aria-label="STATUS_LABEL[status]" @dragover.prevent="onDragOver" @drop.prevent="emit('dropTask', status)">
+  <section class="col" :data-status="status" :aria-label="STATUS_LABEL[status]" @dragover.prevent="onDragOver" @drop.prevent="emit('dropTask', status)">
     <header class="col__head" :style="{ background: STATUS_COLOR[status] }">
       <h2 class="col__name">{{ STATUS_LABEL[status] }}</h2>
       <span class="col__n mono">{{ tasks.length }}</span>

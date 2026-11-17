@@ -9,7 +9,7 @@ export interface ShellWorkspace {
 }
 
 export interface ShellProject {
-  id: number;
+  id: string;
   name: string;
   batch?: BatchVersion | null;
 }

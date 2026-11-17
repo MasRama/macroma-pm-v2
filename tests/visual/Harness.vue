@@ -10,11 +10,14 @@ import NotFoundPage from '../../src/app/pages/NotFoundPage.vue';
 import ProfilePage from '../../src/app/pages/ProfilePage.vue';
 import {
   ActivityPage,
-  BoardPage,
-  DashboardPage,
+  BoardView,
+  DashboardView,
+  EditTaskModal,
   MoveTaskModal,
   NewTaskModal,
+  nextTaskVersion,
   ReleasesPage,
+  TaskDetailModal,
 } from '../../src/features/projects/web';
 import { ChatDrawer, WorkspaceView } from '../../src/features/workspaces/web';
 import { ConfirmDialog } from '../../src/shared/ui';
@@ -22,11 +25,12 @@ import * as f from './fixtures';
 import { screenName } from './screens';
 
 const screen = screenName(new URLSearchParams(window.location.search).get('screen'));
-const batchFilter = ref('23');
-const selectedRelease = ref(22);
+const batchFilter = ref('b23');
+const selectedRelease = ref('b22');
+const editForm = ref({ title: f.detail.title, description: f.detail.description ?? '', priority: f.detail.priority, assigneeId: '1' });
 const framed = !['login', 'register', 'forgot-password', 'reset-password', 'not-found'].includes(screen);
 const chatOpen = screen === 'chat';
-const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm', 'bump', 'notifications'];
+const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'edit-task', 'confirm', 'bump', 'notifications'];
 </script>
 
 <template>
@@ -46,31 +50,28 @@ const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm'
       :admin-links="[]"
       :notifications="f.notifications"
     >
-      <BoardPage
+      <BoardView
         v-if="boardScreens.includes(screen)"
         v-model:batch-filter="batchFilter"
-        project-id="1"
+        project-id="p1"
         :project="f.project"
         :batches="f.batches"
         :tasks="f.tasks"
         :members="f.team"
         :can-bump="true"
         :can-create="true"
-        :task-id="screen === 'task-detail' ? 4 : null"
-        :detail="screen === 'task-detail' ? f.detail : null"
-        detail-tab="history"
       />
       <ReleasesPage
         v-else-if="screen === 'releases'"
         v-model:selected-id="selectedRelease"
-        project-id="1"
+        project-id="p1"
         :project="f.project"
         :active-batch="f.batches[2]"
         :releases="f.releases"
         :detail="f.releaseDetail"
         :can-bump="true"
       />
-      <DashboardPage
+      <DashboardView
         v-else-if="screen === 'dashboard'"
         user-name="Ren"
         :now="f.NOW"
@@ -104,12 +105,36 @@ const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm'
       :me-id="1"
       :now="f.NOW"
     />
-    <NewTaskModal :open="screen === 'new-task'" :batch="{ major: 2, minor: 3 }" :members="f.team" />
+    <NewTaskModal
+      :open="screen === 'new-task'"
+      :batch="{ major: 2, minor: 3 }"
+      :start-version="nextTaskVersion({ major: 2, minor: 3 }, 'b23', f.tasks)"
+      :members="f.team"
+    />
     <MoveTaskModal
       :open="screen === 'move-task'"
       :task="f.tasks[3] ?? null"
       initial-target="review"
+      :next-version="nextTaskVersion({ major: 2, minor: 3 }, 'b23', f.tasks)"
       note-error="Catatan wajib diisi"
+    />
+    <TaskDetailModal
+      :open="screen === 'task-detail'"
+      :task="f.detail"
+      :comments="f.detailComments"
+      :images="f.detailImages"
+      initial-tab="history"
+    />
+    <EditTaskModal
+      v-model:title="editForm.title"
+      v-model:description="editForm.description"
+      v-model:priority="editForm.priority"
+      v-model:assignee-id="editForm.assigneeId"
+      :open="screen === 'edit-task'"
+      :members="f.team"
+      merge-notice="Task ini disimpan orang lain saat kamu mengedit. Cek isiannya lalu simpan lagi."
+      :conflicts="['title']"
+      :theirs="{ ...editForm, title: 'Pairing code 8 digit (tanpa QR)' }"
     />
     <ConfirmDialog
       :open="screen === 'confirm'"

@@ -6,6 +6,8 @@
  */
 export { createProjectsClient } from './client';
 export type { ProjectsClient, ProjectsClientOptions, ProjectsWebCsrf } from './client';
+export { createProjectsList } from './live';
+export type { ProjectsList } from './live';
 export {
   PROJECT_ACTIVITY_EVENTS,
   PROJECT_ACTIVITY_LIMIT,
@@ -69,6 +71,9 @@ export { default as ReleasesPage } from './pages/ReleasesPage.vue';
 export { default as ActivityItem } from './components/ActivityItem.vue';
 export { default as BatchStrip } from './components/BatchStrip.vue';
 export { default as BoardColumn } from './components/BoardColumn.vue';
+export { default as BoardView } from './components/BoardView.vue';
+export { default as DashboardView } from './components/DashboardView.vue';
+export { default as EditTaskModal } from './components/EditTaskModal.vue';
 export { default as BumpVersionMenu } from './components/BumpVersionMenu.vue';
 export { default as MoveTaskModal } from './components/MoveTaskModal.vue';
 export { default as NewProjectModal } from './components/NewProjectModal.vue';

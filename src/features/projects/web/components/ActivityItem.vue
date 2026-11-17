@@ -13,11 +13,17 @@ withDefaults(defineProps<{ entry: ActivityEntry; now?: Date }>(), { now: () => n
     <div class="act__body">
       <p class="act__text">
         <b>{{ entry.actor.name }}</b>
-        <template v-if="entry.kind === 'moved'"> mindahin <b>{{ entry.subject }}</b> ke</template>
-        <template v-else-if="entry.kind === 'completed'"> nyelesaiin <b>{{ entry.subject }}</b></template>
+        <template v-if="entry.kind === 'moved'"> mindahin task di <b>{{ entry.subject }}</b> ke</template>
+        <template v-else-if="entry.kind === 'completed'"> nyelesaiin task di <b>{{ entry.subject }}</b></template>
         <template v-else-if="entry.kind === 'commented'"> komentar di <b>{{ entry.subject }}</b></template>
-        <template v-else-if="entry.kind === 'bumped'"> bump <b>{{ entry.subject }}</b> ke batch</template>
-        <template v-else> bikin task <b>{{ entry.subject }}</b></template>
+        <template v-else-if="entry.kind === 'bumped'"> bump <b>{{ entry.subject }}</b> ke batch{{ entry.version ? '' : ' baru' }}</template>
+        <template v-else-if="entry.kind === 'batch-created'"> buka batch baru di <b>{{ entry.subject }}</b></template>
+        <template v-else-if="entry.kind === 'project-created'"> bikin project <b>{{ entry.subject }}</b></template>
+        <template v-else-if="entry.kind === 'edited'"> ngedit task di <b>{{ entry.subject }}</b></template>
+        <template v-else-if="entry.kind === 'deleted'"> hapus task di <b>{{ entry.subject }}</b></template>
+        <template v-else-if="entry.kind === 'image-added'"> nambah gambar di <b>{{ entry.subject }}</b></template>
+        <template v-else-if="entry.kind === 'image-removed'"> hapus gambar di <b>{{ entry.subject }}</b></template>
+        <template v-else> bikin task di <b>{{ entry.subject }}</b></template>
       </p>
       <div class="act__meta">
         <StatusBlock v-if="entry.status" :status="entry.status" />
