@@ -1,8 +1,10 @@
 /*
- * Screenshots every harness screen: desktop 1440x900 (light and dark) and
- * phone 390x844. Usage: node tests/visual/shoot.cjs <out-dir> [screen,...]
+ * Screenshots every harness screen in light and dark, at desktop 1440x900
+ * and phone 390x844: <screen>-<light|dark>-<desk|phone>.png.
+ * Usage: node tests/visual/shoot.cjs <out-dir> [screen,...]
  * Needs the harness dev server on :5611 and PLAYWRIGHT pointing at a
- * Playwright install (none is a repo dependency).
+ * Playwright install (none is a repo dependency). Flags page overflow and
+ * any dialog or menu that pokes out of the viewport.
  */
 const path = require('node:path');
 const fs = require('node:fs');
@@ -13,30 +15,30 @@ const only = process.argv[3] ? process.argv[3].split(',') : null;
 const BASE = 'http://localhost:5611/';
 const NOW = new Date('2026-11-17T10:20:00');
 
-const SHOTS = [
-  ['board', 'light', 'desk'],
-  ['task-detail', 'light', 'desk'],
-  ['new-task', 'light', 'desk'],
-  ['move-task', 'light', 'desk'],
-  ['confirm', 'light', 'desk'],
-  ['bump', 'light', 'desk', (page) => page.getByRole('button', { name: 'Bump versi' }).click()],
-  ['notifications', 'light', 'desk', (page) => page.locator('.bell').click()],
-  ['releases', 'light', 'desk'],
-  ['dashboard', 'light', 'desk'],
-  ['workspace', 'light', 'desk'],
-  ['chat', 'light', 'desk'],
-  ['feed', 'light', 'desk'],
-  ['login', 'light', 'desk'],
-  ['profile', 'light', 'desk'],
-  ['not-found', 'light', 'desk'],
-  ['board', 'dark', 'desk'],
-  ['dashboard', 'dark', 'desk'],
-  ['task-detail', 'dark', 'desk'],
-  ['board', 'light', 'phone'],
-  ['dashboard', 'light', 'phone'],
-  ['login', 'light', 'phone'],
-  ['workspace', 'light', 'phone'],
+/** Clicks a trigger when the layout shows it (the phone board has no Bump versi button). */
+const clickIfShown = (locator) => locator.isVisible().then((shown) => (shown ? locator.click() : undefined));
+
+/** Screens, with the click that opens a menu screen. */
+const SCREENS = [
+  ['board'],
+  ['task-detail'],
+  ['new-task'],
+  ['move-task'],
+  ['confirm'],
+  ['bump', (page) => clickIfShown(page.getByRole('button', { name: 'Bump versi' }))],
+  ['notifications', (page) => clickIfShown(page.locator('.bell'))],
+  ['releases'],
+  ['dashboard'],
+  ['workspace'],
+  ['chat'],
+  ['feed'],
+  ['login'],
+  ['profile'],
+  ['not-found'],
 ];
+const SHOTS = SCREENS.flatMap(([screen, act]) =>
+  ['desk', 'phone'].flatMap((size) => ['light', 'dark'].map((theme) => [screen, theme, size, act])),
+);
 
 const PROFILE = { id: '1', name: 'Ren', email: 'ren@wajom.co', avatar: null, revision: 1 };
 
@@ -66,9 +68,20 @@ const PROFILE = { id: '1', name: 'Ren', email: 'ren@wajom.co', avatar: null, rev
     if (act) await act(page);
     await page.waitForTimeout(300);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    const clipped = await page.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"]')]
+        .map((element) => ({ element, box: element.getBoundingClientRect() }))
+        .filter(({ box }) => box.width > 0 && (box.left < 0 || box.right > window.innerWidth + 0.5))
+        .map(({ element }) => element.getAttribute('aria-label') || element.className),
+    );
     const file = path.join(out, `${screen}-${theme}-${size}.png`);
     await page.screenshot({ path: file });
-    console.log(`${file}${overflow ? '  [horizontal overflow]' : ''}${errors.length ? `  errors: ${errors.join(' | ')}` : ''}`);
+    const notes = [
+      overflow ? '[horizontal overflow]' : '',
+      clipped.length ? `[outside viewport: ${clipped.join(', ')}]` : '',
+      errors.length ? `errors: ${errors.join(' | ')}` : '',
+    ].filter(Boolean);
+    console.log([file, ...notes].join('  '));
     await context.close();
   }
   await browser.close();
