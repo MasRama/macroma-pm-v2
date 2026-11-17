@@ -1032,7 +1032,7 @@ describe('projects, the board and the dashboard in the open tab', () => {
     const row = container.querySelector(`[data-project-id="${projectId}"]`);
     expect(row?.textContent).toContain('Wajom Portal');
     expect(row?.textContent).toContain('0/2');
-    expect(container.querySelector('.feed__list')?.textContent).toContain('mindahin task di Wajom Portal');
+    expect(container.querySelector('.feed__list')?.textContent).toMatch(/Ren Owner mindahin Satu\s*ke/);
   });
 
   const ONE_PIXEL_PNG = Buffer.from(
@@ -1307,7 +1307,7 @@ describe('the dashboard in the open tab', () => {
     expect(stokoRow?.querySelector('.health__count')?.textContent).toBe('0/1');
   });
 
-  it('lists recent activity with the status and version, links to the feed, and follows other devices live', async () => {
+  it('lists recent activity by task title, status and version, links to the feed, and follows other devices live', async () => {
     const owner = await register('Ren Owner');
     const portal = await createProject(owner, 'Wajom Portal');
     await openBatch(owner, portal);
@@ -1316,18 +1316,23 @@ describe('the dashboard in the open tab', () => {
 
     await openTab(owner.cookie, '/dashboard');
     const latest = container.querySelector('.feed__list li');
-    expect(latest?.textContent).toContain('Ren Owner mindahin task di Wajom Portal ke');
+    expect(latest?.textContent?.replace(/\s+/g, ' ')).toContain('Ren Owner mindahin Pairing code ke');
+    expect(latest?.querySelector('b:nth-of-type(2)')?.textContent).toBe('Pairing code');
     expect(latest?.textContent).toContain('Revisi');
     expect(latest?.textContent).toContain('v0.1.2');
     expect(container.querySelector('.feed__all')?.getAttribute('href')).toBe('/feed');
     expect(statValue(2)).toBe('1');
+    // Opening the batch reads "bump <project> ke batch" with the batch's version.
+    const bumped = [...container.querySelectorAll('.feed__list li')].find((row) => row.textContent?.includes('bump'));
+    expect(bumped?.textContent?.replace(/\s+/g, ' ')).toContain('Ren Owner bump Wajom Portal ke batch');
+    expect(bumped?.querySelector('.act__ver')?.textContent).toBe('v0.1');
 
     // Another device finishes the task: the open dashboard refetches on the board topic.
     await move(owner, task, 'done');
     await settle();
     expect(statValue(2)).toBe('0');
     expect(statValue(3)).toBe('1');
-    expect(container.querySelector('.feed__list li')?.textContent).toContain('nyelesaiin task di Wajom Portal');
+    expect(container.querySelector('.feed__list li')?.textContent?.replace(/\s+/g, ' ')).toContain('nyelesaiin Pairing code');
   });
 
   it('counts a workspace made on another device and says in Indonesian why a new project was refused', async () => {

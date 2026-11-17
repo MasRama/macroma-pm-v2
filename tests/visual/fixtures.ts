@@ -184,11 +184,11 @@ export const health: BoardHealthRow[] = [
 ];
 
 export const activity: ActivityEntry[] = [
-  { id: 'a1', actor: azka, kind: 'moved', subject: 'Wajom Portal', status: 'revisi', version: v(7), at: at(17, '10:08') },
-  { id: 'a2', actor: ren, kind: 'moved', subject: 'Wajom Portal', status: 'ongoing', version: v(4), at: at(17, '08:20') },
-  { id: 'a3', actor: dimas, kind: 'completed', subject: 'Wajom Portal', status: 'done', version: v(8), at: at(17, '07:20') },
-  { id: 'a4', actor: salsa, kind: 'image-added', subject: 'Stoko App', at: at(17, '05:20') },
-  { id: 'a5', actor: ren, kind: 'bumped', subject: 'Stoko App', at: at(16, '09:00') },
+  { id: 'a1', actor: azka, kind: 'moved', subject: 'Wajom Portal', task: 'Checkout Midtrans gagal di Safari iOS', status: 'revisi', version: v(7), at: at(17, '10:08') },
+  { id: 'a2', actor: ren, kind: 'moved', subject: 'Wajom Portal', task: 'Pairing code 8 digit', status: 'ongoing', version: v(4), at: at(17, '08:20') },
+  { id: 'a3', actor: dimas, kind: 'completed', subject: 'Wajom Portal', task: 'Status device realtime via SSE', status: 'done', version: v(8), at: at(17, '07:20') },
+  { id: 'a4', actor: salsa, kind: 'image-added', subject: 'Stoko App', task: null, at: at(17, '05:20') },
+  { id: 'a5', actor: ren, kind: 'bumped', subject: 'Stoko App', task: null, version: { major: 1, minor: 8 }, at: at(16, '09:00') },
 ];
 
 export const wsProjects: WorkspaceProjectCard[] = [
