@@ -3,8 +3,10 @@ export const SCREENS = [
   'task-detail',
   'new-task',
   'move-task',
+  'edit-task',
   'confirm',
   'bump',
+  'first-bump',
   'notifications',
   'releases',
   'dashboard',
@@ -29,9 +31,9 @@ export function screenName(value: string | null): Screen {
 export function pathFor(screen: Screen): string {
   switch (screen) {
     case 'task-detail':
-      return '/projects/1/tasks/4';
+      return '/projects/p1/tasks/t4';
     case 'releases':
-      return '/projects/1/releases';
+      return '/projects/p1/releases';
     case 'dashboard':
       return '/dashboard';
     case 'workspace':
@@ -55,6 +57,6 @@ export function pathFor(screen: Screen): string {
     case 'not-found':
       return '/nowhere';
     default:
-      return '/projects/1/board';
+      return '/projects/p1/board';
   }
 }

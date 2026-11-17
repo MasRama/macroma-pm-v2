@@ -19,13 +19,13 @@ const props = withDefaults(
     activeBatch?: BatchSummary | null;
     releases?: ReleaseSummary[];
     /** Id of the release shown on the right. */
-    selectedId?: number | null;
+    selectedId?: string | null;
     detail?: ReleaseDetail | null;
     canBump?: boolean;
   }>(),
   { project: null, activeBatch: null, releases: () => [], selectedId: null, detail: null, canBump: false },
 );
-const emit = defineEmits<{ 'update:selectedId': [id: number]; bump: [kind: BumpKind] }>();
+const emit = defineEmits<{ 'update:selectedId': [id: string]; bump: [kind: BumpKind] }>();
 
 const tab = ref('changelog');
 const showAll = ref(false);
@@ -58,7 +58,7 @@ const hiddenCount = computed(() => (props.detail?.changelog.length ?? 0) - chang
     />
     <PageHead title="Rilis" description="Tiap batch adalah satu rilis. Bump versi menutup batch aktif dan membuka yang baru.">
       <template v-if="canBump && activeBatch" #actions>
-        <BumpVersionMenu :current="activeBatch" @bump="emit('bump', $event)" />
+        <BumpVersionMenu :current="activeBatch" :closing="activeBatch" @bump="emit('bump', $event)" />
       </template>
     </PageHead>
 

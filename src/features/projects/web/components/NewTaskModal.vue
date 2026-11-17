@@ -11,18 +11,26 @@ import {
   UiModal,
   type PersonRef,
 } from '../../../../shared/ui';
-import type { BatchVersion, NewTaskInput, TaskPriority } from '../view';
+import { formatVersion } from '../format';
+import type { BatchVersion, NewTaskInput, TaskPriority, TaskVersion } from '../view';
 
 const props = withDefaults(
   defineProps<{
     open: boolean;
-    batch: BatchVersion;
+    /** The batch new tasks go to; `null` while the project has no active batch. */
+    batch: BatchVersion | null;
+    /** The version the task starts at, when it is known. */
+    startVersion?: TaskVersion | null;
     members: PersonRef[];
     busy?: boolean;
+    /** Offer image uploads with the task. */
+    allowFiles?: boolean;
     /** Field errors from the server, keyed by field. */
     errors?: Partial<Record<'title' | 'description' | 'assigneeId' | 'files', string>>;
+    /** A refusal that is not about one field. */
+    error?: string;
   }>(),
-  { busy: false, errors: () => ({}) },
+  { startVersion: null, busy: false, allowFiles: false, errors: () => ({}), error: undefined },
 );
 const emit = defineEmits<{ close: []; submit: [input: NewTaskInput] }>();
 
@@ -71,8 +79,9 @@ function submit(): void {
 <template>
   <UiModal :open="open" title="Task baru" :width="460" @close="emit('close')">
     <template #subtitle>
-      Masuk ke Backlog, batch <span class="mono">v{{ batch.major }}.{{ batch.minor }}</span>, mulai di
-      <span class="mono">v{{ batch.major }}.{{ batch.minor }}.0</span>.
+      <template v-if="batch">Masuk ke Backlog, batch <span class="mono">{{ formatVersion(batch) }}</span></template>
+      <template v-else>Masuk ke Backlog, di luar batch</template>
+      <template v-if="startVersion">, mulai di <span class="mono">{{ formatVersion(startVersion) }}</span></template>.
     </template>
     <form id="new-task-form" class="form" novalidate @submit.prevent="submit">
       <TextField id="new-task-title" v-model="title" label="Judul" :error="titleError || errors.title" required />
@@ -99,14 +108,15 @@ function submit(): void {
           <template v-if="assignee" #lead><UiAvatar :person="assignee" :size="22" /></template>
         </SelectField>
       </div>
-      <UiDropzone id="new-task-images" label="Gambar" @files="files = [...files, ...$event]" />
-      <ul v-if="files.length" class="form__files">
+      <UiDropzone v-if="allowFiles" id="new-task-images" label="Gambar" @files="files = [...files, ...$event]" />
+      <ul v-if="allowFiles && files.length" class="form__files">
         <li v-for="(file, index) in files" :key="`${file.name}-${index}`">
           {{ file.name }}
           <button type="button" class="link" @click="files = files.filter((_, at) => at !== index)">Hapus</button>
         </li>
       </ul>
       <p v-if="errors.files" class="form__error">{{ errors.files }}</p>
+      <p v-if="error" role="alert" class="form__error" data-testid="new-task-error">{{ error }}</p>
     </form>
     <template #footer>
       <UiButton variant="ghost" @click="emit('close')">Batal</UiButton>

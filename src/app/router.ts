@@ -1,8 +1,15 @@
-import { createRouter, createWebHistory, type RouteRecordRaw, type RouterScrollBehavior } from 'vue-router';
+import {
+  createRouter,
+  createWebHistory,
+  type RouteLocationNormalized,
+  type RouteRecordRaw,
+  type RouterScrollBehavior,
+} from 'vue-router';
 import { ChangePasswordPage, rolesAccess, RolesPage, SecurityPage, useAuthSession } from '../features/auth/web';
 import { ActivityPage, BoardPage, DashboardPage, ReleasesPage } from '../features/projects/web';
 import { WorkspacePage } from '../features/workspaces/web';
-import { workspacesClient } from './api-clients';
+import { projectsClient, workspacesClient } from './api-clients';
+import { currentWorkspace, newWorkspaceOpen, workspaceNameOf } from './shell-state';
 import activityWebRoutes from './bindings/activity.web';
 import usersWebRoutes from './bindings/users.web';
 import { canEnter } from './navigation';
@@ -18,12 +25,18 @@ const authSession = useAuthSession();
 const signedIn = { requiresAuth: true } as const;
 
 /*
- * Macroma screens. Pages render from props; until they are wired to the
- * Macroma API (phase 2) the routes pass only what the URL says, so each shows
- * its empty state. The official Users binding keeps the /users route, name
- * and access rule; Macroma draws it with its own Pengguna page, and its
+ * Macroma screens. Pages wired to the Macroma API get its typed client and
+ * what they need from the shell; the rest still render from the URL alone and
+ * show their empty state. The official Users binding keeps the /users route,
+ * name and access rule; Macroma draws it with its own Pengguna page, and its
  * /profile is replaced by the app's Profil page.
  */
+const boardProps = (route: RouteLocationNormalized) => ({
+  projectId: String(route.params.projectId),
+  taskId: route.params.taskId ? String(route.params.taskId) : null,
+  client: projectsClient,
+  workspaceNameOf,
+});
 export const appRoutes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/login', name: 'login', component: LoginPage, meta: { guestOnly: true } },
@@ -34,8 +47,15 @@ export const appRoutes = [
     path: '/dashboard',
     name: 'dashboard',
     component: DashboardPage,
-    // The greeting uses the first name: "Pagi, Ren".
-    props: () => ({ userName: authSession.user.value?.name.trim().split(/\s+/)[0] ?? '' }),
+    props: () => ({
+      client: projectsClient,
+      // The greeting uses the first name: "Pagi, Ren".
+      userName: authSession.user.value?.name.trim().split(/\s+/)[0] ?? '',
+      currentWorkspace: () => (currentWorkspace.value ? { id: currentWorkspace.value.id, name: currentWorkspace.value.name } : null),
+      onNewWorkspace: () => {
+        newWorkspaceOpen.value = true;
+      },
+    }),
     meta: signedIn,
   },
   { path: '/feed', name: 'feed', component: ActivityPage, meta: signedIn },
@@ -46,6 +66,7 @@ export const appRoutes = [
     props: (route) => ({
       workspaceId: String(route.params.workspaceId),
       client: workspacesClient,
+      projectsClient,
       meId: authSession.user.value?.id ?? null,
     }),
     meta: signedIn,
@@ -55,14 +76,14 @@ export const appRoutes = [
     path: '/projects/:projectId/board',
     name: 'project-board',
     component: BoardPage,
-    props: true,
+    props: boardProps,
     meta: signedIn,
   },
   {
     path: '/projects/:projectId/tasks/:taskId',
     name: 'project-task',
     component: BoardPage,
-    props: true,
+    props: boardProps,
     meta: signedIn,
   },
   {

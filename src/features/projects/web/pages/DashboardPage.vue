@@ -1,309 +1,148 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { RouterLink } from 'vue-router';
-import { formatLongDate, PageHead, ShellTopBar, TopCrumb, UiButton } from '../../../../shared/ui';
-import ActivityItem from '../components/ActivityItem.vue';
-import StatusBar from '../components/StatusBar.vue';
-import StatusLegend from '../components/StatusLegend.vue';
-import { formatVersion, greeting, projectColor } from '../format';
-import type { ActivityEntry, BoardHealthRow, DashboardStats } from '../view';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { onServerEvent } from '../../../../shared/realtime/browser';
+import { PROJECTS_BOARD_CHANGED_EVENT, PROJECTS_CHANGED_EVENT } from '../../contract';
+import type { ProjectsClient } from '../client';
+import DashboardView from '../components/DashboardView.vue';
+import NewProjectModal from '../components/NewProjectModal.vue';
+import { fieldText, refusalText } from '../refusals';
+import { toDashboard, type DashboardData, type NewProjectInput } from '../view';
 
-/** Home: greeting, four stat blocks, board health per project, latest activity. */
+/**
+ * The dashboard on the Projects API: stats, board health and the latest
+ * activity across the account's projects, refreshed on `projects.changed`,
+ * `projects.board-changed` and `workspaces.changed` (the workspace count). "Project baru" creates the project in the
+ * workspace in view; "Workspace baru" is the shell's.
+ */
 const props = withDefaults(
   defineProps<{
+    client: ProjectsClient;
     userName?: string;
-    now?: Date;
-    workspaceCount?: number;
-    stats?: DashboardStats | null;
-    health?: BoardHealthRow[];
-    activity?: ActivityEntry[];
-    canCreateProject?: boolean;
+    /** The workspace a new project goes to; `null` makes a project outside any workspace. */
+    currentWorkspace?: () => { id: string; name: string } | null;
   }>(),
-  {
-    userName: '',
-    now: () => new Date(),
-    workspaceCount: 0,
-    stats: null,
-    health: () => [],
-    activity: () => [],
-    canCreateProject: true,
-  },
+  { userName: '', currentWorkspace: () => null },
 );
-const emit = defineEmits<{ newWorkspace: []; newProject: [] }>();
+const emit = defineEmits<{ newWorkspace: [] }>();
+const router = useRouter();
 
-const title = computed(() => (props.userName ? `${greeting(props.now)}, ${props.userName}` : greeting(props.now)));
-const summary = computed(
-  () => `${formatLongDate(props.now)} · ${props.workspaceCount} workspace, ${props.stats?.activeProjects ?? 0} project jalan.`,
-);
+const data = ref<DashboardData | null>(null);
+const notice = ref('');
+const now = ref(new Date());
+let latest = 0;
 
-const doneDelta = computed(() => {
-  const stats = props.stats;
-  if (!stats || stats.doneLastWeek === null || stats.doneLastWeek === undefined) return 'minggu ini';
-  const delta = stats.doneThisWeek - stats.doneLastWeek;
-  if (delta > 0) return `naik ${delta} dari minggu lalu`;
-  if (delta < 0) return `turun ${-delta} dari minggu lalu`;
-  return 'sama dengan minggu lalu';
-});
+/** Workspaces owns this topic; naming it here keeps projects from depending on workspaces, which depends on projects. */
+const WORKSPACES_CHANGED_TOPIC = 'workspaces.changed';
 
-const blocks = computed(() => {
-  const stats = props.stats;
-  return [
-    { key: 'active', label: 'Task aktif', value: stats?.activeTasks ?? 0, note: `di ${stats?.activeProjects ?? 0} project`, tone: 'ink' },
-    {
-      key: 'ongoing',
-      label: 'Lagi dikerjain',
-      value: stats?.ongoing ?? 0,
-      note: stats?.ongoingMine != null ? `${stats.ongoingMine} punya kamu` : 'di semua project',
-      tone: 'ongoing',
-    },
-    {
-      key: 'revisi',
-      label: 'Revisi',
-      value: stats?.revisi ?? 0,
-      note: stats?.revisiRepeated != null ? `${stats.revisiRepeated} balik lebih dari sekali` : 'perlu dicek ulang',
-      tone: 'revisi',
-    },
-    { key: 'done', label: 'Selesai minggu ini', value: stats?.doneThisWeek ?? 0, note: doneDelta.value, tone: 'card' },
-  ];
-});
-
-function done(row: BoardHealthRow): number {
-  return row.counts.done;
+async function load(): Promise<void> {
+  const ticket = ++latest;
+  try {
+    const response = await props.client.dashboard();
+    if (ticket !== latest) return;
+    now.value = new Date();
+    if (response.success) {
+      data.value = toDashboard(response.data);
+      notice.value = '';
+    } else if (response.code !== 'UNAUTHORIZED') {
+      notice.value = refusalText(response.code);
+    }
+  } catch (cause) {
+    console.error(cause);
+    if (ticket === latest) notice.value = 'Dashboard belum bisa dimuat. Coba muat ulang halaman.';
+  }
 }
-function total(row: BoardHealthRow): number {
-  const c = row.counts;
-  return c.backlog + c.ongoing + c.revisi + c.review + c.done;
+
+let stopLive: (() => void) | undefined;
+onMounted(() => {
+  const stopProjects = onServerEvent(PROJECTS_CHANGED_EVENT, () => void load());
+  const stopBoard = onServerEvent(PROJECTS_BOARD_CHANGED_EVENT, () => void load());
+  const stopWorkspaces = onServerEvent(WORKSPACES_CHANGED_TOPIC, () => void load());
+  stopLive = () => {
+    stopProjects();
+    stopBoard();
+    stopWorkspaces();
+  };
+  void load();
+});
+onBeforeUnmount(() => stopLive?.());
+
+const newProjectOpen = ref(false);
+const newProjectBusy = ref(false);
+const newProjectError = ref<string | undefined>();
+const workspace = ref<{ id: string; name: string } | null>(null);
+
+function openNewProject(): void {
+  workspace.value = props.currentWorkspace();
+  newProjectError.value = undefined;
+  newProjectOpen.value = true;
+}
+
+async function createProject(input: NewProjectInput): Promise<void> {
+  if (newProjectBusy.value) return;
+  newProjectBusy.value = true;
+  newProjectError.value = undefined;
+  try {
+    const response = await props.client.create({
+      name: input.name,
+      description: input.description || null,
+      workspace_id: workspace.value?.id ?? null,
+    });
+    if (!response.success) {
+      newProjectError.value = fieldText(response.errors, 'name') ?? refusalText(response.code);
+      return;
+    }
+    newProjectOpen.value = false;
+    await router.push({ name: 'project-board', params: { projectId: response.data.project.id } });
+  } catch (cause) {
+    console.error(cause);
+    newProjectError.value = 'Project belum bisa dibuat. Coba lagi.';
+  } finally {
+    newProjectBusy.value = false;
+  }
 }
 </script>
 
 <template>
-  <div class="dash">
-    <ShellTopBar><TopCrumb current="Dashboard" /></ShellTopBar>
-    <PageHead :title="title" :description="summary">
-      <template #actions>
-        <UiButton @click="emit('newWorkspace')">Workspace baru</UiButton>
-        <UiButton v-if="canCreateProject" variant="primary" icon="plus" @click="emit('newProject')">Project baru</UiButton>
-      </template>
-    </PageHead>
-
-    <div class="dash__stats">
-      <div v-for="block in blocks" :key="block.key" class="stat" :class="`stat--${block.tone}`">
-        <div class="stat__label">{{ block.label }}</div>
-        <div class="stat__value">{{ block.value }}</div>
-        <div class="stat__note">{{ block.note }}</div>
-      </div>
-    </div>
-
-    <div class="dash__grid">
-      <section class="panel health" aria-labelledby="health-title">
-        <div class="health__head">
-          <h2 id="health-title" class="h2">Board health</h2>
-          <span class="health__hint">batch aktif tiap project</span>
-        </div>
-        <ul v-if="health.length" class="health__rows">
-          <li v-for="row in health" :key="row.project.id" class="health__row">
-            <span class="health__sq" :style="{ background: projectColor(row.project.id) }" />
-            <RouterLink class="health__name" :to="{ name: 'project-board', params: { projectId: row.project.id } }">
-              {{ row.project.name }}
-            </RouterLink>
-            <span class="health__ver mono">{{ formatVersion(row.batch) }}</span>
-            <StatusBar class="health__bar" :counts="row.counts" />
-            <span class="health__count"><b>{{ done(row) }}</b><span>/{{ total(row) }}</span></span>
-          </li>
-        </ul>
-        <p v-else class="dash__empty">Belum ada project yang jalan.</p>
-        <StatusLegend class="health__legend" />
-      </section>
-
-      <section class="panel feed" aria-labelledby="feed-title">
-        <div class="health__head">
-          <h2 id="feed-title" class="h2">Aktivitas</h2>
-          <RouterLink class="link feed__all" :to="{ name: 'feed' }">Lihat semua</RouterLink>
-        </div>
-        <ul v-if="activity.length" class="feed__list">
-          <ActivityItem v-for="entry in activity" :key="entry.id" :entry="entry" :now="now" />
-        </ul>
-        <p v-else class="dash__empty">Belum ada aktivitas.</p>
-      </section>
-    </div>
-  </div>
+  <DashboardView
+    data-testid="dashboard-page"
+    :user-name="userName"
+    :now="now"
+    :workspace-count="data?.workspaceCount ?? 0"
+    :stats="data?.stats ?? null"
+    :health="data?.health ?? []"
+    :activity="data?.activity ?? []"
+    :busy="newProjectBusy"
+    @new-workspace="emit('newWorkspace')"
+    @new-project="openNewProject"
+  >
+    <template #notice>
+      <p v-if="notice" role="alert" class="dash-notice">{{ notice }}</p>
+    </template>
+  </DashboardView>
+  <NewProjectModal
+    :open="newProjectOpen"
+    :workspace-name="workspace?.name"
+    :busy="newProjectBusy"
+    :name-error="newProjectError"
+    @close="newProjectOpen = false"
+    @submit="createProject"
+  />
 </template>
 
 <style scoped>
-.dash {
-  padding-bottom: 28px;
-}
-.dash__stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  padding: 0 28px;
-}
-.stat {
-  border-radius: var(--r-panel);
-  padding: 16px 18px;
-  color: #fff;
-}
-.stat--ink {
-  background: var(--block);
-  border: 1px solid var(--block-line);
-  color: var(--block-fg);
-}
-.stat--ongoing {
-  background: var(--c-ongoing);
-}
-.stat--revisi {
-  background: var(--c-revisi);
-}
-.stat--card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  color: var(--ink);
-}
-.stat__label {
-  font-size: 12.5px;
-  font-weight: 600;
-  opacity: 0.8;
-}
-.stat__value {
-  margin-top: 8px;
-  font-size: 40px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1.1;
-}
-.stat__note {
-  margin-top: 2px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.78);
-}
-.stat--ink .stat__note {
-  color: var(--block-meta);
-}
-.stat--card .stat__note {
-  color: var(--mute);
-}
-.dash__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 14px;
-  padding: 14px 28px 0;
-  align-items: start;
-}
-.health {
-  padding: 18px 22px;
-}
-.health__head {
-  display: flex;
-  align-items: center;
-}
-.health__hint {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--mute);
-}
-.health__rows {
-  margin: 6px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.health__row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 13px 0;
-  border-bottom: 1px solid var(--line-soft);
-}
-.health__sq {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-.health__name {
-  width: 120px;
-  flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
-  text-decoration: none;
-}
-.health__name:hover {
-  text-decoration: underline;
-}
-.health__ver {
-  width: 38px;
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--mute);
-}
-.health__bar {
-  flex: 1;
-}
-.health__count {
-  width: 58px;
-  text-align: right;
-  font-size: 12.5px;
-}
-.health__count span {
-  color: var(--mute);
-}
-.health__legend {
-  margin-top: 14px;
-}
-.feed {
-  padding: 18px 20px;
-  overflow: hidden;
-}
-.feed__all {
-  margin-left: auto;
-  font-size: 12.5px;
-}
-.feed__list {
-  margin: 0;
-  padding: 0;
-}
-.dash__empty {
-  margin: 16px 0 4px;
+.dash-notice {
+  margin: 0 28px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--alert);
+  border-radius: var(--r-small);
   font-size: 13px;
-  color: var(--mute);
-}
-@media (max-width: 1100px) {
-  .dash__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  color: var(--alert);
+  background: var(--card);
 }
 @media (max-width: 760px) {
-  .dash__stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    padding: 0 16px;
-  }
-  .stat__value {
-    font-size: 32px;
-  }
-  .dash__grid {
-    padding: 12px 16px 0;
-  }
-  /* Phones: the status bar gets its own full-width line under name, version and count. */
-  .health__row {
-    flex-wrap: wrap;
-    row-gap: 9px;
-  }
-  .health__name {
-    flex: 1;
-    width: auto;
-  }
-  .health__bar {
-    order: 1;
-    flex-basis: 100%;
-  }
-  .health__hint {
-    display: none;
+  .dash-notice {
+    margin: 0 16px 14px;
   }
 }
 </style>
