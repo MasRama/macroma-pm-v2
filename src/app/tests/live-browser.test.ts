@@ -1244,3 +1244,108 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(document.body.textContent).not.toContain('belum terunggah');
   });
 });
+
+describe('the dashboard in the open tab', () => {
+  const db = () => getDatabase();
+
+  async function createProject(owner: { cookie: string }, name: string): Promise<string> {
+    expect((await asDevice(owner.cookie, '/api/projects', 'POST', { name })).status).toBe(201);
+    return (db().prepare('SELECT id FROM projects WHERE name = ? ORDER BY created_at DESC LIMIT 1').get(name) as { id: string }).id;
+  }
+
+  async function openBatch(owner: { cookie: string }, projectId: string): Promise<void> {
+    expect((await asDevice(owner.cookie, `/api/projects/${projectId}/batches`, 'POST', { activate: true })).status).toBe(201);
+  }
+
+  async function createTask(actor: { cookie: string }, projectId: string, title: string, extra: Record<string, unknown> = {}): Promise<string> {
+    expect((await asDevice(actor.cookie, `/api/projects/${projectId}/tasks`, 'POST', { title, ...extra })).status).toBe(201);
+    return (db().prepare('SELECT id FROM tasks WHERE project_id = ? AND title = ?').get(projectId, title) as { id: string }).id;
+  }
+
+  async function move(actor: { cookie: string }, taskId: string, column: string): Promise<void> {
+    expect((await asDevice(actor.cookie, `/api/tasks/${taskId}/move`, 'PATCH', { column_id: column, note: 'Catatan' })).status).toBe(200);
+  }
+
+  const stat = (index: number) => container.querySelectorAll('.stat')[index];
+  const statValue = (index: number) => stat(index)?.querySelector('.stat__value')?.textContent?.trim();
+  const statNote = (index: number) => stat(index)?.querySelector('.stat__note')?.textContent?.trim();
+
+  it('shows the four stat blocks with their sub-lines and a board health row per project', async () => {
+    const owner = await register('Ren Owner');
+    const portal = await createProject(owner, 'Wajom Portal');
+    await openBatch(owner, portal);
+    const mine = await createTask(owner, portal, 'Pairing code', { assignee_id: owner.id });
+    const twice = await createTask(owner, portal, 'Checkout Safari');
+    const finished = await createTask(owner, portal, 'Status realtime');
+    await move(owner, mine, 'ongoing');
+    await move(owner, twice, 'revisi');
+    await move(owner, twice, 'ongoing');
+    await move(owner, twice, 'revisi');
+    await move(owner, finished, 'done');
+    const stoko = await createProject(owner, 'Stoko App');
+    await createTask(owner, stoko, 'Katalog');
+
+    await openTab(owner.cookie, '/dashboard');
+    expect(container.querySelector('h1')?.textContent).toMatch(/, Ren$/);
+    expect(container.textContent).toContain('0 workspace, 2 project jalan.');
+    expect([0, 1, 2, 3].map(statValue)).toEqual(['2', '1', '1', '1']);
+    expect([0, 1, 2, 3].map(statNote)).toEqual([
+      'di 2 project',
+      '1 punya kamu',
+      '1 balik lebih dari sekali',
+      'naik 1 dari minggu lalu',
+    ]);
+
+    const portalRow = container.querySelector(`[data-project-id="${portal}"]`);
+    expect(portalRow?.textContent).toContain('Wajom Portal');
+    expect(portalRow?.querySelector('.health__ver')?.textContent).toBe('v0.1');
+    expect(portalRow?.querySelector('.health__count')?.textContent).toBe('1/3');
+    expect(portalRow?.querySelector('a')?.getAttribute('href')).toBe(`/projects/${portal}/board`);
+    // No active batch: the row counts the whole project and shows no version.
+    const stokoRow = container.querySelector(`[data-project-id="${stoko}"]`);
+    expect(stokoRow?.querySelector('.health__ver')?.textContent).toBe('—');
+    expect(stokoRow?.querySelector('.health__count')?.textContent).toBe('0/1');
+  });
+
+  it('lists recent activity with the status and version, links to the feed, and follows other devices live', async () => {
+    const owner = await register('Ren Owner');
+    const portal = await createProject(owner, 'Wajom Portal');
+    await openBatch(owner, portal);
+    const task = await createTask(owner, portal, 'Pairing code');
+    await move(owner, task, 'revisi');
+
+    await openTab(owner.cookie, '/dashboard');
+    const latest = container.querySelector('.feed__list li');
+    expect(latest?.textContent).toContain('Ren Owner mindahin task di Wajom Portal ke');
+    expect(latest?.textContent).toContain('Revisi');
+    expect(latest?.textContent).toContain('v0.1.2');
+    expect(container.querySelector('.feed__all')?.getAttribute('href')).toBe('/feed');
+    expect(statValue(2)).toBe('1');
+
+    // Another device finishes the task: the open dashboard refetches on the board topic.
+    await move(owner, task, 'done');
+    await settle();
+    expect(statValue(2)).toBe('0');
+    expect(statValue(3)).toBe('1');
+    expect(container.querySelector('.feed__list li')?.textContent).toContain('nyelesaiin task di Wajom Portal');
+  });
+
+  it('counts a workspace made on another device and says in Indonesian why a new project was refused', async () => {
+    const owner = await register('Ren Owner');
+    await openTab(owner.cookie, '/dashboard');
+    expect(container.textContent).toContain('0 workspace, 0 project jalan.');
+
+    expect((await asDevice(owner.cookie, '/api/workspaces', 'POST', { name: 'Wajom Studio' })).status).toBe(201);
+    await settle();
+    expect(container.textContent).toContain('1 workspace, 0 project jalan.');
+
+    await click('[data-testid="dashboard-new-project"]');
+    const name = document.querySelector<HTMLInputElement>('#project-name')!;
+    name.value = 'x'.repeat(256);
+    name.dispatchEvent(new Event('input'));
+    document.querySelector<HTMLFormElement>('#new-project-form')!.requestSubmit();
+    await settle();
+    expect(document.querySelector('#new-project-form')?.textContent).toContain('Nama wajib diisi, maksimal 255 karakter.');
+    expect(db().prepare('SELECT COUNT(*) AS n FROM projects WHERE owner_id = ?').get(owner.id)).toEqual({ n: 0 });
+  });
+});
