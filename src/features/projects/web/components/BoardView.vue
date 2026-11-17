@@ -185,7 +185,7 @@ function onDragTask(id: string | null): void {
         <p v-if="byStatus[phoneStatus].length === 0" class="phone-board__empty">Belum ada task</p>
       </div>
       <div v-if="canCreate" class="phone-board__bar">
-        <UiButton variant="primary" size="lg" block icon="plus" :disabled="busy || !activeBatch" @click="emit('newTask')">Task baru</UiButton>
+        <UiButton variant="primary" size="lg" block icon="plus" data-testid="new-task-phone" :disabled="busy || !activeBatch" @click="emit('newTask')">Task baru</UiButton>
       </div>
     </div>
   </div>

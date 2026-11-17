@@ -955,8 +955,12 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(adders()[0]?.disabled).toBe(true);
     const newTask = () => container.querySelector<HTMLButtonElement>('[data-testid="new-task"]');
     expect(newTask()?.disabled).toBe(true);
+    // The phone layout's bottom bar has its own Task baru, held back the same way.
+    const phoneNewTask = () => container.querySelector<HTMLButtonElement>('.phone-board__bar [data-testid="new-task-phone"]');
+    expect(phoneNewTask()?.disabled).toBe(true);
     adders()[0]?.click();
     newTask()?.click();
+    phoneNewTask()?.click();
     await settle();
     expect(document.querySelector('#new-task-title')).toBeNull();
 
@@ -972,6 +976,7 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(hint()).toBeNull();
     expect(container.querySelector('.batch')?.textContent).toContain('v0.1');
     expect(newTask()?.disabled).toBe(false);
+    expect(phoneNewTask()?.disabled).toBe(false);
     expect(adders()[0]?.disabled).toBe(false);
 
     application?.unmount();
@@ -982,6 +987,7 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(hint()?.textContent).toContain('Task baru bisa dibuat setelah owner project bump versi.');
     expect(container.querySelector('[data-testid="bump-version"]')).toBeNull();
     expect(newTask()?.disabled).toBe(true);
+    expect(phoneNewTask()?.disabled).toBe(true);
   });
 
   it('shows released batches on Rilis, keeps the chosen one in the URL and bumps from there', async () => {
