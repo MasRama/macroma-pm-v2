@@ -15,14 +15,14 @@ function readJson(relativePath) {
 }
 
 const rootManifest = readJson('package.json');
-const publishableManifest = readJson('packages/nara/package.json');
 const lockfile = readJson('package-lock.json');
 
+// packages/nara is the vendored Nara CLI: it carries the framework's version,
+// not Macroma's, so only the root manifest and its lockfile must agree.
 // npm lockfileVersion 3 records the root version twice: top-level
 // `version` and `packages[""].version`. Both must track the manifests.
 const observed = new Map([
   ['package.json → version', rootManifest.version],
-  ['packages/nara/package.json → version', publishableManifest.version],
   ['package-lock.json → version', lockfile.version],
   ['package-lock.json → packages[""].version', lockfile.packages?.['']?.version],
 ]);
@@ -41,7 +41,7 @@ if (distinct.size > 1 || failed) {
   for (const [label, value] of observed) {
     console.error(`  ${label}: ${JSON.stringify(value)}`);
   }
-  console.error('Fix: bump every manifest together (root `npm version <v> --no-git-tag-version` plus packages/nara/package.json).');
+  console.error('Fix: set the version with `npm version <v> --no-git-tag-version`.');
   process.exit(1);
 }
 

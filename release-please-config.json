@@ -4,13 +4,13 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "package-name": "nara",
+      "package-name": "macroma",
+      "initial-version": "2.0.0",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         { "type": "json", "path": "package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "package-lock.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "package-lock.json", "jsonpath": "$.packages[''].version" },
-        { "type": "json", "path": "packages/nara/package.json", "jsonpath": "$.version" }
+        { "type": "json", "path": "package-lock.json", "jsonpath": "$.packages[''].version" }
       ]
     }
   }
