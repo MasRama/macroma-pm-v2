@@ -569,8 +569,10 @@ npm run import:v1 -- --from /path/to/v1/database/dev.sqlite3 --storage /path/to/
   and notification data fields that are not flat values are left out.
 - Each imported activity entry records the `task_title` and `batch_version`
   it names in its `meta`, from the imported task or batch, so the names
-  outlive later deletes. An entry whose task or batch V1 no longer had keeps
-  `null`.
+  outlive later deletes. For a task deleted in V1 (its `task_id` is `NULL`),
+  the title comes from V1's description, `Task "<title>" dibuat` or
+  `Task "<title>" dipindah dari …`; any other entry whose task or batch V1 no
+  longer had keeps `null`.
 - Batch activation times come from V1's `batch.activated` activity entries
   (the latest per batch); a batch with none falls back to its creation order.
   The batch active in V1 stays active.
