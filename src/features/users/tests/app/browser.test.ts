@@ -277,7 +277,7 @@ function submitForm(selector: string): void {
 }
 
 function chooseFile(file: TestFile): void {
-  const input = container.querySelector('#avatar-file');
+  const input = container.querySelector('#profile-avatar-file');
   if (!(input instanceof HTMLInputElement)) throw new Error('Missing avatar input');
   Object.defineProperty(input, 'files', { configurable: true, value: [file] });
   input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -328,20 +328,21 @@ describe('users browser surfaces', () => {
     const documentElement = document.documentElement;
 
     expect(router.currentRoute.value.name).toBe('dashboard');
-    expect(container.querySelector('h1')?.textContent).toContain('Hi, Existing.');
-    const appNavigation = container.querySelector<HTMLElement>('nav[aria-label="Application navigation"]');
-    expect(appNavigation?.classList.contains('site-header-nav')).toBe(true);
-    expect(appNavigation?.closest('.site-header')?.classList.contains('site-header--app')).toBe(true);
-    expect(container.querySelector('a[href="/dashboard"]')?.textContent).toContain('Dashboard');
-    expect(container.querySelector('a[href="/profile"]')?.textContent).toContain('Profile');
+    expect(container.querySelector('h1')?.textContent).toMatch(/, Existing$/);
+    const appNavigation = container.querySelector<HTMLElement>('nav[aria-label="Navigasi utama"]');
+    expect(appNavigation).not.toBeNull();
+    const dashboardLink = [...appNavigation!.querySelectorAll('a[href="/dashboard"]')].find((link) => link.textContent?.includes('Dashboard'));
+    expect(dashboardLink).toBeDefined();
+    const profileLink = appNavigation!.querySelector<HTMLAnchorElement>('a[href="/profile"]');
+    expect(profileLink?.getAttribute('aria-label')).toBe('Profil Existing User');
 
     const navigation = waitForNavigation();
-    container.querySelector<HTMLAnchorElement>('a[href="/profile"]')?.click();
+    profileLink?.click();
     await navigation;
     await settle();
 
     expect(router.currentRoute.value.name).toBe('profile');
-    expect(container.querySelector('h1')?.textContent).toContain('Your profile');
+    expect(container.querySelector('h1')?.textContent).toBe('Profil');
     expect(document.documentElement).toBe(documentElement);
   });
 
@@ -359,16 +360,16 @@ describe('users browser surfaces', () => {
     await mountAt('/profile');
     await settle();
 
-    expect(container.querySelector<HTMLInputElement>('#name')?.value).toBe('Existing User');
-    expect(container.querySelector<HTMLInputElement>('#email')?.value).toBe(email);
+    expect(container.querySelector<HTMLInputElement>('#profile-name')?.value).toBe('Existing User');
+    expect(container.querySelector<HTMLInputElement>('#profile-email')?.value).toBe(email);
 
     const updatedEmail = `${randomUUID()}@example.com`;
-    setInput('#name', 'Updated User');
-    setInput('#email', updatedEmail);
+    setInput('#profile-name', 'Updated User');
+    setInput('#profile-email', updatedEmail);
     submitForm('[data-testid="profile-form"]');
     await settle();
 
-    expect(container.textContent).toContain('Profile changes saved.');
+    expect(container.textContent).toContain('Data diri disimpan.');
     expect(usersWebHost.currentSessionUser()).toMatchObject({ name: 'Updated User', email: updatedEmail });
     expect(fetchRequests).toContainEqual({ method: 'PATCH', path: '/api/users/me' });
 
@@ -385,14 +386,13 @@ describe('users browser surfaces', () => {
     await settle();
     const profileRequestsBeforeSubmit = fetchRequests.filter(({ path }) => path === '/api/users/me').length;
 
-    setInput('#name', 'A');
-    setInput('#email', 'invalid');
+    setInput('#profile-name', ' ');
+    setInput('#profile-email', 'invalid');
     submitForm('[data-testid="profile-form"]');
     await settle();
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Please correct');
-    expect(container.textContent).toContain('Name must be at least 2 characters');
-    expect(container.textContent).toContain('Invalid email format');
+    expect(container.textContent).toContain('Nama wajib diisi');
+    expect(container.textContent).toContain('Masukkan email yang valid');
     expect(fetchRequests.filter(({ path }) => path === '/api/users/me')).toHaveLength(profileRequestsBeforeSubmit);
   });
 
@@ -401,20 +401,19 @@ describe('users browser surfaces', () => {
     await mountAt('/profile');
     await settle();
 
-    setInput('#current_password', 'wrong password');
-    setInput('#new_password', 'new correct horse battery staple');
-    setInput('#confirm_password', 'new correct horse battery staple');
+    setInput('#profile-current-password', 'wrong password');
+    setInput('#profile-new-password', 'new correct horse battery staple');
     submitForm('[data-testid="password-form"]');
     await settle();
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Current password is incorrect');
     expect(router.currentRoute.value.name).toBe('profile');
 
-    setInput('#current_password', TEST_PASSWORD);
+    setInput('#profile-current-password', TEST_PASSWORD);
     submitForm('[data-testid="password-form"]');
     await settle();
 
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('Password updated');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Password diganti.');
     expect(usersWebHost.currentSessionUser()).not.toBeNull();
     expect(fetchRequests).toContainEqual({ method: 'POST', path: '/api/auth/change-password' });
   });
@@ -426,32 +425,31 @@ describe('users browser surfaces', () => {
 
     chooseFile(new NodeFile(['not an image'], 'avatar.txt', { type: 'text/plain' }));
     await settle();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Choose a JPEG, PNG, GIF, or WebP image');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Pilih gambar JPEG, PNG, GIF, atau WebP.');
     expect(fetchRequests.filter(({ path }) => path === '/api/assets/avatar')).toHaveLength(0);
 
     chooseFile(new NodeFile([ONE_PIXEL_PNG], 'avatar.png', { type: 'image/png' }));
     await settle();
-    const avatar = container.querySelector<HTMLImageElement>('[data-testid="profile-avatar"]');
+    const avatar = container.querySelector<HTMLImageElement>('[data-testid="profile-avatar"] img');
     expect(avatar?.getAttribute('src')).toMatch(/^\/api\/assets\/avatar\/[a-f0-9-]+\.webp$/i);
-    expect(container.textContent).toContain('Profile photo updated.');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(fetchRequests).toContainEqual({ method: 'POST', path: '/api/assets/avatar' });
 
     const filename = avatar?.getAttribute('src')?.split('/').pop();
     if (filename) await rm(resolve(process.cwd(), 'storage', 'avatars', filename), { force: true });
   });
 
-  it('changes landing calls to match the current session', async () => {
+  it('sends / to Masuk for a guest and to the dashboard for the current session', async () => {
     await mountAt('/');
-    expect(container.querySelector('a[href="/login"]')?.textContent).toContain('Sign in');
-    expect(container.querySelector('a[href="/dashboard"]')).toBeNull();
+    expect(router.currentRoute.value.name).toBe('login');
 
     await startAuthenticatedUser();
     await router.push('/');
     await router.isReady();
     await nextTick();
 
-    expect(container.querySelector('a[href="/dashboard"]')?.textContent).toContain('Dashboard');
-    expect(container.querySelector('a[href="/login"]')).toBeNull();
+    expect(router.currentRoute.value.name).toBe('dashboard');
+    expect(container.querySelector('nav[aria-label="Navigasi utama"]')).not.toBeNull();
   });
 
   it('logs out from the shell and protects account routes again', async () => {
@@ -459,7 +457,7 @@ describe('users browser surfaces', () => {
     await mountAt('/dashboard');
 
     const navigation = waitForNavigation();
-    [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Sign out'))?.click();
+    container.querySelector<HTMLButtonElement>('button[aria-label="Keluar"]')?.click();
     await navigation;
 
     expect(router.currentRoute.value.name).toBe('login');
@@ -487,11 +485,11 @@ describe('users administration browser surfaces', () => {
       },
     });
 
-    expect(container.querySelector('a[href="/users"]')?.textContent).toContain('Users');
-    expect(container.querySelector('a[href="/roles"]')?.textContent).toContain('Roles');
-    // The shell lists routes that declare meta.nav, in route order.
-    const links = [...container.querySelectorAll('nav[aria-label="Application navigation"] a')].map((link) => link.textContent?.trim());
-    expect(links).toEqual(['Dashboard', 'Profile', 'Users', 'Roles', 'Activity', 'Security']);
+    expect(container.querySelector('a[href="/users"]')?.textContent).toContain('Pengguna');
+    expect(container.querySelector('a[href="/roles"]')?.textContent).toContain('Role & izin');
+    // The sidebar's ADMIN section lists the admin routes that declare meta.nav, in route order.
+    const links = [...container.querySelectorAll('nav[aria-label="Navigasi utama"] a.proj__a--admin')].map((link) => link.textContent?.trim());
+    expect(links).toEqual(['Pengguna', 'Role & izin', 'Log audit']);
   });
 
   it('redirects restricted users away from administration routes', async () => {

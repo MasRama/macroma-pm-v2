@@ -1,17 +1,17 @@
-@import url('https://rsms.me/inter/inter.css');
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 @import "./palette.css";
+@import "./macroma.css";
 @source "../src/app";
 @source "../src/features";
+@source "../src/shared";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --font-sans: 'Inter var', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-body: 'Manrope', system-ui, sans-serif;
-  --font-mono-accent: 'JetBrains Mono', monospace;
+  --font-sans: 'Geist Variable', 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-heading: 'Geist Variable', 'Geist', system-ui, sans-serif;
+  --font-body: 'Geist Variable', 'Geist', system-ui, sans-serif;
+  --font-mono-accent: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -120,7 +120,7 @@
 
 @layer base {
   html {
-    font-family: 'Manrope', system-ui, sans-serif;
+    font-family: var(--font-ui);
   }
 
   body::-webkit-scrollbar {
@@ -140,34 +140,41 @@
 /* Shared shell for authenticated app pages: same width, rhythm, and backdrop everywhere. */
 @layer components {
   .nara-page { position: relative; isolation: isolate; overflow: hidden; padding: 36px 20px 96px; }
-  .nara-page::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: -2;
-    background-image: linear-gradient(var(--nara-grid) 1px, transparent 1px), linear-gradient(90deg, var(--nara-grid) 1px, transparent 1px);
-    background-size: 56px 56px;
-    background-position: 50% -1px;
-    mask-image: radial-gradient(ellipse 70% 50% at 50% 0%, #000 30%, transparent 78%);
-    -webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 0%, #000 30%, transparent 78%);
-    pointer-events: none;
-  }
-  .nara-page::after {
-    content: '';
-    position: absolute;
-    top: 300px;
-    left: 50%;
-    z-index: -1;
-    width: min(1100px, 120%);
-    height: 560px;
-    transform: translateX(-50%);
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--nara-accent) 18%, transparent), transparent);
-    pointer-events: none;
-  }
   @media (min-width: 640px) { .nara-page { padding: 48px 40px 120px; } }
   .nara-page-inner { max-width: 1100px; margin: 0 auto; }
   .nara-page-title { font-family: var(--font-heading); font-size: clamp(2.4rem, 5.6vw, 4.4rem); font-weight: 800; line-height: 1.02; letter-spacing: -0.058em; overflow-wrap: anywhere; }
   .nara-page-title-accent { color: var(--nara-accent-strong); }
   .nara-page-lede { margin-top: 16px; max-width: 520px; color: var(--nara-muted); font-size: 15.5px; line-height: 1.8; }
   .nara-page-body { margin-top: 40px; }
+}
+
+/*
+ * Official Nara pages (users, roles, activity, security, change password) read
+ * --nara-* colours; point them at the Macroma tokens so they sit in the same
+ * palette and follow the theme switch.
+ */
+html:root {
+  --nara-bg: var(--bg);
+  --nara-surface: var(--card);
+  --nara-surface-soft: var(--fill);
+  --nara-fg: var(--ink);
+  --nara-muted: var(--mute);
+  --nara-faint: var(--mute);
+  --nara-line: var(--line);
+  --nara-line-strong: var(--dash);
+  --nara-input: var(--field);
+  --nara-accent: var(--ink);
+  --nara-accent-strong: var(--ink);
+  --nara-accent-soft: var(--fill);
+  --nara-on-accent: var(--primary-fg);
+  --nara-signal: var(--c-done);
+  --nara-signal-soft: var(--fill);
+  --nara-signal-on-light: var(--c-done);
+  --nara-danger: var(--c-revisi);
+  --nara-danger-solid: var(--c-revisi);
+  --nara-grid: transparent;
+  --nara-shadow: var(--shadow-card);
+  --nara-avatar: var(--c-ongoing);
+  --nara-avatar-fg: #ffffff;
+  --nara-mono: var(--font-mono);
 }

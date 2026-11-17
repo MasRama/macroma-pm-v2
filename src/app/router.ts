@@ -1,52 +1,86 @@
 import { createRouter, createWebHistory, type RouteRecordRaw, type RouterScrollBehavior } from 'vue-router';
-import {
-  ChangePasswordPage,
-  LoginPage,
-  RegisterPage,
-  rolesAccess,
-  RolesPage,
-  SecurityPage,
-  useAuthSession,
-} from '../features/auth/web';
+import { ChangePasswordPage, rolesAccess, RolesPage, SecurityPage, useAuthSession } from '../features/auth/web';
+import { ActivityPage, BoardPage, DashboardPage, ReleasesPage } from '../features/projects/web';
+import { WorkspacePage } from '../features/workspaces/web';
 import activityWebRoutes from './bindings/activity.web';
 import usersWebRoutes from './bindings/users.web';
 import { canEnter } from './navigation';
-import DashboardPage from './pages/DashboardPage.vue';
-import HomePage from './pages/HomePage.vue';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.vue';
+import LoginPage from './pages/auth/LoginPage.vue';
+import RegisterPage from './pages/auth/RegisterPage.vue';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage.vue';
 import NotFoundPage from './pages/NotFoundPage.vue';
+import ProfilePage from './pages/ProfilePage.vue';
 
+const authSession = useAuthSession();
+const signedIn = { requiresAuth: true } as const;
+
+/*
+ * Macroma screens. Pages render from props; until they are wired to the
+ * Macroma API (phase 2) the routes pass only what the URL says, so each shows
+ * its empty state. The official Users binding keeps /users; its /profile is
+ * replaced by the app's Profil page.
+ */
 export const appRoutes = [
-  {
-    path: '/',
-    name: 'home',
-    component: HomePage,
-  },
-  {
-    path: '/login',
-    name: 'login',
-    component: LoginPage,
-    meta: { guestOnly: true },
-  },
-  {
-    path: '/register',
-    name: 'register',
-    component: RegisterPage,
-    meta: { guestOnly: true },
-  },
+  { path: '/', redirect: '/dashboard' },
+  { path: '/login', name: 'login', component: LoginPage, meta: { guestOnly: true } },
+  { path: '/register', name: 'register', component: RegisterPage, meta: { guestOnly: true } },
+  { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordPage, meta: { guestOnly: true } },
+  { path: '/reset-password', name: 'reset-password', component: ResetPasswordPage, meta: { guestOnly: true } },
   {
     path: '/dashboard',
     name: 'dashboard',
     component: DashboardPage,
-    meta: { requiresAuth: true, nav: { label: 'Dashboard' } },
+    // The greeting uses the first name: "Pagi, Ren".
+    props: () => ({ userName: authSession.user.value?.name.trim().split(/\s+/)[0] ?? '' }),
+    meta: signedIn,
   },
+  { path: '/feed', name: 'feed', component: ActivityPage, meta: signedIn },
+  {
+    path: '/workspaces/:workspaceId',
+    name: 'workspace',
+    component: WorkspacePage,
+    props: true,
+    meta: signedIn,
+  },
+  { path: '/projects/:projectId', redirect: (to) => ({ name: 'project-board', params: to.params }) },
+  {
+    path: '/projects/:projectId/board',
+    name: 'project-board',
+    component: BoardPage,
+    props: true,
+    meta: signedIn,
+  },
+  {
+    path: '/projects/:projectId/tasks/:taskId',
+    name: 'project-task',
+    component: BoardPage,
+    props: true,
+    meta: signedIn,
+  },
+  {
+    path: '/projects/:projectId/releases',
+    name: 'project-releases',
+    component: ReleasesPage,
+    props: true,
+    meta: signedIn,
+  },
+  {
+    path: '/projects/:projectId/activity',
+    name: 'project-activity',
+    component: ActivityPage,
+    props: true,
+    meta: signedIn,
+  },
+  { path: '/profile', name: 'profile', component: ProfilePage, meta: signedIn },
   {
     path: '/change-password',
     name: 'change-password',
     component: ChangePasswordPage,
     meta: { requiresAuth: true, standaloneAuth: true },
   },
-  // Routes with meta.nav appear in the shell's navigation in this order.
-  ...usersWebRoutes,
+  // Admin pages: meta.nav lists them in the sidebar's ADMIN section, in this order.
+  ...usersWebRoutes.filter((route) => route.name !== 'profile'),
   {
     path: '/roles',
     name: 'roles',
@@ -54,17 +88,8 @@ export const appRoutes = [
     meta: { requiresAuth: true, requiresAccess: rolesAccess('view'), nav: { label: 'Roles' } },
   },
   ...activityWebRoutes,
-  {
-    path: '/security',
-    name: 'security',
-    component: SecurityPage,
-    meta: { requiresAuth: true, nav: { label: 'Security' } },
-  },
-  {
-    path: '/:pathMatch(.*)*',
-    name: 'not-found',
-    component: NotFoundPage,
-  },
+  { path: '/security', name: 'security', component: SecurityPage, meta: signedIn },
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundPage },
 ] satisfies RouteRecordRaw[];
 
 export const appScrollBehavior: RouterScrollBehavior = (to, _from, savedPosition) => {
@@ -78,8 +103,6 @@ const router = createRouter({
   routes: appRoutes,
   scrollBehavior: appScrollBehavior,
 });
-
-const authSession = useAuthSession();
 
 router.beforeEach(async (to) => {
   try {
