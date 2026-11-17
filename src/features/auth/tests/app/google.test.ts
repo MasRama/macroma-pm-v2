@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../../../../app/server';
-import { signIn, signUp } from '../../../../app/tests/personas';
+import { signIn, signUp, TEST_PASSWORD, type Persona } from '../../../../app/tests/personas';
+import { getDatabase } from '../../../../shared/database';
 import { mergeResponseCookies } from '../../../../shared/security/tests/helpers';
 import { GOOGLE } from '../../server/config';
 import { GOOGLE_STATE_COOKIE_NAME } from '../../server/google';
-import { enableTwoFactor, findUserByEmail } from '../../server/repository';
+import { enableTwoFactor, findUserByEmail, findUserById } from '../../server/repository';
 
 interface GoogleAccount {
   email: string;
@@ -37,6 +38,18 @@ async function signInWithGoogle(options: { tamperState?: boolean } = {}) {
     headers: { Cookie: cookie },
   });
   return { callback, cookie: mergeResponseCookies(cookie, callback) };
+}
+
+/** An account whose email was proven, as Google sign-in or an administrator marks it. */
+async function verifiedAccount(name: string): Promise<Persona> {
+  const persona = await signUp(name);
+  getDatabase().prepare('UPDATE users SET verified = 1 WHERE id = ?').run(persona.id);
+  return persona;
+}
+
+async function currentUser(cookie: string) {
+  const me = await app.request('/api/auth/me', { headers: { Cookie: cookie } });
+  return { status: me.status, user: me.status === 200 ? ((await me.json()) as { data: { user: { id: string; verified: boolean } } }).data.user : undefined };
 }
 
 describe('Google sign-in', () => {
@@ -97,8 +110,8 @@ describe('Google sign-in', () => {
     await expect(signIn(email, email)).rejects.toThrow('Sign-in failed with 401');
   });
 
-  it('signs in to the existing account with that email', async () => {
-    const existing = await signUp('Existing Person');
+  it('signs in to the existing verified account with that email, keeping its password', async () => {
+    const existing = await verifiedAccount('Existing Person');
     stubGoogle({ email: existing.email, name: 'Someone Else', verified_email: true });
 
     const { callback, cookie } = await signInWithGoogle();
@@ -106,6 +119,44 @@ describe('Google sign-in', () => {
     expect(callback.headers.get('location')).toBe('/');
     const me = await app.request('/api/auth/me', { headers: { Cookie: cookie } });
     await expect(me.json()).resolves.toMatchObject({ data: { user: { id: existing.id, name: 'Existing Person' } } });
+    expect((await currentUser(existing.cookie)).status).toBe(200);
+    await expect(signIn(existing.email, TEST_PASSWORD)).resolves.toContain('auth_id=');
+  });
+
+  it('takes an unverified account back from whoever registered it with the Google email', async () => {
+    // Registration does not prove the email: someone may register the victim's address first.
+    const squatter = await signUp('Squatter');
+    enableTwoFactor(squatter.id, 'JBSWY3DPEHPK3PXP', 0, ['recovery-hash']);
+    const before = findUserById(squatter.id)!;
+    stubGoogle({ email: squatter.email, name: 'Victim', verified_email: true });
+
+    const { callback, cookie } = await signInWithGoogle();
+
+    // Google proved who owns the email, so it signs in without the squatter's second factor.
+    expect(callback.headers.get('location')).toBe('/');
+    expect(await currentUser(cookie)).toMatchObject({ status: 200, user: { id: squatter.id, verified: true } });
+    // Nothing the squatter set up still opens the account.
+    expect((await currentUser(squatter.cookie)).status).toBe(401);
+    await expect(signIn(squatter.email, TEST_PASSWORD)).rejects.toThrow('Sign-in failed with 401');
+    const after = findUserById(squatter.id)!;
+    expect(after.password).not.toBe(before.password);
+    const twoFactor = getDatabase()
+      .prepare('SELECT two_factor_secret, two_factor_pending_secret FROM users WHERE id = ?')
+      .get(squatter.id) as { two_factor_secret: string | null; two_factor_pending_secret: string | null };
+    expect(twoFactor).toEqual({ two_factor_secret: null, two_factor_pending_secret: null });
+    const leftovers = getDatabase()
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM two_factor_recovery_codes WHERE user_id = @id)
+              + (SELECT COUNT(*) FROM two_factor_challenges WHERE user_id = @id)
+              + (SELECT COUNT(*) FROM password_reset_tokens WHERE user_id = @id) AS count`,
+      )
+      .get({ id: squatter.id }) as { count: number };
+    expect(leftovers.count).toBe(0);
+    // The application's activity trail records the takeover.
+    const claimed = getDatabase()
+      .prepare("SELECT actor_id FROM activity_events WHERE action = 'auth.account-claimed' AND target_id = ?")
+      .all(squatter.id);
+    expect(claimed).toEqual([{ actor_id: squatter.id }]);
   });
 
   it('refuses an email Google has not verified, creating nothing', async () => {
@@ -119,8 +170,8 @@ describe('Google sign-in', () => {
     expect(findUserByEmail(email)).toBeUndefined();
   });
 
-  it('asks an account with two-factor for its code instead of signing in', async () => {
-    const existing = await signUp('Two Factor Person');
+  it('asks a verified account with two-factor for its code instead of signing in', async () => {
+    const existing = await verifiedAccount('Two Factor Person');
     enableTwoFactor(existing.id, 'JBSWY3DPEHPK3PXP', 0, []);
     stubGoogle({ email: existing.email, verified_email: true });
 

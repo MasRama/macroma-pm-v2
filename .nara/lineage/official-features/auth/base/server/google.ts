@@ -12,7 +12,8 @@ import { findRoleBySlug, syncUserRoles } from './access';
 import type { AuthActivitySink } from './activity';
 import { GOOGLE, GOOGLE_STATE_TTL_MS } from './config';
 import { setSessionCookie } from './http';
-import { createUser, findUserByEmail, type StoredUser } from './repository';
+import { sessionsChanged } from './live';
+import { claimUnverifiedAccount, createUser, findUserByEmail, findUserById, type StoredUser } from './repository';
 import { beginTwoFactorChallenge } from './security-routes';
 import { endSession, hashPassword, SESSION_COOKIE_NAME, startSession } from './service';
 
@@ -95,8 +96,11 @@ export interface GoogleRoutesOptions {
 /**
  * Google sign-in. A new email gets an account with a random password nobody
  * knows (a reset by email can set one) and counts as verified; an existing
- * account is signed in, through its second factor when it has one. Google
- * must have verified the email, or the sign-in is refused.
+ * verified account is signed in, through its second factor when it has one.
+ * An existing unverified account is claimed first: its password, sessions,
+ * second factor and reset links are dropped, since whoever registered it never
+ * proved the email. Google must have verified the email, or the sign-in is
+ * refused.
  */
 export function createGoogleRoutes(activity: AuthActivitySink | undefined, options: GoogleRoutesOptions = {}) {
   const failed = (context: Context, reason: GoogleSignInError) =>
@@ -168,6 +172,21 @@ export function createGoogleRoutes(activity: AuthActivitySink | undefined, optio
         Logger.logAuth('google_registration_success', { userId: user.id });
         activity?.({
           action: 'auth.registered',
+          resource: 'auth',
+          actorId: user.id,
+          targetId: user.id,
+          targetLabel: user.name,
+          metadata: { method: 'google' },
+        });
+      } else if (user.verified !== 1) {
+        // Registration never proved this email, so whoever registered it may not be its owner.
+        // Google just proved it: the account becomes the owner's, and what the registrant set up stops working.
+        claimUnverifiedAccount(user.id, await hashPassword(randomBytes(32).toString('hex')));
+        sessionsChanged([user.id]);
+        user = findUserById(user.id)!;
+        Logger.logSecurity('google_claimed_unverified_account', { userId: user.id });
+        activity?.({
+          action: 'auth.account-claimed',
           resource: 'auth',
           actorId: user.id,
           targetId: user.id,

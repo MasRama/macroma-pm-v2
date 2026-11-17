@@ -29,22 +29,31 @@ function smtpTransport(): MailTransport {
 }
 
 /**
- * Without SMTP settings (development, tests) the message goes to the log, so
- * links in it still work without any secret. Production is told it is
- * missing mail.
+ * Without SMTP settings (development, tests) nothing is sent. The log only
+ * notes who the message was for and its subject: a body can hold a reset
+ * link, and whoever reads the logs must not be able to use it. Only a
+ * development server prints the message, on its own console, so a developer
+ * can follow the link. Production never gets here: `mailAvailable()` is false
+ * and routes that would send refuse instead.
  */
 function logTransport(): MailTransport {
   return {
     send: async (message) => {
-      if (env.NODE_ENV === 'production') {
-        Logger.warn('MAIL_HOST is not set: an email was written to the log instead of being sent', { to: message.to });
+      Logger.info('Mail not sent: MAIL_HOST is not set', { to: message.to, subject: message.subject });
+      if (env.NODE_ENV === 'development') {
+        process.stdout.write(`\n--- Mail to ${message.to}: ${message.subject} ---\n${message.text}\n---\n\n`);
       }
-      Logger.info('Mail (not sent: MAIL_HOST is not set)', { to: message.to, subject: message.subject, text: message.text });
     },
   };
 }
 
 let transport: MailTransport | undefined;
+let replaced = false;
+
+/** Whether mail can go out: SMTP is set up, a test replaced the transport, or this is not production. */
+export function mailAvailable(): boolean {
+  return replaced || Boolean(MAIL.host) || env.NODE_ENV !== 'production';
+}
 
 export function mailTransport(): MailTransport {
   transport ??= MAIL.host ? smtpTransport() : logTransport();
@@ -54,4 +63,5 @@ export function mailTransport(): MailTransport {
 /** Replaces the transport, for tests that read what was sent; undefined restores the configured one. */
 export function useMailTransport(next: MailTransport | undefined): void {
   transport = next;
+  replaced = next !== undefined;
 }

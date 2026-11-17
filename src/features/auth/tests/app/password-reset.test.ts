@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app, resetSecurityState } from '../../../../app/server';
 import { signIn, signUp, TEST_PASSWORD } from '../../../../app/tests/personas';
+import { env } from '../../../../shared/config';
 import { getDatabase } from '../../../../shared/database';
+import { Logger } from '../../../../shared/logging';
+import { MAIL } from '../../server/config';
 import { csrfHeaders, issueCsrf } from '../../../../shared/security/tests/helpers';
-import { useMailTransport, type MailMessage } from '../../server/mail';
+import { mailTransport, useMailTransport, type MailMessage } from '../../server/mail';
 
 const NEW_PASSWORD = 'a fresh and long passphrase';
 
@@ -108,5 +111,69 @@ describe('password reset by email', () => {
       resets.push((await post('/reset-password', { token: 'nope', password: NEW_PASSWORD })).status);
     }
     expect(resets).toContain(429);
+  });
+});
+
+describe('password reset without SMTP settings', () => {
+  const host = MAIL.host;
+  const nodeEnv = env.NODE_ENV;
+
+  beforeEach(() => {
+    resetSecurityState();
+    Object.assign(MAIL, { host: undefined });
+    useMailTransport(undefined);
+  });
+
+  afterEach(() => {
+    Object.assign(MAIL, { host });
+    Object.assign(env, { NODE_ENV: nodeEnv });
+    useMailTransport(undefined);
+    vi.restoreAllMocks();
+  });
+
+  /** Everything written through the logger or straight to the console while it runs. */
+  async function captureOutput(run: () => Promise<void>): Promise<string> {
+    const written: unknown[] = [];
+    const record = (...args: unknown[]) => void written.push(args);
+    for (const method of ['info', 'warn', 'error', 'logAuth', 'logSecurity'] as const) vi.spyOn(Logger, method).mockImplementation(record);
+    for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) vi.spyOn(console, method).mockImplementation(record);
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => (written.push(String(chunk)), true));
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => (written.push(String(chunk)), true));
+    await run();
+    vi.restoreAllMocks();
+    return JSON.stringify(written);
+  }
+
+  it('never writes a mail body, link or token to the logs', async () => {
+    const direct = await captureOutput(() =>
+      mailTransport().send({ to: 'someone@example.com', subject: 'Reset your password', text: 'Open /reset-password?token=secret-1234' }),
+    );
+    expect(direct).toContain('someone@example.com');
+    expect(direct).toContain('Reset your password');
+    expect(direct).not.toContain('secret-1234');
+    expect(direct).not.toContain('reset-password?token');
+
+    const account = await signUp('Logged Reset');
+    const viaRoute = await captureOutput(async () => {
+      expect((await post('/forgot-password', { email: account.email })).status).toBe(200);
+      // The email goes out in the background.
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(viaRoute).toContain(account.email);
+    expect(viaRoute).not.toContain('reset-password?token');
+    expect(viaRoute).not.toMatch(/[a-f0-9]{64}/);
+  });
+
+  it('refuses in production with 503 MAIL_DISABLED, whatever the email, and issues no token', async () => {
+    const account = await signUp('Production Reset');
+    Object.assign(env, { NODE_ENV: 'production' });
+
+    for (const email of [account.email, `${randomUUID()}@example.com`]) {
+      const response = await post('/forgot-password', { email });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({ success: false, code: 'MAIL_DISABLED' });
+    }
+    const tokens = getDatabase().prepare('SELECT COUNT(*) AS count FROM password_reset_tokens WHERE user_id = ?').get(account.id);
+    expect(tokens).toEqual({ count: 0 });
   });
 });

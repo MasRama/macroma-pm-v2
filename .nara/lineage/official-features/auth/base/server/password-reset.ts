@@ -14,7 +14,7 @@ import { jsonInput, publicRoute } from '../../../shared/security';
 import type { AuthActivitySink } from './activity';
 import { PASSWORD_RESET_TTL_MS } from './config';
 import { sessionsChanged } from './live';
-import { mailTransport } from './mail';
+import { mailAvailable, mailTransport } from './mail';
 import { createPasswordResetToken, findUserByEmail, findUserById, redeemPasswordResetToken } from './repository';
 import { hashPassword } from './service';
 
@@ -28,6 +28,17 @@ export function passwordResetLink(token: string): string {
 }
 
 const forgotPasswordHandler = (context: Context, input: ForgotPasswordInput) => {
+  if (!mailAvailable()) {
+    // Answered for every email alike, so it reveals nothing about accounts.
+    return context.json(
+      {
+        success: false as const,
+        message: 'Password reset by email is not available. Ask an administrator to reset your password.',
+        code: 'MAIL_DISABLED' as const,
+      },
+      503,
+    );
+  }
   const user = findUserByEmail(input.email);
   if (user) {
     const token = randomBytes(32).toString('hex');

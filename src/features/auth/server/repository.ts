@@ -63,6 +63,32 @@ export function updatePassword(userId: string, password: string): void {
     .run(password, Date.now(), userId);
 }
 
+/**
+ * Hands an unverified account to whoever just proved they own its email (a
+ * verified Google sign-in): anyone could have registered that email first,
+ * so the password becomes one nobody knows, and every session, second factor
+ * and reset link set up before is dropped. All at once.
+ */
+export function claimUnverifiedAccount(userId: string, unusablePasswordHash: string): void {
+  const database = getDatabase();
+  database.transaction(() => {
+    const now = Date.now();
+    database
+      .prepare(
+        `UPDATE users
+         SET password = ?, verified = 1, must_change_password = 0,
+             two_factor_secret = NULL, two_factor_pending_secret = NULL, two_factor_enabled_at = NULL,
+             two_factor_last_step = NULL, revision = revision + 1, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(unusablePasswordHash, now, userId);
+    database.prepare('DELETE FROM two_factor_recovery_codes WHERE user_id = ?').run(userId);
+    database.prepare('DELETE FROM two_factor_challenges WHERE user_id = ?').run(userId);
+    database.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(userId);
+    database.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  })();
+}
+
 export function deleteSessionsByUserId(userId: string): void {
   getDatabase().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
 }
