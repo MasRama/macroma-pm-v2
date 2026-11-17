@@ -154,7 +154,7 @@ const hiddenCount = computed(() => (props.detail?.changelog.length ?? 0) - chang
           <VersionText class="release__ver" :version="release" />
           <span class="release__body">
             <span class="release__title">
-              <b>{{ release.label }}</b>
+              <b v-if="release.label">{{ release.label }}</b>
               <span v-if="release.isMajor" class="release__major">MAJOR</span>
             </span>
             <span class="release__dates">{{ formatDay(release.openedAt) }} → {{ formatDay(release.closedAt) }}</span>
@@ -328,13 +328,14 @@ const hiddenCount = computed(() => (props.detail?.changelog.length ?? 0) - chang
 .release__title {
   display: flex;
   align-items: center;
+  /* A gap, not a margin on MAJOR: an unlabeled release has only the mark, which then starts where the dates do. */
+  gap: 8px;
 }
 .release__title b {
   font-size: 14px;
   font-weight: 600;
 }
 .release__major {
-  margin-left: 8px;
   padding: 2px 6px;
   border-radius: 4px;
   background: var(--primary-bg);
