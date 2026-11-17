@@ -91,7 +91,7 @@ const now = computed(() => props.now ?? openedAt.value);
               <span v-if="item.kind === 'other' || !item.actor">Notifikasi baru</span>
               <span v-else-if="item.kind === 'invited'"><b>{{ item.actor.name }}</b> ngundang kamu ke workspace <b>{{ item.subject }}</b></span>
               <template v-else-if="item.move">
-                <span><b>{{ item.actor.name }}</b> mindahin <b>{{ item.subject }}</b></span>
+                <span><b>{{ item.actor.name }}</b> mindahin <b>{{ item.subject }}</b> ke</span>
                 <span class="notif__move">
                   <StatusBlock :status="item.move.from" />
                   <UiIcon name="arrow" :size="12" :stroke="2.2" class="notif__arrow" />

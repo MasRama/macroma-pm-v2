@@ -507,7 +507,7 @@ describe('the notification bell in the open tab', () => {
     await click('[data-testid="notifications-bell"]');
     expect(rows()).toHaveLength(1);
     const text = rows()[0]!.textContent?.replace(/\s+/g, ' ');
-    expect(text).toContain('Azka Mover mindahin Ship the bell');
+    expect(text).toMatch(/Azka Mover mindahin Ship the bell ke\s*Backlog/);
     expect(text).toMatch(/Backlog.*Review/);
     expect(rows()[0]!.querySelector('.notif__version')?.textContent).toBe(version);
 
