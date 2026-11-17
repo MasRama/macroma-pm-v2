@@ -54,8 +54,10 @@ import {
   personRefs,
   projectAudience,
   projectAudiences,
+  closedReleases,
+  releaseBatchView,
   releaseStatsView,
-  releaseView,
+  upcomingReleases,
   taskView,
   taskViews,
 } from './access';
@@ -383,7 +385,8 @@ export function createProjectRoutes(host: ProjectsServerHost) {
         message: 'OK',
         data: {
           active: active ? activeReleaseView(active, countsByBatch(project.id).get(active.id)) : null,
-          closed: releases.filter((row) => row.is_active !== 1).map(releaseView),
+          closed: closedReleases(releases),
+          upcoming: upcomingReleases(releases).reverse(),
         },
       } satisfies ReleasesSuccess);
     })
@@ -392,7 +395,7 @@ export function createProjectRoutes(host: ProjectsServerHost) {
       const batchId = context.req.param('batchId');
       const row = listReleases(project.id).find((release) => release.id === batchId);
       if (!row) return batchNotFound(context);
-      const release = releaseView(row);
+      const release = releaseBatchView(row);
       const changelog = changelogRows(row.id);
       const contributions = contributorCounts(row.id);
       // One account lookup for the changelog's assignees and the contributors.
@@ -415,7 +418,7 @@ export function createProjectRoutes(host: ProjectsServerHost) {
         success: true as const,
         message: 'OK',
         data: {
-          batch: { ...release, is_active: row.is_active === 1 },
+          batch: release,
           stats: releaseStatsView(release, revisiTaskCount(row.id)),
           changelog: changelog.map((entry) => changelogView(entry, people)),
           contributors,

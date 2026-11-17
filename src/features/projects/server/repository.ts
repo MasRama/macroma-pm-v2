@@ -400,7 +400,11 @@ export function countsByBatch(projectId: string): Map<string, ColumnCounts> {
 
 // --- Releases ---------------------------------------------------------------
 
-/** A batch as the releases view sees it, placed among the project's batches in opening order. */
+/**
+ * A batch as the releases view sees it. Batches run in release order: the
+ * activated ones by activation, then the planned (never activated) ones by
+ * creation.
+ */
 export interface ReleaseRow {
   id: string;
   project_id: string;
@@ -409,27 +413,30 @@ export interface ReleaseRow {
   label: string | null;
   is_active: 0 | 1;
   created_at: number;
-  /** The next batch's opening. */
-  next_opened_at: number | null;
+  /** When the batch last became active; `null` while it was only planned. */
+  activated_at: number | null;
+  /** The next activation after this one. */
+  next_activated_at: number | null;
+  /** The major version of the batch before it in release order. */
   previous_major: number | null;
   task_count: number;
 }
 
-/** The project's batches, newest first, each with the next batch's opening, the previous major and its task count. */
+/** The project's batches, latest in release order first, each with its task count. */
 export function listReleases(projectId: string): ReleaseRow[] {
   return getDatabase()
     .prepare(
-      `SELECT b.id, b.project_id, b.major, b.minor, b.label, b.is_active, b.created_at,
-         LEAD(b.created_at) OVER opening AS next_opened_at,
-         LAG(b.major) OVER opening AS previous_major,
+      `SELECT b.id, b.project_id, b.major, b.minor, b.label, b.is_active, b.created_at, b.activated_at,
+         LEAD(b.activated_at) OVER release AS next_activated_at,
+         LAG(b.major) OVER release AS previous_major,
          COALESCE(t.task_count, 0) AS task_count
        FROM project_batches b
        LEFT JOIN (
          SELECT batch_id, COUNT(*) AS task_count FROM tasks WHERE project_id = ? AND batch_id IS NOT NULL GROUP BY batch_id
        ) t ON t.batch_id = b.id
        WHERE b.project_id = ?
-       WINDOW opening AS (ORDER BY b.created_at, b.major, b.minor)
-       ORDER BY b.created_at DESC, b.major DESC, b.minor DESC`,
+       WINDOW release AS (ORDER BY b.activated_at IS NULL, b.activated_at, b.created_at, b.major, b.minor)
+       ORDER BY b.activated_at IS NULL DESC, b.activated_at DESC, b.created_at DESC, b.major DESC, b.minor DESC`,
     )
     .all(projectId, projectId) as ReleaseRow[];
 }
@@ -484,7 +491,7 @@ export function contributorCounts(batchId: string): Array<{ user_id: string; tas
 function setActiveBatch(projectId: string, batchId: string, now: number): void {
   const database = getDatabase();
   database.prepare('UPDATE project_batches SET is_active = 0, updated_at = ? WHERE project_id = ? AND is_active = 1').run(now, projectId);
-  database.prepare('UPDATE project_batches SET is_active = 1, updated_at = ? WHERE id = ?').run(now, batchId);
+  database.prepare('UPDATE project_batches SET is_active = 1, activated_at = ?, updated_at = ? WHERE id = ?').run(now, now, batchId);
 }
 
 /**
