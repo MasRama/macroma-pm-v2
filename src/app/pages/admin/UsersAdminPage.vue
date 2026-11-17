@@ -245,6 +245,10 @@ async function loadUsers(nextPage = page.value): Promise<void> {
 // Accounts changed elsewhere: refresh the page in place and fold a newer
 // version of the account being edited into its form.
 async function followUserChanges(): Promise<void> {
+  await Promise.all([refreshShownUsers(), followEditedAccount()]);
+}
+
+async function refreshShownUsers(): Promise<void> {
   // A search or page change started meanwhile wins over this refresh.
   const requestId = usersLoadRequestId;
   try {
@@ -257,10 +261,34 @@ async function followUserChanges(): Promise<void> {
     if (requestId !== usersLoadRequestId || !response.success) return;
     users.value = response.data.users;
     total.value = response.data.total;
-    const open = editingUser.value;
-    if (!open || !isFormOpen.value || isSubmitting.value) return;
-    const saved = response.data.users.find((user) => user.id === open.id);
-    if (saved && saved.revision > editRevision.value) followSaved(saved);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+/**
+ * Finds the open account whatever page, search or filter is in view. The API
+ * has no read of one account, so it searches by the last saved email (unique),
+ * then by name in case the email itself changed, and matches the id. A save
+ * that changed both still meets the 409 merge.
+ */
+async function findAccount(account: ManagedUser): Promise<ManagedUser | undefined> {
+  for (const term of [account.email, account.name]) {
+    const response = await usersClient.listUsers({ page: 1, limit: 25, search: term, filter: 'all' });
+    if (!response.success) return undefined;
+    const found = response.data.users.find((user) => user.id === account.id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+async function followEditedAccount(): Promise<void> {
+  const open = editingUser.value;
+  if (!open || !isFormOpen.value) return;
+  try {
+    const saved = await findAccount(open);
+    if (!saved || editingUser.value?.id !== open.id || !isFormOpen.value || isSubmitting.value) return;
+    if (saved.revision > editRevision.value) followSaved(saved);
   } catch (error) {
     console.error(error);
   }
@@ -1075,6 +1103,58 @@ onUnmounted(() => stopEditing?.());
   }
   .list__size {
     width: 100%;
+  }
+  /* Phones: each account is a card with its actions beside the name, so Edit
+     and Hapus are in view without scrolling the table sideways. */
+  .table {
+    display: block;
+    min-width: 0;
+  }
+  .table thead {
+    display: none;
+  }
+  .table tbody {
+    display: block;
+  }
+  .table tr {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .table td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border-bottom: 0;
+  }
+  .table td:first-child {
+    grid-column: 1 / 4;
+    grid-row: 1;
+  }
+  .table__acts {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .table__phone {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .table td:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .table td:nth-child(4) {
+    grid-column: 3 / 5;
+    grid-row: 2;
+  }
+  .who__text small {
+    overflow-wrap: anywhere;
   }
 }
 </style>
