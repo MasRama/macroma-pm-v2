@@ -3,8 +3,12 @@ import { PROJECTS_NOTIFICATION_TYPES, TASK_COLUMNS, type TaskMovedNotificationDa
 import { WORKSPACE_NOTIFICATION_TYPES } from '../../workspaces/web';
 import type { Notification } from '../contract';
 
-/** The notification types the bell knows how to say; others stay out of the list. */
-export type NotificationKind = 'invited' | 'invite-accepted' | 'task-moved';
+/**
+ * What a bell row says. `other` is a type the bell does not know (or data it
+ * cannot read): it still shows as "Notifikasi baru", so the rows always add up
+ * to the unread count the API gives.
+ */
+export type NotificationKind = 'invited' | 'invite-accepted' | 'task-moved' | 'other';
 
 /** Where a moved task went, for a "task-moved" row. */
 export interface TaskMove {
@@ -20,8 +24,8 @@ export interface TaskMove {
 export interface NotificationItem {
   id: string;
   kind: NotificationKind;
-  /** Who did it; notifications carry only a name, so the avatar shows initials. */
-  actor: PersonRef;
+  /** Who did it, by name only (the avatar shows initials); `null` on an `other` row. */
+  actor: PersonRef | null;
   /** Workspace name, or the task title for a task move. */
   subject: string;
   workspaceId: string | null;
@@ -51,8 +55,8 @@ function taskMove(data: Notification['data']): TaskMovedNotificationData | null 
   return data as unknown as TaskMovedNotificationData;
 }
 
-/** Maps one API notification onto the row the bell shows, or `null` for a type it does not know. */
-export function toNotificationItem(notification: Notification): NotificationItem | null {
+/** Maps one API notification onto the row the bell shows; a type it cannot say becomes an `other` row. */
+export function toNotificationItem(notification: Notification): NotificationItem {
   const { data } = notification;
   const row = {
     id: notification.id,
@@ -62,6 +66,7 @@ export function toNotificationItem(notification: Notification): NotificationItem
     at: new Date(notification.created_at).toISOString(),
     unread: !notification.is_read,
   };
+  const other: NotificationItem = { ...row, kind: 'other', actor: null, subject: '', workspaceId: null, invitationToken: null };
   switch (notification.type) {
     case WORKSPACE_NOTIFICATION_TYPES.invitation: {
       const name = text(data, 'inviter_name');
@@ -73,7 +78,7 @@ export function toNotificationItem(notification: Notification): NotificationItem
     }
     case PROJECTS_NOTIFICATION_TYPES.taskMoved: {
       const moved = taskMove(data);
-      if (!moved) return null;
+      if (!moved) return other;
       return {
         ...row,
         kind: 'task-moved',
@@ -85,6 +90,6 @@ export function toNotificationItem(notification: Notification): NotificationItem
       };
     }
     default:
-      return null;
+      return other;
   }
 }

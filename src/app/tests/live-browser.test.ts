@@ -7,6 +7,7 @@ import App from '../App.vue';
 import router from '../router';
 import { app as serverApp } from '../server';
 import { useAuthSession } from '../../features/auth/web';
+import { notify } from '../../features/notifications';
 import { getDatabase, seed } from '../../shared/database';
 import { closeEventStreams } from '../../shared/realtime';
 import { readEvents, type EventReader } from '../../shared/realtime/tests/helpers';
@@ -514,6 +515,29 @@ describe('the notification bell in the open tab', () => {
     expect(router.currentRoute.value.name).toBe('project-task');
     expect(router.currentRoute.value.params).toEqual({ projectId: project.id, taskId: task.id });
     expect(container.querySelector('[data-testid="notifications-bell"]')?.getAttribute('aria-expanded')).toBe('false');
+    const read = getDatabase().prepare('SELECT read_at FROM notifications WHERE id = ?').get(notice.id) as { read_at: number | null };
+    expect(read.read_at).not.toBeNull();
+    expect(dot()).toBeNull();
+  });
+
+  it('lists a notification type the bell does not know, so the count and the rows agree, and marks it read on click', async () => {
+    const account = await register('Bell Reader');
+    await openTab(account.cookie, '/profile');
+    expect(dot()).toBeNull();
+    const notice = notify(account.id, 'task_due_soon', { task_title: 'Later' });
+    await settle();
+    expect(dot()).not.toBeNull();
+
+    await click('[data-testid="notifications-bell"]');
+    expect(container.querySelector('[data-testid="notifications-bell"]')?.getAttribute('aria-label')).toBe('Notifikasi, 1 belum dibaca');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]!.dataset.unread).toBe('true');
+    expect(rows()[0]!.textContent).toContain('Notifikasi baru');
+    expect(container.querySelector('.notif__empty')).toBeNull();
+
+    rows()[0]!.querySelector<HTMLButtonElement>('button.notif__text')!.click();
+    await settle();
+    expect(rows()[0]!.dataset.unread).toBe('false');
     const read = getDatabase().prepare('SELECT read_at FROM notifications WHERE id = ?').get(notice.id) as { read_at: number | null };
     expect(read.read_at).not.toBeNull();
     expect(dot()).toBeNull();

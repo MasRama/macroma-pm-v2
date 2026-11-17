@@ -38,11 +38,25 @@ describe('the bell row for a task move', () => {
     });
   });
 
-  it('leaves out a task move whose data is not whole', () => {
+  it('shows a task move whose data is not whole as a plain row', () => {
     const { task_id: _taskId, ...withoutTask } = moved;
-    expect(toNotificationItem(notification(withoutTask))).toBeNull();
-    expect(toNotificationItem(notification({ ...moved, column_to: 'archived' }))).toBeNull();
-    expect(toNotificationItem(notification({ ...moved, version: 3 }))).toBeNull();
+    for (const data of [withoutTask, { ...moved, column_to: 'archived' }, { ...moved, version: 3 }]) {
+      expect(toNotificationItem(notification(data))).toMatchObject({ id: 'n1', kind: 'other', actor: null, move: null, unread: true });
+    }
+  });
+
+  it('shows a type the bell does not know as a plain unread row, so the list matches the unread count', () => {
+    expect(toNotificationItem(notification({ anything: 'new' }, 'task_due_soon'))).toEqual({
+      id: 'n1',
+      kind: 'other',
+      actor: null,
+      subject: '',
+      workspaceId: null,
+      invitationToken: null,
+      move: null,
+      at: '2026-11-17T03:08:00.000Z',
+      unread: true,
+    });
   });
 
   it('gives other kinds no move', () => {

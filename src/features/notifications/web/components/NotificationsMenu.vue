@@ -75,7 +75,8 @@ const now = computed(() => props.now ?? openedAt.value);
       <ul v-if="items.length" class="notif__list">
         <li v-for="item in items" :key="item.id" class="notif__item" :data-notification-id="item.id" :data-unread="item.unread">
           <i class="notif__unread" :class="{ 'notif__unread--on': item.unread }" />
-          <UiAvatar :person="item.actor" :size="30" />
+          <UiAvatar v-if="item.actor" :person="item.actor" :size="30" />
+          <span v-else class="notif__icon"><UiIcon name="bell" :size="15" /></span>
           <div class="notif__body">
             <component
               :is="item.unread || item.move ? 'button' : 'div'"
@@ -87,7 +88,8 @@ const now = computed(() => props.now ?? openedAt.value);
               :data-testid="item.move ? 'notification-open-task' : undefined"
               @click="pick(item)"
             >
-              <span v-if="item.kind === 'invited'"><b>{{ item.actor.name }}</b> ngundang kamu ke workspace <b>{{ item.subject }}</b></span>
+              <span v-if="item.kind === 'other' || !item.actor">Notifikasi baru</span>
+              <span v-else-if="item.kind === 'invited'"><b>{{ item.actor.name }}</b> ngundang kamu ke workspace <b>{{ item.subject }}</b></span>
               <template v-else-if="item.move">
                 <span><b>{{ item.actor.name }}</b> mindahin <b>{{ item.subject }}</b></span>
                 <span class="notif__move">
@@ -155,6 +157,16 @@ const now = computed(() => props.now ?? openedAt.value);
   list-style: none;
   max-height: min(480px, 70vh);
   overflow-y: auto;
+}
+.notif__icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--ink2);
 }
 .notif__item {
   display: flex;
