@@ -34,10 +34,11 @@ export async function projectsRouteTypes(): Promise<void> {
   const dashboard = await (await hc<ReturnType<typeof createDashboardRoutes>>('/api/dashboard').index.$get()).json();
   if (dashboard.success) {
     const doneThisWeek: number = dashboard.data.stats.done_this_week;
+    const activeProjects: number = dashboard.data.stats.active_project_count;
     const day: string = dashboard.data.trends[0].day;
     const recentTitle: string | null = dashboard.data.recent_activity[0].task_title;
     const recentVersion: string | null = dashboard.data.recent_activity[0].batch_version;
-    void [doneThisWeek, day, recentTitle, recentVersion];
+    void [doneThisWeek, activeProjects, day, recentTitle, recentVersion];
   }
 
   const activity = await (await projects[':id'].activity.$get({ param: { id: 'p' } })).json();

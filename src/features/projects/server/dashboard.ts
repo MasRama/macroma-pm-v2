@@ -24,6 +24,11 @@ function total(counts: ColumnCounts): number {
   return TASK_COLUMNS.reduce((sum, column) => sum + counts[column], 0);
 }
 
+/** Tasks in the active columns: what the dashboard's "active tasks" counts (`ongoing + revisi + review` of `stats.counts`). */
+function activeCount(counts: ColumnCounts): number {
+  return ACTIVE_COLUMNS.reduce((sum, column) => sum + counts[column], 0);
+}
+
 /**
  * The dashboard of the account, over the projects it can open (newest first).
  * Days and weeks (from Monday) are the calendar's in `timeZone`.
@@ -53,7 +58,7 @@ export function dashboardData(
       day,
       workspace: openings.filter((opened) => opened <= moment).length,
       project: projects.filter((project) => project.created_at <= moment).length,
-      active: ACTIVE_COLUMNS.reduce((sum, column) => sum + columns[column], 0),
+      active: activeCount(columns),
       done: columns.done,
     };
   });
@@ -85,6 +90,7 @@ export function dashboardData(
       workspace_count: host.workspacesOf(userId).length,
       project_count: projects.length,
       counts,
+      active_project_count: [...perProject.values()].filter((projectCounts) => activeCount(projectCounts) > 0).length,
       total: total(counts),
       done_this_week: doneBetween(projectIds, calendar.weekStart, at + 1),
       done_last_week: doneBetween(projectIds, calendar.lastWeekStart, calendar.weekStart),
