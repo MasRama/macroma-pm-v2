@@ -337,3 +337,97 @@ describe('live updates in the open tab', () => {
     expect(container.querySelector('[data-testid="profile-conflicts"]')).toBeNull();
   });
 });
+
+describe('the notification bell in the open tab', () => {
+  /** Creates a workspace as `owner` and invites `invitee`; returns the workspace id. */
+  async function invite(owner: { cookie: string }, invitee: { email: string }, name = 'Nara Labs'): Promise<string> {
+    expect((await asDevice(owner.cookie, '/api/workspaces', 'POST', { name })).status).toBe(201);
+    const workspace = getDatabase().prepare('SELECT id FROM workspaces WHERE name = ? ORDER BY created_at DESC LIMIT 1').get(name) as { id: string };
+    expect((await asDevice(owner.cookie, `/api/workspaces/${workspace.id}/invitations`, 'POST', { email: invitee.email })).status).toBe(201);
+    return workspace.id;
+  }
+
+  const dot = () => container.querySelector('[data-testid="notifications-dot"]');
+  const rows = () => [...container.querySelectorAll<HTMLElement>('[data-testid="notifications-menu"] [data-notification-id]')];
+  const isMember = (workspaceId: string, userId: string) =>
+    getDatabase().prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, userId) !== undefined;
+
+  it('shows an invitation as it arrives and joins the workspace on Terima', async () => {
+    const owner = await register('Dimas Owner');
+    const invitee = await register('Ayu Invitee');
+    await openTab(invitee.cookie, '/profile');
+    expect(dot()).toBeNull();
+
+    const workspaceId = await invite(owner, invitee);
+    await settle();
+    expect(dot()).not.toBeNull();
+    expect(container.querySelector('[data-testid="notifications-bell"]')?.getAttribute('aria-label')).toBe('Notifikasi, 1 belum dibaca');
+
+    await click('[data-testid="notifications-bell"]');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]!.textContent).toContain('Dimas Owner ngundang kamu ke workspace Nara Labs');
+
+    await click('[data-testid="invite-accept"]');
+    expect(isMember(workspaceId, invitee.id)).toBe(true);
+    // Answered invitations are withdrawn; the inviter hears about it instead.
+    expect(rows()).toHaveLength(0);
+    expect(dot()).toBeNull();
+    const told = getDatabase().prepare("SELECT data_json FROM notifications WHERE user_id = ? AND type = 'invitation_accepted'").get(owner.id) as
+      | { data_json: string }
+      | undefined;
+    expect(JSON.parse(told!.data_json)).toMatchObject({ workspace_name: 'Nara Labs', accepter_name: 'Ayu Invitee' });
+  });
+
+  it('declines on Tolak, and says by code why an expired invitation cannot be answered', async () => {
+    const owner = await register('Dimas Owner');
+    const invitee = await register('Ayu Invitee');
+    const declined = await invite(owner, invitee, 'Tolak Labs');
+    const expired = await invite(owner, invitee, 'Lama Labs');
+    getDatabase().prepare('UPDATE workspace_invitations SET expires_at = ? WHERE workspace_id = ?').run(Date.now() - 1, expired);
+
+    await openTab(invitee.cookie, '/profile');
+    await click('[data-testid="notifications-bell"]');
+    expect(rows()).toHaveLength(2);
+
+    const row = (name: string) => rows().find((item) => item.textContent?.includes(name))!;
+    row('Tolak Labs').querySelector<HTMLButtonElement>('[data-testid="invite-decline"]')!.click();
+    await settle();
+    expect(isMember(declined, invitee.id)).toBe(false);
+    expect(rows().map((item) => item.textContent)).toEqual([expect.stringContaining('Lama Labs')]);
+
+    row('Lama Labs').querySelector<HTMLButtonElement>('[data-testid="invite-accept"]')!.click();
+    await settle();
+    expect(isMember(expired, invitee.id)).toBe(false);
+    expect(container.querySelector('[data-testid="notifications-menu"] [role="alert"]')?.textContent).toContain('Undangan ini sudah kedaluwarsa');
+  });
+
+  it('marks one notification read on click and the rest with Tandai dibaca', async () => {
+    const owner = await register('Dimas Owner');
+    const first = await register('Ayu Invitee');
+    const second = await register('Bima Invitee');
+    const one = await invite(owner, first, 'Satu Labs');
+    const two = await invite(owner, second, 'Dua Labs');
+    await openTab(owner.cookie, '/profile');
+    expect(dot()).toBeNull();
+
+    for (const [account, workspaceId] of [[first, one], [second, two]] as const) {
+      const token = getDatabase().prepare('SELECT token FROM workspace_invitations WHERE workspace_id = ?').get(workspaceId) as { token: string };
+      expect((await asDevice(account.cookie, `/api/invitations/${token.token}/respond`, 'POST', { action: 'accept' })).status).toBe(200);
+    }
+    await settle();
+    await click('[data-testid="notifications-bell"]');
+    expect(rows().map((item) => item.dataset.unread)).toEqual(['true', 'true']);
+    expect(rows()[0]!.textContent).toContain('Bima Invitee nerima undangan ke Dua Labs');
+
+    rows()[0]!.querySelector<HTMLButtonElement>('button.notif__text')!.click();
+    await settle();
+    expect(rows().map((item) => item.dataset.unread)).toEqual(['false', 'true']);
+    expect(container.querySelector('[data-testid="notifications-bell"]')?.getAttribute('aria-label')).toBe('Notifikasi, 1 belum dibaca');
+
+    await click('[data-testid="notifications-read-all"]');
+    expect(rows().map((item) => item.dataset.unread)).toEqual(['false', 'false']);
+    expect(dot()).toBeNull();
+    const unread = getDatabase().prepare('SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL').get(owner.id) as { count: number };
+    expect(unread.count).toBe(0);
+  });
+});

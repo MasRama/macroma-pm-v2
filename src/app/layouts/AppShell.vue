@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useAuthSession } from '../../features/auth/web';
-import { ChatDrawer, NewWorkspaceModal } from '../../features/workspaces/web';
+import { csrfHeaders, ensureCsrfToken, useAuthSession } from '../../features/auth/web';
+import { createNotificationsClient, createNotificationsFeed } from '../../features/notifications/web';
+import { ChatDrawer, createWorkspacesClient, NewWorkspaceModal, type WorkspacesError } from '../../features/workspaces/web';
 import { navigationLinks } from '../navigation';
 import AppFrame from './AppFrame.vue';
 import type { ShellLink } from './shell-types';
 
 /*
  * Wires the frame to the session: who is signed in, admin links the session
- * may open, sign-out, and the chat drawer (`?chat=1`). Workspaces, projects,
- * chat and notifications are empty until the pages are wired to the
- * Macroma API (phase 2).
+ * may open, sign-out, the chat drawer (`?chat=1`), and the live notification
+ * bell with its invitation answers. Workspaces, projects and chat are empty
+ * until those pages are wired to the Macroma API.
  */
 const ADMIN_LABELS: Record<string, string> = {
   '/users': 'Pengguna',
@@ -25,6 +26,50 @@ const router = useRouter();
 const loggingOut = ref(false);
 const error = ref('');
 const newWorkspaceOpen = ref(false);
+
+const csrf = { headers: (extra?: HeadersInit) => csrfHeaders(extra), ensureToken: () => ensureCsrfToken() };
+const feed = createNotificationsFeed(createNotificationsClient({ csrf }));
+const workspacesClient = createWorkspacesClient({ csrf });
+const notificationsBusy = ref(false);
+let stopFeed: (() => void) | undefined;
+onMounted(() => {
+  stopFeed = feed.start();
+});
+onBeforeUnmount(() => stopFeed?.());
+
+/** What the bell says when an invitation cannot be answered, by refusal code. */
+const INVITATION_REFUSALS: Partial<Record<WorkspacesError['code'], string>> = {
+  INVITATION_NOT_FOUND: 'Undangan ini sudah tidak berlaku.',
+  INVITATION_NOT_PENDING: 'Undangan ini sudah dijawab.',
+  INVITATION_EXPIRED: 'Undangan ini sudah kedaluwarsa. Minta undangan baru ke pemilik workspace.',
+  FORBIDDEN: 'Undangan ini untuk akun lain.',
+};
+
+async function busyWith(work: () => Promise<void>): Promise<void> {
+  if (notificationsBusy.value) return;
+  notificationsBusy.value = true;
+  try {
+    await work();
+  } finally {
+    notificationsBusy.value = false;
+  }
+}
+
+function answerInvitation(token: string, action: 'accept' | 'decline'): Promise<void> {
+  return busyWith(async () => {
+    let message = '';
+    try {
+      const response = await workspacesClient.respondInvitation(token, { action });
+      if (!response.success) message = INVITATION_REFUSALS[response.code] ?? response.message;
+    } catch (cause) {
+      console.error(cause);
+      message = 'Undangan belum bisa dijawab. Coba lagi.';
+    }
+    // The server withdraws an answered invitation's notification; show the list as it is now.
+    await feed.load();
+    if (message) feed.error.value = message;
+  });
+}
 
 const user = computed(() => {
   const current = authSession.user.value;
@@ -71,7 +116,15 @@ async function logout(): Promise<void> {
     :admin-links="adminLinks"
     :logging-out="loggingOut"
     :error="error"
+    :notifications="feed.items.value"
+    :notifications-unread="feed.unread.value"
+    :notifications-busy="notificationsBusy"
+    :notifications-error="feed.error.value"
     @chat="toggleChat"
+    @accept-invite="answerInvitation($event, 'accept')"
+    @decline-invite="answerInvitation($event, 'decline')"
+    @read-notification="busyWith(() => feed.markRead($event))"
+    @mark-notifications-read="busyWith(() => feed.markAllRead())"
     @new-workspace="newWorkspaceOpen = true"
     @logout="logout"
   >

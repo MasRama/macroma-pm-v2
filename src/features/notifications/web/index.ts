@@ -1,4 +1,4 @@
-/* Browser boundary of the notifications Feature: the typed API client and the bell menu the app shell shows. */
+/* Browser boundary of the notifications Feature: the typed API client, the live feed and the bell menu the app shell shows. */
 export { createNotificationsClient } from './client';
 export type { NotificationsClient, NotificationsClientOptions, NotificationsWebCsrf } from './client';
 export {
@@ -16,4 +16,7 @@ export type {
   NotificationsMarkSuccess,
 } from '../contract';
 export { default as NotificationsMenu } from './components/NotificationsMenu.vue';
-export type { NotificationItem } from './view';
+export { createNotificationsFeed } from './feed';
+export type { NotificationsFeed } from './feed';
+export { toNotificationItem } from './view';
+export type { NotificationItem, NotificationKind } from './view';
