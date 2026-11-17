@@ -126,7 +126,7 @@ export function createProject(input: { name: string; description: string | null;
       .run(project);
     addProjectMember(project.id, input.ownerId, 'owner', now);
     database
-      .prepare('INSERT INTO project_version_counters (project_id, patch_counter, major, minor, updated_at) VALUES (?, 0, 0, 0, ?)')
+      .prepare('INSERT INTO project_version_counters (project_id, patch_counter, updated_at) VALUES (?, 0, ?)')
       .run(project.id, now);
     logActivity({
       projectId: project.id,
@@ -247,6 +247,24 @@ export function projectCountsByWorkspace(workspaceIds: readonly string[]): Recor
   return Object.fromEntries(rows.map((row) => [row.workspace_id, row.count]));
 }
 
+/** The projects that live in the workspace. */
+export function projectsInWorkspace(workspaceId: string): Project[] {
+  return getDatabase().prepare(`SELECT ${PROJECT_COLUMNS} FROM projects p WHERE p.workspace_id = ?`).all(workspaceId) as Project[];
+}
+
+/** Takes the accounts off every task of the project they are assigned to; answers whether any task changed. */
+export function unassignTasks(projectId: string, userIds: readonly string[], now = Date.now()): boolean {
+  if (userIds.length === 0) return false;
+  return (
+    getDatabase()
+      .prepare(
+        `UPDATE tasks SET assignee_id = NULL, revision = revision + 1, updated_at = ?
+         WHERE project_id = ? AND assignee_id IN (${placeholders(userIds)})`,
+      )
+      .run(now, projectId, ...userIds).changes > 0
+  );
+}
+
 /** The projects of a deleted workspace stay, without a workspace (V1's `ON DELETE SET NULL`). Returns them. */
 export function detachWorkspaceRows(workspaceId: string): string[] {
   const database = getDatabase();
@@ -342,8 +360,8 @@ function setActiveBatch(projectId: string, batchId: string, now: number): void {
 
 /**
  * Opens the next batch: the next minor version, or the next major one with
- * `bumpMajor`. The project's version moves with it and its patch counter
- * starts again. With `activate`, the batch also becomes the active one.
+ * `bumpMajor`, with its own patch counter at zero. With `activate`, the
+ * batch also becomes the active one.
  */
 export function createBatch(
   projectId: string,
@@ -374,12 +392,6 @@ export function createBatch(
          VALUES (@id, @project_id, @major, @minor, @label, @is_active, @created_at, @updated_at)`,
       )
       .run(batch);
-    database
-      .prepare(
-        `INSERT INTO project_version_counters (project_id, patch_counter, major, minor, updated_at) VALUES (?, 0, ?, ?, ?)
-         ON CONFLICT (project_id) DO UPDATE SET patch_counter = 0, major = excluded.major, minor = excluded.minor, updated_at = excluded.updated_at`,
-      )
-      .run(projectId, major, minor, now);
     logActivity({
       projectId,
       eventType: 'batch.created',
@@ -440,16 +452,27 @@ function nextSortOrder(projectId: string, column: TaskColumn): number {
   return (row.max ?? 0) + 1;
 }
 
-/** Moves the project's patch counter on and answers the version it reached. */
-function nextVersion(projectId: string, now: number): { major: number; minor: number; patch: number } {
-  const row = getDatabase()
+/**
+ * The next version of a change to a task: its batch's major.minor with the
+ * batch's next patch, or v0.0.x from the project counter for a task outside
+ * any batch. Runs inside the caller's transaction, so each patch is taken once.
+ */
+function nextVersion(projectId: string, batchId: string | null, now: number): { major: number; minor: number; patch: number } {
+  const database = getDatabase();
+  if (batchId) {
+    const batch = database
+      .prepare('UPDATE project_batches SET patch_counter = patch_counter + 1 WHERE id = ? RETURNING major, minor, patch_counter')
+      .get(batchId) as { major: number; minor: number; patch_counter: number } | undefined;
+    if (batch) return { major: batch.major, minor: batch.minor, patch: batch.patch_counter };
+  }
+  const row = database
     .prepare(
-      `INSERT INTO project_version_counters (project_id, patch_counter, major, minor, updated_at) VALUES (?, 1, 0, 0, ?)
+      `INSERT INTO project_version_counters (project_id, patch_counter, updated_at) VALUES (?, 1, ?)
        ON CONFLICT (project_id) DO UPDATE SET patch_counter = patch_counter + 1, updated_at = excluded.updated_at
-       RETURNING major, minor, patch_counter`,
+       RETURNING patch_counter`,
     )
-    .get(projectId, now) as { major: number; minor: number; patch_counter: number };
-  return { major: row.major, minor: row.minor, patch: row.patch_counter };
+    .get(projectId, now) as { patch_counter: number };
+  return { major: 0, minor: 0, patch: row.patch_counter };
 }
 
 function insertLog(log: TaskLogRow): void {
@@ -473,7 +496,7 @@ export function createTask(input: {
   const database = getDatabase();
   const id = database.transaction((): string => {
     const now = Date.now();
-    const version = nextVersion(input.projectId, now);
+    const version = nextVersion(input.projectId, input.batchId, now);
     const taskId = randomUUID();
     database
       .prepare(
@@ -567,7 +590,7 @@ const COLUMN_NAMES: Record<TaskColumn, string> = {
   done: 'Done',
 };
 
-/** Moves the task to another column under the project's next version, and logs it. */
+/** Moves the task to another column under its batch's next version, and logs it. */
 export function moveTask(
   task: TaskRow,
   input: { column: TaskColumn; note: string; sortOrder?: number },
@@ -576,7 +599,7 @@ export function moveTask(
   const database = getDatabase();
   const log = database.transaction((): TaskLogRow => {
     const now = Date.now();
-    const version = nextVersion(task.project_id, now);
+    const version = nextVersion(task.project_id, task.batch_id, now);
     const label = versionString(version.major, version.minor, version.patch);
     database
       .prepare(

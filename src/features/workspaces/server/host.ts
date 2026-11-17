@@ -19,6 +19,11 @@ export interface WorkspacesServerHost {
   withdrawNotifications(type: string, field: string, value: string): void;
   /** How many projects each workspace holds; workspaces without any may be left out. */
   projectCounts(workspaceIds: readonly string[]): Record<string, number>;
-  /** Runs inside the transaction that deletes the workspace; its projects stay, without a workspace. */
-  workspaceDeleted(workspaceId: string): void;
+  /**
+   * Runs inside the transaction that deletes the workspace; its projects stay,
+   * without a workspace. `formerMemberIds` are the accounts that belonged to it.
+   */
+  workspaceDeleted(workspaceId: string, formerMemberIds: readonly string[]): void;
+  /** Runs inside the transaction that took the accounts out of the workspace (they left or were removed). */
+  membersLeft(workspaceId: string, userIds: readonly string[]): void;
 }

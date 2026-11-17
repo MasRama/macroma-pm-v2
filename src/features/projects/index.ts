@@ -11,4 +11,4 @@ export {
 export type { FeatureName, ProjectPerson } from './contract';
 export type { ProjectsServerHost } from './server/host';
 export { createProjectRoutes, createTaskRoutes } from './server/routes';
-export { detachWorkspace, forgetAccounts, workspaceProjectCounts } from './server/membership';
+export { detachWorkspace, forgetAccounts, workspaceMembersLeft, workspaceProjectCounts } from './server/membership';

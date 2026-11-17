@@ -7,7 +7,7 @@ import {
   SESSION_COOKIE_NAME,
 } from '../../features/auth';
 import { notify, withdrawNotifications } from '../../features/notifications';
-import { detachWorkspace, workspaceProjectCounts } from '../../features/projects';
+import { detachWorkspace, workspaceMembersLeft, workspaceProjectCounts } from '../../features/projects';
 import { projectsServerHost } from './projects.server';
 import {
   createInvitationRoutes,
@@ -40,12 +40,15 @@ export const workspacesServerHost: WorkspacesServerHost = {
     withdrawNotifications(type, field, value);
   },
   projectCounts: (workspaceIds) => workspaceProjectCounts(workspaceIds),
-  workspaceDeleted: (workspaceId) => detachWorkspace(projectsServerHost, workspaceId),
+  workspaceDeleted: (workspaceId, formerMemberIds) => detachWorkspace(projectsServerHost, workspaceId, formerMemberIds),
+  membersLeft: (workspaceId, userIds) => workspaceMembersLeft(projectsServerHost, workspaceId, userIds),
 };
 
 // Workspaces keep no foreign keys into Auth's users table; deleted accounts are forgotten here.
 onAccountsDeleted((userIds) => {
-  for (const workspaceId of forgetAccounts(workspacesServerHost, userIds)) workspacesServerHost.workspaceDeleted(workspaceId);
+  for (const { workspaceId, formerMemberIds } of forgetAccounts(workspacesServerHost, userIds)) {
+    workspacesServerHost.workspaceDeleted(workspaceId, formerMemberIds);
+  }
 });
 
 export default function composeWorkspacesServer(app: Hono): void {

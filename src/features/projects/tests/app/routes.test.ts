@@ -205,7 +205,7 @@ describe('projects', () => {
     expect(shown.body.data.project.active_batch).toEqual({ id: first.id, major: 0, minor: 1, label: 'Kickoff' });
   });
 
-  it('versions tasks from the project counter and logs every move', async () => {
+  it('versions tasks from their batch and logs every move', async () => {
     const owner = await signUp('Task Owner');
     const member = await signUp('Task Member');
     const outsider = await signUp('Task Outsider');

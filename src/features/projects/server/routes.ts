@@ -30,6 +30,7 @@ import {
   type TasksSuccess,
   type TaskSavedSuccess,
 } from '../contract';
+import { getDatabase } from '../../../shared/database';
 import { createGuard, forbidden, jsonInput, queryInput } from '../../../shared/security';
 import {
   batchRef,
@@ -67,6 +68,7 @@ import {
   moveTask,
   removeProjectMember,
   taskCountsByProject,
+  unassignTasks,
   updateProject,
   updateTask,
   type BatchRow,
@@ -271,10 +273,14 @@ export function createProjectRoutes(host: ProjectsServerHost) {
         return refuse(context, 409, 'OWNER_CANNOT_BE_REMOVED', 'The owner cannot be removed from the project');
       }
       const audience = projectAudience(host, project);
-      if (!removeProjectMember(project.id, userId)) {
-        return refuse(context, 404, 'MEMBER_NOT_FOUND', 'This account is not a member of the project');
-      }
+      // A member who can no longer open the project (no workspace way in) comes off its tasks.
+      const removed = getDatabase().transaction(() => {
+        if (!removeProjectMember(project.id, userId)) return undefined;
+        return { unassigned: !canOpenProject(host, project, userId) && unassignTasks(project.id, [userId]) };
+      })();
+      if (!removed) return refuse(context, 404, 'MEMBER_NOT_FOUND', 'This account is not a member of the project');
       announceProjectChange(audience);
+      if (removed.unassigned) announceBoardChange(projectAudience(host, project));
       return context.json({ success: true as const, message: 'Member removed' } satisfies ProjectsDone);
     })
     .get('/:id/activity', guard.signedIn, projectAccess('member'), (context) => {
