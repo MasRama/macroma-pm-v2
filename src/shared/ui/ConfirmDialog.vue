@@ -43,6 +43,8 @@ useEscape(toRef(props, 'open'), () => emit('cancel'));
   inset: 0;
   z-index: 70;
   display: grid;
+  /* A 1fr track keeps the dialog inside the viewport; an auto track would grow to 400px. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
 }
@@ -53,8 +55,7 @@ useEscape(toRef(props, 'open'), () => emit('cancel'));
 }
 .confirm {
   position: relative;
-  width: 400px;
-  max-width: 100%;
+  width: min(400px, 100%);
   padding: 22px;
   background: var(--card);
   border: 1px solid var(--float-line);

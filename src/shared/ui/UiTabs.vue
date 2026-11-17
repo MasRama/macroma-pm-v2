@@ -27,15 +27,23 @@ const model = defineModel<string>({ required: true });
 .tabs {
   display: flex;
   gap: 22px;
-  border-bottom: 1px solid var(--line);
+  /* One line of tabs; narrow screens scroll them sideways. The rule is a
+     shadow so the active tab's underline is not clipped by the scroller. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 .tabs__tab {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
   padding: 11px 0;
-  margin-bottom: -1px;
   border: 0;
+  white-space: nowrap;
   border-bottom: 2px solid transparent;
   background: none;
   cursor: pointer;

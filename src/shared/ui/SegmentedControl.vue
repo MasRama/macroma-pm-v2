@@ -52,7 +52,7 @@ const model = defineModel<string>({ required: true });
 }
 .seg--field .seg__item {
   flex: 1;
-  padding: 6px 0;
+  padding: 6px 10px;
   text-align: center;
 }
 .seg__item--on {
