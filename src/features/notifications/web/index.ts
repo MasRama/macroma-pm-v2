@@ -25,4 +25,4 @@ export {
 } from './refusals';
 export type { NotificationsFeed } from './feed';
 export { toNotificationItem } from './view';
-export type { NotificationItem, NotificationKind } from './view';
+export type { NotificationItem, NotificationKind, TaskMove } from './view';

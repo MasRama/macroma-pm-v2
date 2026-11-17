@@ -50,6 +50,7 @@ const emit = defineEmits<{
   acceptInvite: [token: string];
   declineInvite: [token: string];
   readNotification: [id: string];
+  openNotificationTask: [item: NotificationItem];
   markNotificationsRead: [];
 }>();
 
@@ -119,6 +120,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
           @accept="emit('acceptInvite', $event)"
           @decline="emit('declineInvite', $event)"
           @read="emit('readNotification', $event)"
+          @open-task="emit('openNotificationTask', $event)"
           @mark-all-read="emit('markNotificationsRead')"
         />
       </header>

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { csrfHeaders, ensureCsrfToken, useAuthSession } from '../../features/auth/web';
-import { createNotificationsClient, createNotificationsFeed } from '../../features/notifications/web';
+import { createNotificationsClient, createNotificationsFeed, type NotificationItem } from '../../features/notifications/web';
 import {
   ChatDrawer,
   createWorkspaceChat,
@@ -22,7 +22,7 @@ import type { ShellLink } from './shell-types';
  * admin links the session may open, sign-out, the workspace switcher and
  * "Workspace baru", the sidebar's project list, the chat drawer (`?chat=1`)
  * of the workspace in view with its unread badge, and the live notification
- * bell with its invitation answers.
+ * bell with its invitation answers and task moves.
  */
 const ADMIN_LABELS: Record<string, string> = {
   '/users': 'Pengguna',
@@ -162,6 +162,14 @@ function answerInvitation(token: string, action: 'accept' | 'decline'): Promise<
   });
 }
 
+/** A task-moved row opens that task on its board, marking the row read first when it is unread. */
+async function openNotificationTask(item: NotificationItem): Promise<void> {
+  if (!item.move) return;
+  const { projectId, taskId } = item.move;
+  if (item.unread) await busyWith(() => feed.markRead(item.id));
+  await router.push({ name: 'project-task', params: { projectId, taskId } });
+}
+
 const user = computed(() => {
   const current = authSession.user.value;
   if (!current) return null;
@@ -230,6 +238,7 @@ async function logout(): Promise<void> {
     @accept-invite="answerInvitation($event, 'accept')"
     @decline-invite="answerInvitation($event, 'decline')"
     @read-notification="busyWith(() => feed.markRead($event))"
+    @open-notification-task="openNotificationTask"
     @mark-notifications-read="busyWith(() => feed.markAllRead())"
     @new-workspace="newWorkspaceOpen = true"
     @logout="logout"
