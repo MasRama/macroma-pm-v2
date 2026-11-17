@@ -46,22 +46,49 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ 'update:selectedId': [id: string]; bump: [kind: BumpKind] }>();
 
-/** One column (tablets and phones) puts the panel under the list: bring it into sight when a release is picked. */
+/**
+ * One column (tablets and phones) puts the panel under the list: bring it into sight when a release
+ * is picked. The parent loads the picked release after the pick, so the panel scrolls once that
+ * release is on screen; scrolling earlier aims at the old changelog, and a shorter new one clamps it.
+ */
 const panel = ref<HTMLElement | null>(null);
-async function pick(id: string): Promise<void> {
-  emit('update:selectedId', id);
-  if (!window.matchMedia?.('(max-width: 1100px)').matches) return;
+let scrollTo: string | null = null;
+async function showPanel(): Promise<void> {
   await nextTick();
   panel.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+}
+function pick(id: string): void {
+  emit('update:selectedId', id);
+  if (!window.matchMedia?.('(max-width: 1100px)').matches) return;
+  if (props.detail?.id === id) {
+    scrollTo = null;
+    void showPanel();
+  } else {
+    scrollTo = id;
+  }
 }
 
 const tab = ref('changelog');
 const showAll = ref(false);
 watch(
   () => props.detail?.id,
-  () => {
+  (id) => {
     tab.value = 'changelog';
     showAll.value = false;
+    if (id && id === scrollTo) {
+      scrollTo = null;
+      void showPanel();
+    }
+  },
+);
+// The picked release failed to load: its message takes the panel, so show that instead.
+watch(
+  () => props.detailError,
+  (error) => {
+    if (error && scrollTo) {
+      scrollTo = null;
+      void showPanel();
+    }
   },
 );
 
