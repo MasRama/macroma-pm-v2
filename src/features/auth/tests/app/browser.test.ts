@@ -9,7 +9,11 @@ import { getDatabase } from '../../../../shared/database';
 import { csrfHeaders, issueCsrf, mergeResponseCookies } from '../../../../shared/security/tests/helpers';
 import { createAuthClient, createAuthSession, useAuthSession, type AuthClient, type CurrentUser } from '../../web';
 import { createSecurityClient } from '../../web/security-client';
+import { GOOGLE_SIGN_IN_PATH } from '../../web';
+import { GOOGLE } from '../../server/config';
+import { useMailTransport, type MailMessage } from '../../server/mail';
 import { totpCode, totpStep } from '../../server/totp';
+import { startGoogleSignIn } from '../../../../app/pages/auth/google';
 
 const TEST_PASSWORD = 'correct horse battery staple';
 
@@ -251,7 +255,7 @@ describe('browser authentication lifecycle', () => {
     await settle();
 
     expect(router.currentRoute.value.name).toBe('register');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Email already in use');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Email ini sudah dipakai akun lain.');
   });
 
   it('renders login errors and loading state', async () => {
@@ -271,7 +275,7 @@ describe('browser authentication lifecycle', () => {
     await settle();
 
     expect(router.currentRoute.value.name).toBe('login');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid email or password');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Email atau password salah.');
     expect(useAuthSession().status.value).toBe('unauthenticated');
   });
 
@@ -395,7 +399,7 @@ describe('browser authentication lifecycle', () => {
     setInput('#login-code', '000000');
     submitForm();
     await settle();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid authentication code');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Kodenya salah. Coba lagi.');
 
     const navigation = waitForNavigation();
     setInput('#login-code', totpCode(secret, totpStep() + 1));
@@ -540,5 +544,188 @@ describe('application-owned auth pages', () => {
     } finally {
       router.addRoute(register);
     }
+  });
+});
+
+describe('Macroma sign-in pages on the Auth API', () => {
+  function click(selector: string): void {
+    const element = container.querySelector<HTMLElement>(selector);
+    if (!element) throw new Error(`Missing element ${selector}`);
+    element.click();
+  }
+
+  /** Serves Google's token and profile endpoints for the server's own calls; everything else goes to the app. */
+  function stubGoogle(account: { email: string; name: string }): void {
+    const delegated = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith('https://oauth2.googleapis.com/token')) return Promise.resolve(Response.json({ access_token: 'google-token' }));
+      if (url.startsWith('https://www.googleapis.com/oauth2/v2/userinfo')) {
+        return Promise.resolve(Response.json({ ...account, verified_email: true }));
+      }
+      return delegated(input, init);
+    });
+  }
+
+  const googleSettings = { ...GOOGLE };
+  afterEach(() => {
+    Object.assign(GOOGLE, googleSettings);
+    useMailTransport(undefined);
+  });
+
+  it('registers with an optional phone number and checks its format first', async () => {
+    await mountAt('/register');
+    const email = `phone-${Date.now()}@example.com`;
+    setInput('#register-name', 'Phone Person');
+    setInput('#register-email', email);
+    setInput('#register-phone', 'call me');
+    setInput('#register-password', TEST_PASSWORD);
+    submitForm();
+    await settle();
+    expect(container.textContent).toContain('Nomor HP hanya boleh angka');
+    expect(fetchPaths).not.toContain('/api/auth/register');
+
+    setInput('#register-phone', '+62 812-3456-7890');
+    const navigation = waitForNavigation();
+    submitForm();
+    await navigation;
+    expect(router.currentRoute.value.name).toBe('dashboard');
+    expect(getDatabase().prepare('SELECT phone, verified FROM users WHERE email = ?').get(email)).toEqual({
+      phone: '+62 812-3456-7890',
+      verified: 0,
+    });
+  });
+
+  it('says so on the page when the server has no Google sign-in', async () => {
+    Object.assign(GOOGLE, { clientId: undefined, clientSecret: undefined, redirectUri: undefined });
+    await mountAt('/login');
+    click('[data-testid="google-sign-in"]');
+    await settle();
+
+    expect(fetchPaths).toContain(GOOGLE_SIGN_IN_PATH);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Masuk dengan Google belum diaktifkan');
+    expect(container.textContent).not.toContain('belum tersedia');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="google-sign-in"]')?.disabled).toBe(false);
+  });
+
+  it('sends the browser to Google when the server is set up for it', async () => {
+    Object.assign(GOOGLE, { clientId: 'client', clientSecret: 'secret', redirectUri: 'http://nara.test/api/auth/google/callback' });
+    // jsdom cannot leave the page, so the navigation is observed instead.
+    const navigate = vi.fn();
+    await expect(startGoogleSignIn(navigate)).resolves.toBe('');
+    expect(navigate).toHaveBeenCalledWith(GOOGLE_SIGN_IN_PATH);
+    expect(fetchPaths).toContain(GOOGLE_SIGN_IN_PATH);
+  });
+
+  it('asks for the second factor when Google returns a two-factor account to Masuk', async () => {
+    const email = `google-two-factor-${Date.now()}@example.com`;
+    await registerDirect(email);
+    getDatabase().prepare('UPDATE users SET verified = 1 WHERE email = ?').run(email);
+    const security = createSecurityClient();
+    const setup = await security.startTwoFactorSetup({ password: TEST_PASSWORD });
+    const secret = setup.success ? setup.data!.secret : '';
+    expect((await security.enableTwoFactor({ code: totpCode(secret, totpStep()) })).success).toBe(true);
+    await useAuthSession().logout();
+
+    Object.assign(GOOGLE, { clientId: 'client', clientSecret: 'secret', redirectUri: 'http://nara.test/api/auth/google/callback' });
+    stubGoogle({ email, name: 'Existing User' });
+    const start = await serverApp.request(GOOGLE_SIGN_IN_PATH);
+    expect(start.status).toBe(302);
+    storeResponseCookies(start);
+    const state = new URL(start.headers.get('location')!).searchParams.get('state');
+    const callback = await serverApp.request(`/api/auth/google/callback?code=google-code&state=${state}`, {
+      headers: { Cookie: cookieHeader()! },
+    });
+    expect(callback.headers.get('location')).toBe('/login?two-factor=1');
+    storeResponseCookies(callback);
+
+    await mountAt('/login?two-factor=1');
+    expect(container.querySelector('[data-testid="two-factor-form"]')).not.toBeNull();
+    const navigation = waitForNavigation();
+    setInput('#login-code', totpCode(secret, totpStep() + 1));
+    submitForm();
+    await navigation;
+    expect(router.currentRoute.value.name).toBe('dashboard');
+    expect(useAuthSession().user.value?.email).toBe(email);
+  });
+
+  it('explains why Google sent the person back to Masuk', async () => {
+    await mountAt('/login?google-error=registration-closed');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Pendaftaran akun baru sedang ditutup');
+
+    application?.unmount();
+    await mountAt('/login?google-error=not-a-reason');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('mails a reset link from Lupa password and sets the new password from it', async () => {
+    const sent: MailMessage[] = [];
+    useMailTransport({ send: async (message) => void sent.push(message) });
+    const email = `reset-${Date.now()}@example.com`;
+    await registerDirect(email);
+    await useAuthSession().logout();
+
+    await mountAt('/forgot-password');
+    setInput('#forgot-email', email);
+    submitForm();
+    await settle();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(container.querySelector('[data-testid="forgot-sent"]')?.textContent).toContain(email);
+    expect(sent).toHaveLength(1);
+    const token = sent[0]!.text.match(/reset-password\?token=([a-f0-9]+)/)?.[1];
+    if (!token) throw new Error('No reset link in the email');
+
+    application?.unmount();
+    await mountAt(`/reset-password?token=${token}`);
+    setInput('#reset-password', 'a brand new passphrase');
+    setInput('#reset-confirmation', 'a brand new passphrase');
+    const navigation = waitForNavigation();
+    submitForm();
+    await navigation;
+    await settle();
+    expect(router.currentRoute.value.name).toBe('login');
+    expect(container.querySelector('[data-testid="reset-done"]')).not.toBeNull();
+
+    const csrf = await issueCsrf(serverApp);
+    const login = await serverApp.request('/api/auth/login', {
+      method: 'POST',
+      headers: { ...csrfHeaders(csrf), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'a brand new passphrase' }),
+    });
+    expect(login.status).toBe(200);
+
+    // The link works once.
+    application?.unmount();
+    await mountAt(`/reset-password?token=${token}`);
+    setInput('#reset-password', 'yet another passphrase');
+    setInput('#reset-confirmation', 'yet another passphrase');
+    submitForm();
+    await settle();
+    expect(container.querySelector('[data-testid="reset-link-invalid"]')).not.toBeNull();
+  });
+
+  it('offers a new link when Reset password opens without a token', async () => {
+    await mountAt('/reset-password');
+    expect(container.querySelector('[data-testid="reset-link-invalid"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/forgot-password"]')).not.toBeNull();
+  });
+
+  it('shows a clear message when the server cannot send reset email', async () => {
+    const delegated = globalThis.fetch;
+    // A production server without MAIL_HOST answers this (see password-reset.test.ts).
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.endsWith('/api/auth/forgot-password')) {
+        const body = { success: false, message: 'Password reset by email is not available.', code: 'MAIL_DISABLED' };
+        return Promise.resolve(Response.json(body, { status: 503 }));
+      }
+      return delegated(input, init);
+    });
+    await mountAt('/forgot-password');
+    setInput('#forgot-email', 'someone@example.com');
+    submitForm();
+    await settle();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Reset password lewat email belum aktif di server ini');
+    expect(container.querySelector('[data-testid="forgot-sent"]')).toBeNull();
   });
 });

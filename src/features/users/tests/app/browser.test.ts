@@ -243,35 +243,37 @@ async function mountAt(path: string): Promise<void> {
   await nextTick();
 }
 
+// Helpers look in the whole document: Pengguna's form and delete confirmation
+// are dialogs teleported to <body>.
 function setInput(selector: string, value: string): void {
-  const input = container.querySelector(selector);
+  const input = document.querySelector(selector);
   if (!(input instanceof HTMLInputElement)) throw new Error(`Missing input ${selector}`);
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function setSelect(selector: string, value: string): void {
-  const select = container.querySelector(selector);
+  const select = document.querySelector(selector);
   if (!(select instanceof HTMLSelectElement)) throw new Error(`Missing select ${selector}`);
   select.value = value;
   select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 async function click(selector: string): Promise<void> {
-  const element = container.querySelector<HTMLElement>(selector);
+  const element = document.querySelector<HTMLElement>(selector);
   if (!element) throw new Error(`Missing element ${selector}`);
   element.click();
   await nextTick();
 }
 
 function tableRowContaining(text: string): HTMLTableRowElement {
-  const row = [...container.querySelectorAll<HTMLTableRowElement>('tbody tr')].find((candidate) => candidate.textContent?.includes(text));
+  const row = [...document.querySelectorAll<HTMLTableRowElement>('tbody tr')].find((candidate) => candidate.textContent?.includes(text));
   if (!row) throw new Error(`Missing table row containing ${text}`);
   return row;
 }
 
 function submitForm(selector: string): void {
-  const form = container.querySelector(selector);
+  const form = document.querySelector(selector);
   if (!(form instanceof HTMLFormElement)) throw new Error(`Missing form ${selector}`);
   form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 }
@@ -363,9 +365,11 @@ describe('users browser surfaces', () => {
     expect(container.querySelector<HTMLInputElement>('#profile-name')?.value).toBe('Existing User');
     expect(container.querySelector<HTMLInputElement>('#profile-email')?.value).toBe(email);
 
+    expect(container.querySelector('[data-testid="profile-verified"]')?.textContent).toContain('Belum terverifikasi');
     const updatedEmail = `${randomUUID()}@example.com`;
     setInput('#profile-name', 'Updated User');
     setInput('#profile-email', updatedEmail);
+    setInput('#profile-phone', '0812 3456 7890');
     submitForm('[data-testid="profile-form"]');
     await settle();
 
@@ -376,8 +380,14 @@ describe('users browser surfaces', () => {
     const response = await serverApp.request('/api/users/me', { headers: { Cookie: cookieHeader()! } });
     await expect(response.json()).resolves.toMatchObject({
       success: true,
-      data: { user: { name: 'Updated User', email: updatedEmail } },
+      data: { user: { name: 'Updated User', email: updatedEmail, phone: '0812 3456 7890', verified: false } },
     });
+
+    // Clearing the phone stores none.
+    setInput('#profile-phone', '');
+    submitForm('[data-testid="profile-form"]');
+    await settle();
+    expect(getDatabase().prepare('SELECT phone FROM users WHERE email = ?').get(updatedEmail)).toEqual({ phone: null });
   });
 
   it('shows profile validation errors without sending invalid input', async () => {
@@ -388,11 +398,13 @@ describe('users browser surfaces', () => {
 
     setInput('#profile-name', ' ');
     setInput('#profile-email', 'invalid');
+    setInput('#profile-phone', 'not a phone');
     submitForm('[data-testid="profile-form"]');
     await settle();
 
     expect(container.textContent).toContain('Nama wajib diisi');
     expect(container.textContent).toContain('Masukkan email yang valid');
+    expect(container.textContent).toContain('Nomor HP hanya boleh angka');
     expect(fetchRequests.filter(({ path }) => path === '/api/users/me')).toHaveLength(profileRequestsBeforeSubmit);
   });
 
@@ -406,7 +418,7 @@ describe('users browser surfaces', () => {
     submitForm('[data-testid="password-form"]');
     await settle();
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Current password is incorrect');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Password saat ini salah.');
     expect(router.currentRoute.value.name).toBe('profile');
 
     setInput('#profile-current-password', TEST_PASSWORD);
@@ -436,6 +448,58 @@ describe('users browser surfaces', () => {
     expect(fetchRequests).toContainEqual({ method: 'POST', path: '/api/assets/avatar' });
 
     const filename = avatar?.getAttribute('src')?.split('/').pop();
+    if (filename) await rm(resolve(process.cwd(), 'storage', 'avatars', filename), { force: true });
+  });
+
+  it('removes the profile photo and keeps unsaved edits in the form', async () => {
+    await startAuthenticatedUser();
+    await mountAt('/profile');
+    await settle();
+    expect(container.querySelector('[data-testid="remove-avatar"]')).toBeNull();
+
+    chooseFile(new NodeFile([ONE_PIXEL_PNG], 'avatar.png', { type: 'image/png' }));
+    await settle();
+    const filename = container.querySelector('[data-testid="profile-avatar"] img')?.getAttribute('src')?.split('/').pop();
+    if (!filename) throw new Error('The uploaded avatar was not shown');
+    const stored = resolve(process.cwd(), 'storage', 'avatars', filename);
+
+    setInput('#profile-name', 'Unsaved Name');
+    await click('[data-testid="remove-avatar"]');
+    await settle();
+
+    expect(fetchRequests).toContainEqual({ method: 'DELETE', path: '/api/users/me/avatar' });
+    expect(container.querySelector('[data-testid="profile-avatar"] img')).toBeNull();
+    expect(container.querySelector('[data-testid="remove-avatar"]')).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(usersWebHost.currentSessionUser()?.avatar).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('#profile-name')?.value).toBe('Unsaved Name');
+    const response = await serverApp.request('/api/users/me', { headers: { Cookie: cookieHeader()! } });
+    await expect(response.json()).resolves.toMatchObject({ data: { user: { avatar: null, name: 'Existing User' } } });
+    await rm(stored, { force: true });
+  });
+
+  it('shows why the profile photo could not be removed', async () => {
+    await startAuthenticatedUser();
+    await mountAt('/profile');
+    await settle();
+    chooseFile(new NodeFile([ONE_PIXEL_PNG], 'avatar.png', { type: 'image/png' }));
+    await settle();
+    const filename = container.querySelector('[data-testid="profile-avatar"] img')?.getAttribute('src')?.split('/').pop();
+
+    const delegatedFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const inputUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (method.toUpperCase() === 'DELETE' && new URL(inputUrl, 'http://nara.test').pathname === '/api/users/me/avatar') {
+        return Promise.resolve(Response.json({ success: false, message: 'User not found', code: 'NOT_FOUND' }, { status: 404 }));
+      }
+      return delegatedFetch(input, init);
+    });
+    await click('[data-testid="remove-avatar"]');
+    await settle();
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Akun kamu tidak ditemukan');
+    expect(container.querySelector('[data-testid="profile-avatar"] img')).not.toBeNull();
     if (filename) await rm(resolve(process.cwd(), 'storage', 'avatars', filename), { force: true });
   });
 
@@ -485,10 +549,10 @@ describe('users administration browser surfaces', () => {
       },
     });
 
-    expect(container.querySelector('a[href="/users"]')?.textContent).toContain('Pengguna');
-    expect(container.querySelector('a[href="/roles"]')?.textContent).toContain('Role & izin');
+    expect(document.querySelector('a[href="/users"]')?.textContent).toContain('Pengguna');
+    expect(document.querySelector('a[href="/roles"]')?.textContent).toContain('Role & izin');
     // The sidebar's ADMIN section lists the admin routes that declare meta.nav, in route order.
-    const links = [...container.querySelectorAll('nav[aria-label="Navigasi utama"] a.proj__a--admin')].map((link) => link.textContent?.trim());
+    const links = [...document.querySelectorAll('nav[aria-label="Navigasi utama"] a.proj__a--admin')].map((link) => link.textContent?.trim());
     expect(links).toEqual(['Pengguna', 'Role & izin', 'Log audit']);
   });
 
@@ -497,18 +561,18 @@ describe('users administration browser surfaces', () => {
     await mountAt('/dashboard');
     await settle();
 
-    expect(container.querySelector('a[href="/users"]')).toBeNull();
-    expect(container.querySelector('a[href="/roles"]')).toBeNull();
+    expect(document.querySelector('a[href="/users"]')).toBeNull();
+    expect(document.querySelector('a[href="/roles"]')).toBeNull();
 
     await router.push('/users');
     await router.isReady();
     expect(router.currentRoute.value.name).toBe('dashboard');
-    expect(container.querySelector('[data-testid="user-list"]')).toBeNull();
+    expect(document.querySelector('[data-testid="user-list"]')).toBeNull();
 
     await router.push('/roles');
     await router.isReady();
     expect(router.currentRoute.value.name).toBe('dashboard');
-    expect(container.querySelector('[data-testid="role-list"]')).toBeNull();
+    expect(document.querySelector('[data-testid="role-list"]')).toBeNull();
   });
 
   it('surfaces role-directory failures instead of silently rendering an empty assignment list', async () => {
@@ -534,20 +598,22 @@ describe('users administration browser surfaces', () => {
     await settle();
 
     // The page shows its own failure message; the host's reason goes to the console.
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Unable to load roles');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Daftar role belum bisa dimuat');
     expect(logged).toHaveBeenCalledWith(expect.objectContaining({ message: 'Role directory unavailable' }));
+    // Without the role list a new account could not get its roles, so Pengguna baru waits.
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="create-user"]')?.disabled).toBe(true);
     await click('[data-testid="create-user"]');
-    expect(container.textContent).toContain('Unable to load roles');
-    expect(container.querySelector('[data-role-slug]')).toBeNull();
+    expect(document.body.textContent).toContain('Daftar role belum bisa dimuat');
+    expect(document.querySelector('[data-role-slug]')).toBeNull();
     logged.mockRestore();
   });
 
   it('uses server search and pagination responses for the users list', async () => {
     const searchTerm = `Searchable-${randomUUID()}`;
     await startAuthenticatedAdmin();
-    await registerDirect(`${randomUUID()}@example.com`, `${searchTerm} One`);
-    await registerDirect(`${randomUUID()}@example.com`, `${searchTerm} Two`);
-    await registerDirect(`${randomUUID()}@example.com`, `${searchTerm} Three`);
+    for (const ordinal of ['One', 'Two', 'Three', 'Four', 'Five', 'Six']) {
+      await registerDirect(`${randomUUID()}@example.com`, `${searchTerm} ${ordinal}`);
+    }
 
     await mountAt('/users');
     await settle();
@@ -556,17 +622,17 @@ describe('users administration browser surfaces', () => {
     await settle();
 
     expect(fetchUrls.some((url) => url.includes(`/api/users?page=1&limit=10&search=${encodeURIComponent(searchTerm)}`))).toBe(true);
-    expect(container.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${searchTerm} One`);
-    expect(container.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${searchTerm} Three`);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${searchTerm} One`);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${searchTerm} Three`);
 
-    setSelect('#user-page-size', '1');
+    setSelect('#user-page-size', '5');
     await settle();
-    expect(container.textContent).toContain('Page 1 of 3');
+    expect(document.body.textContent).toContain('Halaman 1 dari 2');
     await click('[data-testid="user-next"]');
     await settle();
 
-    expect(fetchUrls.some((url) => url.includes(`/api/users?page=2&limit=1&search=${encodeURIComponent(searchTerm)}`))).toBe(true);
-    expect(container.textContent).toContain('Page 2 of 3');
+    expect(fetchUrls.some((url) => url.includes(`/api/users?page=2&limit=5&search=${encodeURIComponent(searchTerm)}`))).toBe(true);
+    expect(document.body.textContent).toContain('Halaman 2 dari 2');
   });
 
   it('keeps the newest users-list response when overlapping searches resolve out of order', async () => {
@@ -609,13 +675,52 @@ describe('users administration browser surfaces', () => {
     setInput('#user-search', fastTerm);
     submitForm('[data-testid="user-search-form"]');
     await settle();
-    expect(container.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${fastTerm} Result`);
-    expect(container.querySelector('[data-testid="user-list"]')?.textContent).not.toContain(`${slowTerm} Result`);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${fastTerm} Result`);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).not.toContain(`${slowTerm} Result`);
 
     releaseSlow?.();
     await settle();
-    expect(container.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${fastTerm} Result`);
-    expect(container.querySelector('[data-testid="user-list"]')?.textContent).not.toContain(`${slowTerm} Result`);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).toContain(`${fastTerm} Result`);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).not.toContain(`${slowTerm} Result`);
+  });
+
+  it('lists phone and verified state and filters the list by verification', async () => {
+    const marker = `Verify-${randomUUID()}`;
+    await startAuthenticatedAdmin();
+    const checkedEmail = `${randomUUID()}@example.com`;
+    const uncheckedEmail = `${randomUUID()}@example.com`;
+    await registerDirect(checkedEmail, `${marker} Checked`);
+    await registerDirect(uncheckedEmail, `${marker} Unchecked`);
+    await mountAt('/users');
+    await settle();
+    setInput('#user-search', marker);
+    submitForm('[data-testid="user-search-form"]');
+    await settle();
+
+    const checkedId = tableRowContaining(checkedEmail).dataset.userId!;
+    await click(`[data-testid="edit-user-${checkedId}"]`);
+    setInput('#user-phone', '021 555 0101');
+    await click('#user-verified');
+    submitForm('[data-testid="user-form"]');
+    await settle();
+    expect(tableRowContaining(checkedEmail).querySelector('[data-verified]')?.textContent).toBe('Terverifikasi');
+    expect(tableRowContaining(checkedEmail).textContent).toContain('021 555 0101');
+    expect(tableRowContaining(uncheckedEmail).querySelector('[data-verified]')?.textContent).toBe('Belum');
+
+    const filterButton = (label: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-testid="user-filter"] [role="radio"]')].find(
+        (button) => button.textContent?.trim() === label,
+      )!;
+    filterButton('Belum').click();
+    await settle();
+    expect(fetchUrls.some((url) => url.includes(`search=${encodeURIComponent(marker)}&filter=unverified`))).toBe(true);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).toContain(uncheckedEmail);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).not.toContain(checkedEmail);
+
+    filterButton('Terverifikasi').click();
+    await settle();
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).toContain(checkedEmail);
+    expect(document.querySelector('[data-testid="user-list"]')?.textContent).not.toContain(uncheckedEmail);
   });
 
   it('requires a password before creating a managed user', async () => {
@@ -631,9 +736,8 @@ describe('users administration browser surfaces', () => {
     submitForm('[data-testid="user-form"]');
     await settle();
 
-    expect(container.textContent).toContain('Password must be at least 8 characters');
-    expect(container.textContent).toContain('Required; use at least 8 characters.');
-    expect(container.textContent).not.toContain('server fallback');
+    expect(document.querySelector('#user-password-error')?.textContent).toBe('Password minimal 8 karakter');
+    expect(document.body.textContent).not.toContain('server fallback');
     expect(fetchRequests.filter(({ method, path }) => method === 'POST' && path === '/api/users')).toHaveLength(postCountBeforeSubmit);
     expect(getDatabase().prepare('SELECT id FROM users WHERE email = ?').get(email)).toBeUndefined();
   });
@@ -651,7 +755,7 @@ describe('users administration browser surfaces', () => {
     const postCountBeforeInvalidSubmit = fetchRequests.filter(({ method, path }) => method === 'POST' && path === '/api/users').length;
     submitForm('[data-testid="user-form"]');
     await settle();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Please correct');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Perbaiki isian');
     expect(fetchRequests.filter(({ method, path }) => method === 'POST' && path === '/api/users')).toHaveLength(postCountBeforeInvalidSubmit);
 
     setInput('#user-name', 'Created Browser User');
@@ -664,7 +768,7 @@ describe('users administration browser surfaces', () => {
     const createdRow = tableRowContaining(email);
     const userId = createdRow.dataset.userId;
     if (!userId) throw new Error('Created user row did not expose its id');
-    expect(createdRow.textContent).toContain('No roles');
+    expect(createdRow.textContent).toContain('Tanpa role');
 
     const passwordBeforeEdit = getDatabase().prepare('SELECT password FROM users WHERE id = ?').get(userId) as { password: string };
     await click(`[data-testid="edit-user-${userId}"]`);
@@ -681,7 +785,7 @@ describe('users administration browser surfaces', () => {
     expect(passwordAfterEdit.password).toBe(passwordBeforeEdit.password);
 
     await click(`[data-testid="edit-user-${userId}"]`);
-    expect(container.querySelector('[data-testid="reset-user-password"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="reset-user-password"]')).not.toBeNull();
     setInput('#user-password', 'reset-managed-password');
     await nextTick();
     await click('[data-testid="reset-user-password"]');
@@ -689,7 +793,7 @@ describe('users administration browser surfaces', () => {
     expect(fetchRequests).toContainEqual({ method: 'POST', path: `/api/users/${userId}/reset-password` });
     const passwordAfterReset = getDatabase().prepare('SELECT password FROM users WHERE id = ?').get(userId) as { password: string };
     expect(passwordAfterReset.password).not.toBe(passwordBeforeEdit.password);
-    expect(container.textContent).toContain('Password reset');
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('direset');
 
     const response = await serverApp.request(`/api/users?search=${encodeURIComponent(email)}`, { headers: { Cookie: cookieHeader()! } });
     await expect(response.json()).resolves.toMatchObject({
@@ -709,12 +813,12 @@ describe('users administration browser surfaces', () => {
     await click(`[data-testid="edit-user-${selfId}"]`);
     setInput('#user-name', 'Rejected Browser Administrator');
     setInput('#user-email', `${randomUUID()}@example.com`);
-    expect(container.querySelector('#user-password')).toBeNull();
-    expect(container.textContent).toContain('Change your own password from Profile');
+    expect(document.querySelector('#user-password')).toBeNull();
+    expect(document.body.textContent).toContain('Ganti password kamu sendiri dari Profil');
     await click('[data-role-slug="admin"]');
     submitForm('[data-testid="user-form"]');
     await settle();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Cannot remove admin role from yourself');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Kamu nggak bisa melepas role admin dari akunmu sendiri.');
     expect(usersWebHost.currentSessionUser()).not.toBeNull();
 
     const selfAfter = getDatabase()
@@ -734,12 +838,27 @@ describe('users administration browser surfaces', () => {
     await mountAt('/users');
     await settle();
 
-    expect(container.querySelector('[data-testid="create-user"]')).toBeNull();
+    expect(document.querySelector('[data-testid="create-user"]')).toBeNull();
     const row = tableRowContaining(targetEmail);
     const targetId = row.dataset.userId;
     if (!targetId) throw new Error('Manager target row did not expose its id');
     await click(`[data-testid="edit-user-${targetId}"]`);
-    expect(container.querySelector('[data-role-slug]')).toBeNull();
+    expect(document.querySelector('[data-role-slug]')).toBeNull();
+    // Email is the sign-in identifier: only an administrator changes another account's.
+    expect(document.querySelector<HTMLInputElement>('#user-email')?.disabled).toBe(true);
+    setInput('#user-phone', '+62 811 000 111');
+    await click('#user-verified');
+    submitForm('[data-testid="user-form"]');
+    await settle();
+    expect(getDatabase().prepare('SELECT email, phone, verified FROM users WHERE id = ?').get(targetId)).toEqual({
+      email: targetEmail,
+      phone: '+62 811 000 111',
+      verified: 1,
+    });
+    expect(fetchRequests).toContainEqual({ method: 'PUT', path: `/api/users/${targetId}` });
+    const savedRow = tableRowContaining(targetEmail);
+    expect(savedRow.textContent).toContain('+62 811 000 111');
+    expect(savedRow.querySelector('[data-verified]')?.textContent).toBe('Terverifikasi');
 
     const response = await createUsersClient({ csrf: usersWebHost.csrf }).updateUser(targetId, { revision: 1, roles: ['user'] });
     expect(response).toMatchObject({
@@ -760,44 +879,45 @@ describe('users administration browser surfaces', () => {
     const targetId = targetRow.dataset.userId;
     if (!targetId) throw new Error('Delete target row did not expose its id');
     await click(`[data-testid="delete-user-${targetId}"]`);
-    await click('[data-testid="confirm-delete"]');
+    await click('[role="alertdialog"] .btn--danger');
     await settle();
-    expect(container.querySelector(`tr[data-user-id="${targetId}"]`)).toBeNull();
+    expect(document.querySelector(`tr[data-user-id="${targetId}"]`)).toBeNull();
     expect(fetchRequests).toContainEqual({ method: 'DELETE', path: '/api/users' });
 
     const selfRow = tableRowContaining('Browser Administrator');
     const selfId = selfRow.dataset.userId;
     if (!selfId) throw new Error('Administrator row did not expose its id');
-    expect(container.querySelector(`[data-testid="delete-user-${selfId}"]`)).toBeNull();
+    expect(document.querySelector(`[data-testid="delete-user-${selfId}"]`)).toBeNull();
     expect(usersWebHost.currentSessionUser()).not.toBeNull();
   });
 
   it('clamps pagination after deleting the only user on the last page', async () => {
     const marker = `Clamp-${randomUUID()}`;
     await startAuthenticatedAdmin();
-    await registerDirect(`${randomUUID()}@example.com`, `${marker} One`);
-    await registerDirect(`${randomUUID()}@example.com`, `${marker} Two`);
+    for (const ordinal of ['One', 'Two', 'Three', 'Four', 'Five', 'Six']) {
+      await registerDirect(`${randomUUID()}@example.com`, `${marker} ${ordinal}`);
+    }
     await mountAt('/users');
     await settle();
 
     setInput('#user-search', marker);
     submitForm('[data-testid="user-search-form"]');
     await settle();
-    setSelect('#user-page-size', '1');
+    setSelect('#user-page-size', '5');
     await settle();
     await click('[data-testid="user-next"]');
     await settle();
-    expect(container.textContent).toContain('Page 2 of 2');
+    expect(document.body.textContent).toContain('Halaman 2 dari 2');
 
-    const row = container.querySelector<HTMLTableRowElement>('[data-testid="user-list"] tbody tr[data-user-id]');
+    const row = document.querySelector<HTMLTableRowElement>('[data-testid="user-list"] tbody tr[data-user-id]');
     const userId = row?.dataset.userId;
     if (!userId) throw new Error('Last-page user row did not expose its id');
     await click(`[data-testid="delete-user-${userId}"]`);
-    await click('[data-testid="confirm-delete"]');
+    await click('[role="alertdialog"] .btn--danger');
     await settle();
 
-    expect(container.textContent).toContain('Page 1 of 1');
-    expect(fetchUrls.some((url) => url.includes(`/api/users?page=1&limit=1&search=${encodeURIComponent(marker)}`))).toBe(true);
+    expect(document.body.textContent).toContain('Halaman 1 dari 1');
+    expect(fetchUrls.some((url) => url.includes(`/api/users?page=1&limit=5&search=${encodeURIComponent(marker)}`))).toBe(true);
   });
 
   it('merges a save made elsewhere when the server refuses an edit based on an older revision', async () => {
@@ -825,11 +945,11 @@ describe('users administration browser surfaces', () => {
     submitForm('[data-testid="user-form"]');
     await settle();
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Choose which version to keep below');
-    expect((container.querySelector('#user-email') as HTMLInputElement).value).toBe(theirEmail);
-    expect((container.querySelector('#user-name') as HTMLInputElement).value).toBe('Mine');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Pilih versi yang mau disimpan di bawah');
+    expect((document.querySelector('#user-email') as HTMLInputElement).value).toBe(theirEmail);
+    expect((document.querySelector('#user-name') as HTMLInputElement).value).toBe('Mine');
     expect(
-      [...container.querySelectorAll('[data-testid="user-conflicts"] [data-conflict-field]')].map((row) => row.getAttribute('data-conflict-field')),
+      [...document.querySelectorAll('[data-testid="user-conflicts"] [data-conflict-field]')].map((row) => row.getAttribute('data-conflict-field')),
     ).toEqual(['name']);
     expect(getDatabase().prepare('SELECT name FROM users WHERE id = ?').get(targetId)).toEqual({ name: 'Theirs' });
 

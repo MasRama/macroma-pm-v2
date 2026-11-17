@@ -8,22 +8,28 @@ import {
   createUsersClient,
   STALE_REVISION,
   USERS_CHANGED_EVENT,
+  usersFieldTexts,
+  usersRefusalText,
   type UpdateProfileResponse,
   type UserProfile,
 } from '../../features/users/web';
+import { authFieldTexts, authRefusalText, createAuthClient } from '../../features/auth/web';
 import { mergeEdit, onServerEvent, sameValue } from '../../shared/realtime/browser';
 import { PageHead, ShellTopBar, TextField, TopCrumb, UiAvatar, UiButton } from '../../shared/ui';
 import { usersWebHost } from '../bindings/users.web';
 import { useTheme, type ThemeMode } from '../theme';
+import { isPhone } from './auth/phone';
 
-/** Profil: photo, name and email, password change, and the per-browser theme. */
+/** Profil: photo, name, email and phone, password change, and the per-browser theme. */
 const usersClient = createUsersClient({ csrf: usersWebHost.csrf });
+const authClient = createAuthClient();
 const router = useRouter();
 const theme = useTheme();
 
 const profile = ref<UserProfile | null>(null);
 const name = ref('');
 const email = ref('');
+const phone = ref('');
 const currentPassword = ref('');
 const newPassword = ref('');
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -40,8 +46,8 @@ const passwordErrors = ref<Record<string, string>>({});
 const avatarBusy = ref(false);
 const avatarMessage = ref('');
 
-type Fields = { name: string; email: string };
-const FIELD_LABEL: Record<keyof Fields, string> = { name: 'Nama', email: 'Email' };
+type Fields = { name: string; email: string; phone: string };
+const FIELD_LABEL: Record<keyof Fields, string> = { name: 'Nama', email: 'Email', phone: 'Nomor HP' };
 const conflicts = ref<Array<keyof Fields>>([]);
 
 const person = computed(() => {
@@ -55,20 +61,23 @@ const THEMES: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'Ikut sistem' },
 ];
 
-function first(errors: Record<string, string[]> | undefined): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, messages] of Object.entries(errors ?? {})) if (messages[0]) result[key] = messages[0];
-  return result;
+function fields(user: UserProfile): Fields {
+  return { name: user.name, email: user.email, phone: user.phone ?? '' };
 }
 
-function fields(user: UserProfile): Fields {
-  return { name: user.name, email: user.email };
+function formFields(): Fields {
+  return { name: name.value, email: email.value, phone: phone.value };
+}
+
+function setFormFields(next: Fields): void {
+  name.value = next.name;
+  email.value = next.email;
+  phone.value = next.phone;
 }
 
 function adopt(user: UserProfile): void {
   profile.value = user;
-  name.value = user.name;
-  email.value = user.email;
+  setFormFields(fields(user));
   usersWebHost.syncSessionUser({ id: user.id, name: user.name, email: user.email, avatar: user.avatar });
 }
 
@@ -76,9 +85,8 @@ function adopt(user: UserProfile): void {
 function followSaved(user: UserProfile): void {
   if (!profile.value) return adopt(user);
   const theirs = fields(user);
-  const result = mergeEdit(fields(profile.value), { name: name.value, email: email.value }, theirs);
-  name.value = result.merged.name;
-  email.value = result.merged.email;
+  const result = mergeEdit(fields(profile.value), formFields(), theirs);
+  setFormFields(result.merged);
   const open = new Set([...conflicts.value, ...result.conflicts]);
   conflicts.value = [...open].filter((field) => !sameValue(result.merged[field], theirs[field]));
   profile.value = user;
@@ -89,10 +97,7 @@ function followSaved(user: UserProfile): void {
 }
 
 function resolve(field: keyof Fields, keep: 'mine' | 'theirs'): void {
-  if (keep === 'theirs' && profile.value) {
-    if (field === 'name') name.value = profile.value.name;
-    else email.value = profile.value.email;
-  }
+  if (keep === 'theirs' && profile.value) setFormFields({ ...formFields(), [field]: fields(profile.value)[field] });
   conflicts.value = conflicts.value.filter((open) => open !== field);
 }
 
@@ -109,7 +114,7 @@ async function load(): Promise<void> {
       await router.replace({ name: 'login', query: { redirect: '/profile' } });
       return;
     }
-    loadError.value = response.message;
+    loadError.value = usersRefusalText(response.code);
   } catch (error) {
     console.error(error);
     loadError.value = 'Profil belum bisa dimuat.';
@@ -136,6 +141,7 @@ async function saveProfile(): Promise<void> {
   }
   if (!name.value.trim()) profileErrors.value.name = 'Nama wajib diisi';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) profileErrors.value.email = 'Masukkan email yang valid';
+  if (!isPhone(phone.value)) profileErrors.value.phone = 'Nomor HP hanya boleh angka, spasi, tanda hubung, dan + di depan';
   if (Object.keys(profileErrors.value).length) return;
 
   profileBusy.value = true;
@@ -144,6 +150,7 @@ async function saveProfile(): Promise<void> {
       revision: profile.value?.revision ?? 0,
       name: name.value.trim(),
       email: email.value.trim(),
+      phone: phone.value.trim() || null,
     });
     if (response.success) {
       adopt(response.data.user);
@@ -154,8 +161,8 @@ async function saveProfile(): Promise<void> {
         ? 'Profil kamu diubah di tempat lain. Pilih versi yang mau disimpan.'
         : 'Profil kamu diubah di tempat lain. Perubahannya sudah digabung, cek lalu simpan lagi.';
     } else {
-      profileErrors.value = first(response.errors);
-      profileError.value = response.message;
+      profileErrors.value = usersFieldTexts(response.errors);
+      profileError.value = usersRefusalText(response.code);
     }
   } catch (error) {
     console.error(error);
@@ -175,10 +182,15 @@ async function changePassword(): Promise<void> {
 
   passwordBusy.value = true;
   try {
-    const response = await usersWebHost.changePassword({ currentPassword: currentPassword.value, newPassword: newPassword.value });
+    // Auth's client, not the Users host: its answer carries the refusal code the page words the error by.
+    const response = await authClient.changePassword({ current_password: currentPassword.value, new_password: newPassword.value });
     if (!response.success) {
-      passwordErrors.value = first(response.errors);
-      passwordError.value = response.message;
+      const texts = authFieldTexts(response.errors);
+      passwordErrors.value = {
+        ...(texts.current_password ? { currentPassword: texts.current_password } : {}),
+        ...(texts.new_password ? { newPassword: texts.new_password } : {}),
+      };
+      passwordError.value = authRefusalText(response.code);
       return;
     }
     currentPassword.value = '';
@@ -211,17 +223,47 @@ async function uploadAvatar(event: Event): Promise<void> {
   try {
     const response = await usersClient.uploadAvatar(file);
     if (!response.success) {
-      avatarMessage.value = response.message;
+      avatarMessage.value = usersRefusalText(response.code);
       return;
     }
     if (profile.value) {
       profile.value = { ...profile.value, avatar: response.data.url };
-      usersWebHost.syncSessionUser({ ...fields(profile.value), id: profile.value.id, avatar: response.data.url });
+      usersWebHost.syncSessionUser({ id: profile.value.id, name: profile.value.name, email: profile.value.email, avatar: response.data.url });
       await followChanges();
     }
   } catch (error) {
     console.error(error);
     avatarMessage.value = 'Foto belum bisa diganti.';
+  } finally {
+    avatarBusy.value = false;
+  }
+}
+
+/** Removes the photo; the account goes back to its initials. Other unsaved edits stay in the form. */
+async function removeAvatar(): Promise<void> {
+  if (avatarBusy.value || !profile.value?.avatar) return;
+  avatarMessage.value = '';
+  avatarBusy.value = true;
+  try {
+    const response = await usersClient.removeAvatar();
+    if (response.success) {
+      followSaved(response.data.user);
+      return;
+    }
+    if (response.code === 'UNAUTHORIZED') {
+      if (!(await usersWebHost.refreshSession().catch(() => false))) {
+        await router.replace({ name: 'login', query: { redirect: '/profile' } });
+        return;
+      }
+      avatarMessage.value = 'Sesi kamu baru dimuat ulang. Coba hapus foto lagi.';
+    } else if (response.code === 'NOT_FOUND') {
+      avatarMessage.value = 'Akun kamu tidak ditemukan. Masuk lagi untuk lanjut.';
+    } else {
+      avatarMessage.value = usersRefusalText(response.code);
+    }
+  } catch (error) {
+    console.error(error);
+    avatarMessage.value = 'Foto belum bisa dihapus.';
   } finally {
     avatarBusy.value = false;
   }
@@ -242,9 +284,15 @@ onUnmounted(onServerEvent(USERS_CHANGED_EVENT, () => void followChanges()));
           <UiAvatar :person="person" :size="64" data-testid="profile-avatar" />
           <div>
             <b class="profile__name">{{ person.name }}</b>
-            <div class="profile__mail">{{ profile?.email ?? '' }}</div>
+            <div class="profile__mail">
+              {{ profile?.email ?? '' }}
+              <span v-if="profile" class="profile__badge" :class="{ 'profile__badge--on': profile.verified }" data-testid="profile-verified">
+                {{ profile.verified ? 'Terverifikasi' : 'Belum terverifikasi' }}
+              </span>
+            </div>
             <div class="profile__photo">
-              <UiButton size="sm" :disabled="avatarBusy" @click="fileInput?.click()">{{ avatarBusy ? 'Mengunggah…' : 'Ganti foto' }}</UiButton>
+              <UiButton size="sm" :disabled="avatarBusy" @click="fileInput?.click()">{{ avatarBusy ? 'Memproses…' : 'Ganti foto' }}</UiButton>
+              <UiButton v-if="person.avatar" size="sm" variant="ghost" :disabled="avatarBusy" data-testid="remove-avatar" @click="removeAvatar">Hapus</UiButton>
               <input id="profile-avatar-file" ref="fileInput" class="sr-only" type="file" :accept="AVATAR_ALLOWED_MIME_TYPES.join(',')" aria-label="Ganti foto" @change="uploadAvatar" />
             </div>
             <p v-if="avatarMessage" role="alert" class="profile__err">{{ avatarMessage }}</p>
@@ -255,6 +303,16 @@ onUnmounted(onServerEvent(USERS_CHANGED_EVENT, () => void followChanges()));
           <p v-if="profileError" role="alert" class="profile__err">{{ profileError }}</p>
           <TextField id="profile-name" v-model="name" label="Nama" autocomplete="name" :error="profileErrors.name" />
           <TextField id="profile-email" v-model="email" type="email" label="Email" autocomplete="email" :error="profileErrors.email" />
+          <TextField
+            id="profile-phone"
+            v-model="phone"
+            type="tel"
+            label="Nomor HP"
+            inputmode="tel"
+            autocomplete="tel"
+            placeholder="Opsional"
+            :error="profileErrors.phone"
+          />
           <div v-if="conflicts.length" class="profile__conflicts" data-testid="profile-conflicts">
             <div
               v-for="field in conflicts"
@@ -365,6 +423,22 @@ onUnmounted(onServerEvent(USERS_CHANGED_EVENT, () => void followChanges()));
 .profile__mail {
   font-size: 13px;
   color: var(--mute);
+}
+.profile__badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink2);
+  vertical-align: 1px;
+}
+.profile__badge--on {
+  border-color: var(--c-done);
+  background: var(--c-done);
+  color: #fff;
 }
 .profile__photo {
   display: flex;

@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import AppFrame from '../../src/app/layouts/AppFrame.vue';
+import UsersAdminPage from '../../src/app/pages/admin/UsersAdminPage.vue';
+import ForgotPasswordPage from '../../src/app/pages/auth/ForgotPasswordPage.vue';
 import LoginPage from '../../src/app/pages/auth/LoginPage.vue';
+import RegisterPage from '../../src/app/pages/auth/RegisterPage.vue';
+import ResetPasswordPage from '../../src/app/pages/auth/ResetPasswordPage.vue';
 import NotFoundPage from '../../src/app/pages/NotFoundPage.vue';
 import ProfilePage from '../../src/app/pages/ProfilePage.vue';
 import {
@@ -20,13 +24,16 @@ import { screenName } from './screens';
 const screen = screenName(new URLSearchParams(window.location.search).get('screen'));
 const batchFilter = ref('23');
 const selectedRelease = ref(22);
-const framed = !['login', 'not-found'].includes(screen);
+const framed = !['login', 'register', 'forgot-password', 'reset-password', 'not-found'].includes(screen);
 const chatOpen = screen === 'chat';
 const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm', 'bump', 'notifications'];
 </script>
 
 <template>
   <LoginPage v-if="screen === 'login'" />
+  <RegisterPage v-else-if="screen === 'register'" />
+  <ForgotPasswordPage v-else-if="screen === 'forgot-password'" />
+  <ResetPasswordPage v-else-if="screen === 'reset-password'" />
   <NotFoundPage v-else-if="screen === 'not-found'" />
   <template v-else-if="framed">
     <AppFrame
@@ -86,6 +93,7 @@ const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'confirm'
       />
       <ActivityPage v-else-if="screen === 'feed'" :entries="f.activity" :now="f.NOW" />
       <ProfilePage v-else-if="screen === 'profile'" />
+      <UsersAdminPage v-else-if="screen === 'users' || screen === 'users-edit'" />
     </AppFrame>
     <ChatDrawer
       :open="chatOpen"

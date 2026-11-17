@@ -60,6 +60,13 @@
   font-size: 13px;
   font-weight: 600;
 }
+/* Inside a form the column gap already spaces it. */
+.af-form > .af-notice {
+  margin: 0;
+}
+.af-notice .link {
+  color: inherit;
+}
 .af-aside {
   font-size: 12px;
 }

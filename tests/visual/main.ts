@@ -3,6 +3,7 @@ import '@fontsource-variable/geist-mono';
 import '../../resources/index.css';
 import { createApp, defineComponent } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
+import { useAuthSession } from '../../src/features/auth/web';
 import Harness from './Harness.vue';
 import { pathFor, screenName } from './screens';
 
@@ -37,4 +38,6 @@ const router = createRouter({
 });
 void router.push(pathFor(screenName(params.get('screen'))));
 await router.isReady();
+// Pages that check permissions read the session; shoot.cjs answers /api/auth/me per screen.
+await useAuthSession().load().catch(() => undefined);
 createApp(Harness).use(router).mount('#app');
