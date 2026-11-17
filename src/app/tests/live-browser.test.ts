@@ -1048,6 +1048,29 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(document.querySelector('.td__pane')?.textContent).not.toContain('Untuk task pertama');
   });
 
+  it('scrolls the chosen detail tab into sight, for phones where the tab row is wider than the screen', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const taskId = await createTask(owner, projectId, 'Pairing code');
+    const revealed: { tab: string; options: unknown }[] = [];
+    // jsdom has no layout, so record the calls instead of scrolling.
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value(this: HTMLElement, options: unknown) {
+        if (this.getAttribute('role') === 'tab' && this.closest('.td__main')) revealed.push({ tab: this.textContent!.trim(), options });
+      },
+    });
+    try {
+      await openTab(owner.cookie, `/projects/${projectId}/tasks/${taskId}`);
+      expect(revealed.at(-1)?.tab).toBe('Detail');
+      await showDetailTab('Gambar');
+      expect(revealed.at(-1)).toEqual({ tab: 'Gambar 0', options: { inline: 'nearest', block: 'nearest' } });
+    } finally {
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
   it('uploads images from the detail, shows them by the API url, and lets only the uploader or owner delete them', async () => {
     const owner = await register('Ren Owner');
     const member = await register('Ayu Member');
