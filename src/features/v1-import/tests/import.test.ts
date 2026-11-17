@@ -225,9 +225,9 @@ async function createFixture(): Promise<Fixture> {
   task(ids.task2, { batch_id: ids.batch02, title: 'Shipped in 0.2', column_id: 'done', version_major: 0, version_minor: 2, version_patch: 2 });
   task(ids.task3, { batch_id: null, title: 'Outside batches', column_id: 'backlog', priority: 'urgent', version_major: 0, version_minor: 0, version_patch: 4 });
   activity('task.moved', T0 + 3 * DAY, { task_id: ids.task2, meta: JSON.stringify({ from: 'review', to: 'done', note: '', version: 'v0.2.2' }) });
-  // Older V1 builds logged comment events; V2's activity feed does not have them.
-  activity('comment.created', T0 + 3 * DAY + HOUR, { task_id: ids.task1 });
-  activity('comment.deleted', T0 + 3 * DAY + 2 * HOUR, { task_id: ids.task1 });
+  // V1's +Log button (removed on 2026-08-04) logged task.log_added, which V2's activity feed does not have.
+  activity('task.log_added', T0 + 3 * DAY + HOUR, { task_id: ids.task1 });
+  activity('task.log_added', T0 + 3 * DAY + 2 * HOUR, { task_id: ids.task1 });
   activity('task.created', T0 + 3 * DAY + 3 * HOUR, { id: ids.badMetaActivity, task_id: ids.task3, meta: '["v0.0.4"]' });
   const log = (taskId: string, version: string, from: string | null, to: string, at: number) =>
     insert('task_logs', { id: randomUUID(), task_id: taskId, version, column_from: from, column_to: to, note: 'Tugas dibuat', created_by: ids.ram, created_at: at });
@@ -342,7 +342,7 @@ describe('V1 import', () => {
         `task log ${ids.oddLog}: unknown column testing became backlog`,
         `task log ${ids.oddLog}: unknown column qa became backlog`,
         `project activity ${ids.badMetaActivity}: its meta was not a JSON object and was emptied`,
-        '2 project activity entries of event types V2 does not record were left out: comment.created (1), comment.deleted (1)',
+        '2 project activity entries of event types V2 does not record were left out: task.log_added (2)',
       ]),
     );
     expect(report.warnings).toHaveLength(12);
@@ -436,8 +436,7 @@ describe('V1 import', () => {
     const activity = await read(`/api/projects/${ids.project}/activity`);
     expect(parsed(projects.activity, activity)).toBe('ok');
     const events = activity.data.activity.map((entry: { event_type: string }) => entry.event_type);
-    expect(events).not.toContain('comment.created');
-    expect(events).not.toContain('comment.deleted');
+    expect(events).not.toContain('task.log_added');
     expect(activity.data.activity.find((entry: { id: string }) => entry.id === ids.badMetaActivity)).toMatchObject({ meta: null });
     expect(parsed(projects.dashboard, await read('/api/dashboard'))).toBe('ok');
     expect(parsed(projects.projects, await read('/api/projects'))).toBe('ok');
