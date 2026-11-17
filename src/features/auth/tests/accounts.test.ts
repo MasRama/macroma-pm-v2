@@ -7,6 +7,7 @@ import {
   deleteAccounts,
   findAccountById,
   listAccounts,
+  onAccountsDeleted,
   resetAccountPassword,
   updateAccount,
   updateAccountWithRoles,
@@ -116,6 +117,24 @@ describe('auth account directory', () => {
       must_change_password: 1,
     });
     expect(getDatabase().prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(account.id)).toEqual({ count: 0 });
+  });
+
+  it('tells deletion listeners inside the deleting transaction, and rolls back when one throws', () => {
+    const seen: string[][] = [];
+    let failing = false;
+    onAccountsDeleted((userIds) => {
+      seen.push([...userIds]);
+      if (failing) throw new Error('listener failed');
+    });
+    const kept = createAccount({ id: randomUUID(), name: 'Kept', email: uniqueEmail(), passwordHash: 'hash' });
+    failing = true;
+    expect(() => deleteAccounts([kept.id])).toThrow('listener failed');
+    expect(findAccountById(kept.id)).toBeDefined();
+    failing = false;
+    expect(deleteAccounts([kept.id])).toBe(1);
+    expect(seen.at(-1)).toEqual([kept.id]);
+    expect(deleteAccounts([randomUUID()])).toBe(0);
+    expect(seen).toHaveLength(2);
   });
 
   it('deletes accounts and cascades their sessions and role assignments', () => {
