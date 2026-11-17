@@ -20,6 +20,7 @@ export {
   readCsrfToken,
 } from './csrf';
 export { createAccessClient, type AccessClient } from './access-client';
+export { createSecurityClient, type SecurityClient } from './security-client';
 export type {
   CurrentUser,
   PermissionData,

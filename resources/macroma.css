@@ -1,0 +1,252 @@
+/*
+ * Macroma design tokens and base styles (approved spec, 2026-11-17).
+ * Light tokens live on :root, dark ones on html.dark (the class the theme
+ * switch in src/app/theme.ts sets). Status colours are the same in both themes.
+ */
+:root {
+  color-scheme: light;
+
+  --bg: #ECEAE4;
+  --ink: #0E0E10;
+  --ink2: #3B3A37;
+  --mute: #7C7A74;
+  --line: #D8D5CD;
+  --line-soft: #EEECE6;
+  --card: #FFFFFF;
+  --field: #FFFFFF;
+  --placeholder: #A8A59D;
+  --dash: #B9B5AB;
+  --fill: #F3F2EE;
+  --track: #ECEAE4;
+  --pri-off: #D4D1C9;
+  --float-line: #CFCBC2;
+
+  /* Primary button and other "ink" controls. */
+  --primary-bg: #0E0E10;
+  --primary-fg: #FFFFFF;
+
+  /* Solid ink blocks on the page: batch strip, stat block, chat header, previews. */
+  --block: #0E0E10;
+  --block-line: #0E0E10;
+  --block-fg: #FFFFFF;
+  --block-meta: #8D8B86;
+  --block-soft: #B5B3AD;
+  --block-dim: #77756F;
+  --block-raise: #1E1E21;
+  --block-raise-line: #3A3A3E;
+
+  /* Sidebar. */
+  --side-bg: #0E0E10;
+  --side-fg: #FFFFFF;
+  --side-text: #C9C7C1;
+  --side-meta: #8D8B86;
+  --side-sec: #6F6D68;
+  --side-raise: #1E1E21;
+  --side-line: #26262A;
+  --side-on-bg: #FFFFFF;
+  --side-on-fg: #0E0E10;
+
+  /* Status colours: always solid with white text. */
+  --c-backlog: #6F6C66;
+  --c-backlog-bar: #77746D;
+  --c-ongoing: #2D55FF;
+  --c-revisi: #FF4A1C;
+  --c-review: #7A3CF0;
+  --c-done: #0F9D4F;
+  --c-gold: #C9A400;
+  --alert: var(--c-revisi);
+  --on-status: #FFFFFF;
+
+  --r-panel: 12px;
+  --r-card: 10px;
+  --r-control: 9px;
+  --r-small: 8px;
+  --r-block: 5px;
+  --r-bar: 2px;
+
+  --shadow-card: 0 1px 0 rgba(14, 14, 16, 0.05);
+  --shadow-float: 0 20px 40px -20px rgba(0, 0, 0, 0.3);
+  --shadow-menu: 0 16px 30px -14px rgba(0, 0, 0, 0.3);
+  --shadow-modal: 0 30px 60px -20px rgba(0, 0, 0, 0.45);
+  --shadow-lift: 0 14px 28px -10px rgba(14, 14, 16, 0.35);
+  --shadow-drawer: -20px 0 40px -20px rgba(0, 0, 0, 0.25);
+  --dim: rgba(14, 14, 16, 0.55);
+
+  --font-ui: 'Geist Variable', 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --bg: #141416;
+  --ink: #F2F1EC;
+  --ink2: #C9C7C1;
+  --mute: #8E8C86;
+  --line: #2A2A2E;
+  --line-soft: #242428;
+  --card: #1D1D20;
+  --field: #1D1D20;
+  --placeholder: #6A6863;
+  --dash: #3A3A3F;
+  --fill: #26262A;
+  --track: #2A2A2E;
+  --pri-off: #3A3A3F;
+  --float-line: #34343A;
+
+  --primary-bg: #F2F1EC;
+  --primary-fg: #0E0E10;
+
+  --block: #000000;
+  --block-line: #2A2A2E;
+
+  --side-bg: #0A0A0B;
+  --side-on-bg: #F2F1EC;
+  --side-on-fg: #0A0A0B;
+
+  --shadow-card: none;
+  --shadow-lift: 0 14px 28px -10px rgba(0, 0, 0, 0.7);
+  --dim: rgba(0, 0, 0, 0.6);
+}
+
+html,
+body {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  /* The mockups use the browser's normal line height, not Tailwind's 1.5. */
+  line-height: normal;
+  font-size: 13.5px;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---- Buttons: solid ink primary, ink-outlined secondary, line-bordered ghost, red danger. ---- */
+.btn {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border-radius: var(--r-control);
+  border: 1.5px solid var(--ink);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.08s ease;
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn:focus-visible,
+.focus-ring:focus-visible {
+  outline: 2px solid var(--c-ongoing);
+  outline-offset: 2px;
+}
+.btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.btn--primary {
+  background: var(--primary-bg);
+  border-color: var(--primary-bg);
+  color: var(--primary-fg);
+}
+.btn--ghost {
+  border-color: var(--line);
+}
+.btn--danger {
+  background: var(--c-revisi);
+  border-color: var(--c-revisi);
+  color: #fff;
+}
+.btn--sm {
+  height: 32px;
+  padding: 0 11px;
+  font-size: 12.5px;
+}
+.btn--sm svg {
+  width: 13px;
+  height: 13px;
+}
+.btn--lg {
+  height: 46px;
+  font-size: 14.5px;
+}
+.btn--block {
+  width: 100%;
+}
+
+/* ---- Text styles shared by panels and forms. ---- */
+.h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.sub {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--mute);
+}
+.cap {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mute);
+  letter-spacing: 0.02em;
+}
+.link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

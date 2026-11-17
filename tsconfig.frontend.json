@@ -22,6 +22,9 @@
     "resources/**/*.ts",
     "resources/**/*.vue",
     "src/app/**/*.vue",
-    "src/features/**/*.vue"
+    "src/features/**/*.vue",
+    "src/shared/**/*.vue",
+    "tests/visual/**/*.ts",
+    "tests/visual/**/*.vue"
   ]
 }
