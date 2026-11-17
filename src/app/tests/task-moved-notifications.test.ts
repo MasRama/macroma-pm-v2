@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetSecurityState } from '../../../../app/server';
-import { callApi } from '../../../../app/tests/api';
-import { grantAdmin, signUp, type Persona } from '../../../../app/tests/personas';
-import { closeEventStreams, EVENTS_PATH, STREAM_READY_EVENT } from '../../../../shared/realtime';
-import { readEvents, type EventReader } from '../../../../shared/realtime/tests/helpers';
-import { NOTIFICATIONS_CHANGED_EVENT, notificationsResponseSchemas } from '../../../notifications';
-import { PROJECTS_NOTIFICATION_TYPES, projectsResponseSchemas } from '../../index';
-import { app } from '../../../../app/server';
+import { app, resetSecurityState } from '../server';
+import { callApi } from './api';
+import { grantAdmin, signUp, type Persona } from './personas';
+import { closeEventStreams, EVENTS_PATH, STREAM_READY_EVENT } from '../../shared/realtime';
+import { readEvents, type EventReader } from '../../shared/realtime/tests/helpers';
+import { NOTIFICATIONS_CHANGED_EVENT, notificationsResponseSchemas } from '../../features/notifications';
+import { PROJECTS_NOTIFICATION_TYPES, projectsResponseSchemas } from '../../features/projects';
 
 const TASK_MOVED = PROJECTS_NOTIFICATION_TYPES.taskMoved;
 
