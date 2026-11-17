@@ -1,10 +1,15 @@
 import { hc } from 'hono/client';
 import type {
   AddProjectMemberInput,
+  AttachmentsResponse,
+  AttachmentsUploadedResponse,
   BatchesResponse,
   BatchSavedResponse,
   BoardQuery,
+  CommentAddedResponse,
+  CommentsResponse,
   CreateBatchInput,
+  CreateCommentInput,
   CreateProjectInput,
   CreateTaskInput,
   ListProjectsQuery,
@@ -56,17 +61,29 @@ export interface ProjectsClient {
   moveTask(taskId: string, input: MoveTaskInput): Promise<TaskMovedResponse>;
   removeTask(taskId: string): Promise<ProjectsDoneResponse>;
   taskLogs(taskId: string): Promise<TaskLogsResponse>;
+  /** The task's comments, oldest first. */
+  comments(taskId: string): Promise<CommentsResponse>;
+  addComment(taskId: string, input: CreateCommentInput): Promise<CommentAddedResponse>;
+  /** The author or the project owner only. */
+  removeComment(taskId: string, commentId: string): Promise<ProjectsDoneResponse>;
+  /** The task's images, oldest first; each `url` serves the image to accounts that can open the project. */
+  attachments(taskId: string): Promise<AttachmentsResponse>;
+  /** Up to 8 JPEG, PNG, GIF or WebP images of at most 5 MB; files that fail come back in `errors`. */
+  uploadAttachments(taskId: string, files: readonly File[]): Promise<AttachmentsUploadedResponse>;
+  /** The uploader or the project owner only. */
+  removeAttachment(taskId: string, attachmentId: string): Promise<ProjectsDoneResponse>;
 }
 
 export interface ProjectsClientOptions {
   baseUrl?: string;
   tasksBaseUrl?: string;
+  attachmentsBaseUrl?: string;
   /** Without it, writes reach the server without a CSRF token and fail closed there. */
   csrf?: ProjectsWebCsrf;
 }
 
 export function createProjectsClient(options: ProjectsClientOptions = {}): ProjectsClient {
-  const { baseUrl = '/api/projects', tasksBaseUrl = '/api/tasks', csrf } = options;
+  const { baseUrl = '/api/projects', tasksBaseUrl = '/api/tasks', attachmentsBaseUrl = '/api/task-attachments', csrf } = options;
   const apiFetch: typeof fetch = async (input, init = {}) => {
     const method = (init.method ?? 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD') await csrf?.ensureToken();
@@ -95,5 +112,19 @@ export function createProjectsClient(options: ProjectsClientOptions = {}): Proje
     moveTask: async (taskId, input) => (await tasks[':id'].move.$patch({ param: { id: taskId }, json: input })).json(),
     removeTask: async (taskId) => (await tasks[':id'].$delete({ param: { id: taskId } })).json(),
     taskLogs: async (taskId) => (await tasks[':id'].logs.$get({ param: { id: taskId } })).json(),
+    comments: async (taskId) => (await tasks[':id'].comments.$get({ param: { id: taskId } })).json(),
+    addComment: async (taskId, input) => (await tasks[':id'].comments.$post({ param: { id: taskId }, json: input })).json(),
+    removeComment: async (taskId, commentId) =>
+      (await tasks[':id'].comments[':commentId'].$delete({ param: { id: taskId, commentId } })).json(),
+    attachments: async (taskId) => (await tasks[':id'].attachments.$get({ param: { id: taskId } })).json(),
+    // Multipart with several files under one name, which the typed client does not build; the shape is the route's.
+    uploadAttachments: async (taskId, files) => {
+      const form = new FormData();
+      for (const file of files) form.append('files', file, file.name);
+      const url = `${attachmentsBaseUrl.replace(/\/$/, '')}?${new URLSearchParams({ task_id: taskId })}`;
+      return (await apiFetch(url, { method: 'POST', body: form })).json() as Promise<AttachmentsUploadedResponse>;
+    },
+    removeAttachment: async (taskId, attachmentId) =>
+      (await tasks[':id'].attachments[':attachmentId'].$delete({ param: { id: taskId, attachmentId } })).json(),
   };
 }

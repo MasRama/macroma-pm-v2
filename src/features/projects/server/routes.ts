@@ -5,6 +5,7 @@ import {
   addProjectMemberInputSchema,
   boardQuerySchema,
   createBatchInputSchema,
+  createCommentInputSchema,
   createProjectInputSchema,
   createTaskInputSchema,
   listProjectsQuerySchema,
@@ -12,8 +13,15 @@ import {
   STALE_REVISION,
   updateProjectInputSchema,
   updateTaskInputSchema,
+  uploadAttachmentsQuerySchema,
+  TASK_ATTACHMENT_MAX_FILE_SIZE_BYTES,
+  TASK_ATTACHMENT_MAX_FILES,
+  type AttachmentsSuccess,
+  type AttachmentsUploadedSuccess,
   type BatchesSuccess,
   type BatchSavedSuccess,
+  type CommentAddedSuccess,
+  type CommentsSuccess,
   type MemberAddedSuccess,
   type Project,
   type ProjectActivitySuccess,
@@ -31,11 +39,13 @@ import {
   type TaskSavedSuccess,
 } from '../contract';
 import { getDatabase } from '../../../shared/database';
-import { createGuard, forbidden, jsonInput, queryInput } from '../../../shared/security';
+import { createGuard, forbidden, jsonInput, queryInput, type RoutePolicy } from '../../../shared/security';
 import {
+  attachmentView,
   batchRef,
   batchView,
   canOpenProject,
+  commentView,
   logView,
   personRefs,
   projectAudience,
@@ -43,25 +53,34 @@ import {
   taskView,
   taskViews,
 } from './access';
+import { removeStoredImages, storeImages, uploadedFiles } from './attachments';
 import type { ProjectsServerHost } from './host';
 import { announceBoardChange, announceProjectChange, projectsBoardChangedTopic, projectsChangedTopic } from './live';
 import {
   activateBatch,
   activeBatches,
+  addAttachments,
   addProjectMember,
   countsByBatch,
   createBatch,
+  createComment,
   createProject,
   createTask,
+  deleteAttachment,
+  deleteComment,
   deleteProject,
   deleteTask,
   directMemberRole,
   directMembers,
+  findAttachment,
   findBatch,
+  findComment,
   findProject,
   findTask,
   listActivity,
+  listAttachments,
   listBatches,
+  listComments,
   listLogs,
   listProjectsFor,
   listTasks,
@@ -96,6 +115,8 @@ function assigneeRefused(context: Context) {
 const projectNotFound = (context: Context) => refuse(context, 404, 'PROJECT_NOT_FOUND', 'Project not found');
 const batchNotFound = (context: Context) => refuse(context, 404, 'BATCH_NOT_FOUND', 'Batch not found');
 const taskNotFound = (context: Context) => refuse(context, 404, 'TASK_NOT_FOUND', 'Task not found');
+const commentNotFound = (context: Context) => refuse(context, 404, 'COMMENT_NOT_FOUND', 'Comment not found');
+const attachmentNotFound = (context: Context) => refuse(context, 404, 'ATTACHMENT_NOT_FOUND', 'Attachment not found');
 
 function guardFor(host: ProjectsServerHost) {
   return createGuard((context) => host.resolveActor(getCookie(context, host.sessionCookieName)));
@@ -241,11 +262,12 @@ export function createProjectRoutes(host: ProjectsServerHost) {
         data: { project: update.project },
       } satisfies ProjectSavedSuccess);
     })
-    .delete('/:id', guard.signedIn, projectAccess('owner'), (context) => {
+    .delete('/:id', guard.signedIn, projectAccess('owner'), async (context) => {
       const project = current(context);
       const audience = projectAudience(host, project);
-      deleteProject(project.id);
+      const images = deleteProject(project.id);
       announceProjectChange(audience);
+      await removeStoredImages(host, images);
       return context.json({ success: true as const, message: 'Project deleted' } satisfies ProjectsDone);
     })
     .post('/:id/members', guard.signedIn, projectAccess('owner'), jsonInput(addProjectMemberInputSchema), (context) => {
@@ -475,11 +497,12 @@ export function createTaskRoutes(host: ProjectsServerHost) {
         data: { task: taskView(moved.task, people), log: logView(moved.log, people) },
       } satisfies TaskMovedSuccess);
     })
-    .delete('/:id', guard.signedIn, taskAccess('owner'), (context) => {
+    .delete('/:id', guard.signedIn, taskAccess('owner'), async (context) => {
       const actor = guard.actor(context);
       const { task, project } = current(context);
-      deleteTask(task, actor.id);
+      const images = deleteTask(task, actor.id);
       announceBoardChange(projectAudience(host, project));
+      await removeStoredImages(host, images);
       return context.json({ success: true as const, message: 'Task deleted' } satisfies ProjectsDone);
     })
     .get('/:id/logs', guard.signedIn, taskAccess('member'), (context) => {
@@ -493,5 +516,147 @@ export function createTaskRoutes(host: ProjectsServerHost) {
         message: 'OK',
         data: { logs: logs.map((log) => logView(log, people)) },
       } satisfies TaskLogsSuccess);
+    })
+    .get('/:id/comments', guard.signedIn, taskAccess('member'), (context) => {
+      const comments = listComments(current(context).task.id);
+      const people = personRefs(
+        host,
+        comments.map((comment) => comment.user_id),
+      );
+      return context.json({
+        success: true as const,
+        message: 'OK',
+        data: { comments: comments.map((comment) => commentView(comment, people)) },
+      } satisfies CommentsSuccess);
+    })
+    .post('/:id/comments', guard.signedIn, taskAccess('member'), jsonInput(createCommentInputSchema), (context) => {
+      const actor = guard.actor(context);
+      const { task, project } = current(context);
+      const comment = createComment({ taskId: task.id, userId: actor.id, content: context.req.valid('json').content });
+      announceBoardChange(projectAudience(host, project));
+      return context.json(
+        {
+          success: true as const,
+          message: 'Comment added',
+          data: { comment: commentView(comment, personRefs(host, [actor.id])) },
+        } satisfies CommentAddedSuccess,
+        201,
+      );
+    })
+    .delete('/:id/comments/:commentId', guard.signedIn, taskAccess('member'), (context) => {
+      const actor = guard.actor(context);
+      const { task, project } = current(context);
+      const comment = findComment(context.req.param('commentId'));
+      if (!comment || comment.task_id !== task.id) return commentNotFound(context);
+      if (comment.user_id !== actor.id && project.owner_id !== actor.id) {
+        return forbidden(context, 'Only the author or the project owner can delete this comment');
+      }
+      deleteComment(comment.id);
+      announceBoardChange(projectAudience(host, project));
+      return context.json({ success: true as const, message: 'Comment deleted' } satisfies ProjectsDone);
+    })
+    .get('/:id/attachments', guard.signedIn, taskAccess('member'), (context) => {
+      const attachments = listAttachments(current(context).task.id);
+      const people = personRefs(
+        host,
+        attachments.map((attachment) => attachment.uploaded_by),
+      );
+      return context.json({
+        success: true as const,
+        message: 'OK',
+        data: { attachments: attachments.map((attachment) => attachmentView(attachment, people)) },
+      } satisfies AttachmentsSuccess);
+    })
+    .get('/:id/attachments/:attachmentId/file', guard.signedIn, taskAccess('member'), async (context) => {
+      const { task } = current(context);
+      const attachment = findAttachment(context.req.param('attachmentId'));
+      if (!attachment || attachment.task_id !== task.id) return attachmentNotFound(context);
+      const stored = await host.assetStorage.get(attachment.storage_key);
+      if (!stored) return attachmentNotFound(context);
+      return new Response(Buffer.from(stored.data), {
+        headers: {
+          // Only accounts that can open the project may see it, so no shared cache keeps it.
+          'Cache-Control': 'private, max-age=3600',
+          'Content-Type': attachment.mime_type,
+          'Content-Length': String(stored.size),
+        },
+      });
+    })
+    .delete('/:id/attachments/:attachmentId', guard.signedIn, taskAccess('member'), async (context) => {
+      const actor = guard.actor(context);
+      const { task, project } = current(context);
+      const attachment = findAttachment(context.req.param('attachmentId'));
+      if (!attachment || attachment.task_id !== task.id) return attachmentNotFound(context);
+      if (attachment.uploaded_by !== actor.id && project.owner_id !== actor.id) {
+        return forbidden(context, 'Only the uploader or the project owner can delete this image');
+      }
+      deleteAttachment(task, attachment, actor.id);
+      announceBoardChange(projectAudience(host, project));
+      await removeStoredImages(host, [attachment.storage_key]);
+      return context.json({ success: true as const, message: 'Image deleted' } satisfies ProjectsDone);
     });
 }
+
+/**
+ * Task image uploads, mounted on their own static path so the route can carry
+ * a body budget for eight images; the task is named in the query and checked
+ * (404, then 403) before the body is read.
+ */
+export function createTaskAttachmentRoutes(host: ProjectsServerHost) {
+  const guard = guardFor(host);
+  return new Hono().post('/', guard.signedIn, queryInput(uploadAttachmentsQuerySchema), async (context) => {
+    const actor = guard.actor(context);
+    const task = findTask(context.req.valid('query').task_id);
+    const project = task ? findProject(task.project_id) : undefined;
+    if (!task || !project) return taskNotFound(context);
+    if (!canOpenProject(host, project, actor.id)) return forbidden(context, 'You cannot open this project');
+
+    let files: File[];
+    try {
+      files = uploadedFiles(await context.req.parseBody({ all: true }));
+    } catch {
+      files = [];
+    }
+    const { stored, errors } = await storeImages(host, files);
+    if (stored.length === 0) {
+      return context.json(
+        {
+          success: false as const,
+          message: 'No image was uploaded',
+          code: 'NO_FILES_PROCESSED' as const,
+          errors: { files: errors.length > 0 ? errors : ['Choose at least one image'] },
+        },
+        422,
+      );
+    }
+    let rows;
+    try {
+      rows = addAttachments(task, stored, actor.id);
+    } catch (error) {
+      await removeStoredImages(
+        host,
+        stored.map((image) => image.storageKey),
+      );
+      throw error;
+    }
+    announceBoardChange(projectAudience(host, project));
+    const people = personRefs(host, [actor.id]);
+    return context.json(
+      {
+        success: true as const,
+        message: errors.length > 0 ? `${rows.length} uploaded, ${errors.length} failed` : `${rows.length} uploaded`,
+        data: { attachments: rows.map((row) => attachmentView(row, people)), errors },
+      } satisfies AttachmentsUploadedSuccess,
+      201,
+    );
+  });
+}
+
+/**
+ * Mounted next to `createTaskAttachmentRoutes`: uploads count toward the
+ * strict per-client limit, and their budget is eight full-size images plus
+ * a 2 MiB multipart allowance; the per-file checks stay authoritative.
+ */
+export const TASK_ATTACHMENT_ROUTE_POLICIES = [
+  { method: 'POST', path: '/', sensitive: true, bodyMaxBytes: TASK_ATTACHMENT_MAX_FILES * TASK_ATTACHMENT_MAX_FILE_SIZE_BYTES + 2 * 1024 * 1024 },
+] as const satisfies readonly RoutePolicy[];

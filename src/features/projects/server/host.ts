@@ -1,3 +1,4 @@
+import type { AssetStorage } from '../../../shared/storage';
 import type { ProjectPerson } from '../contract';
 
 /**
@@ -18,4 +19,6 @@ export interface ProjectsServerHost {
   workspaceMemberIds(workspaceId: string): string[];
   /** The workspaces the account belongs to. */
   workspacesOf(userId: string): string[];
+  /** Where task images are stored, under `task-attachments/`. */
+  readonly assetStorage: AssetStorage;
 }

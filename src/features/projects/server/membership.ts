@@ -1,5 +1,6 @@
 import { getDatabase } from '../../../shared/database';
 import { canOpenProject, projectAudiences } from './access';
+import { removeStoredImages } from './attachments';
 import type { ProjectsServerHost } from './host';
 import { announceBoardChange, announceProjectChange } from './live';
 import {
@@ -67,19 +68,20 @@ export function workspaceMembersLeft(host: ProjectsServerHost, workspaceId: stri
 
 /**
  * Forgets deleted accounts the way V1's foreign keys did: the projects they
- * owned go with everything inside, their memberships go, and their names come
- * off tasks, logs and the activity feed.
+ * owned go with everything inside (their images too), their memberships go,
+ * and their names come off tasks, logs, comments, images and the activity feed.
  */
 export function forgetAccounts(host: ProjectsServerHost, userIds: readonly string[]): void {
   if (userIds.length === 0) return;
-  const touched = getDatabase().transaction(() => {
+  const forgotten = getDatabase().transaction(() => {
     const projects = [...new Set([...projectIdsOwnedBy(userIds), ...projectIdsWithMembers(userIds)])]
       .map((id) => findProject(id))
       .filter((project): project is Project => project !== undefined);
     const audience = new Set([...projectAudiences(host, projects).values()].flatMap((members) => [...members]));
-    forgetAccountRows(userIds);
-    return audience;
+    return { audience, images: forgetAccountRows(userIds) };
   })();
-  for (const userId of userIds) touched.delete(userId);
-  announceProjectChange(touched);
+  for (const userId of userIds) forgotten.audience.delete(userId);
+  announceProjectChange(forgotten.audience);
+  // The rows are gone, so the files are already refused; their removal runs after the deletion commits.
+  void removeStoredImages(host, forgotten.images);
 }

@@ -1,6 +1,15 @@
-import type { Batch, BatchRef, ColumnCounts, Project, ProjectPersonRef, Task, TaskLog } from '../contract';
+import type { Batch, BatchRef, ColumnCounts, Project, ProjectPersonRef, Task, TaskAttachment, TaskComment, TaskLog } from '../contract';
 import type { ProjectsServerHost } from './host';
-import { directMemberIdsByProject, directMemberRole, emptyCounts, type BatchRow, type TaskLogRow, type TaskRow } from './repository';
+import {
+  directMemberIdsByProject,
+  directMemberRole,
+  emptyCounts,
+  type AttachmentRow,
+  type BatchRow,
+  type CommentRow,
+  type TaskLogRow,
+  type TaskRow,
+} from './repository';
 
 /** Project access, as in V1: a direct member of the project, or a member of its workspace. */
 export function canOpenProject(host: ProjectsServerHost, project: Project, userId: string): boolean {
@@ -69,6 +78,8 @@ export function taskView(row: TaskRow, people: Map<string, ProjectPersonRef>): T
     version: { major: row.version_major, minor: row.version_minor, patch: row.version_patch },
     revision: row.revision,
     revisi_count: row.revisi_count,
+    comment_count: row.comment_count,
+    attachment_count: row.attachment_count,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -91,6 +102,34 @@ export function logView(row: TaskLogRow, people: Map<string, ProjectPersonRef>):
     column_to: row.column_to,
     note: row.note,
     user: row.created_by ? (people.get(row.created_by) ?? null) : null,
+    created_at: row.created_at,
+  };
+}
+
+export function commentView(row: CommentRow, people: Map<string, ProjectPersonRef>): TaskComment {
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    content: row.content,
+    user: row.user_id ? (people.get(row.user_id) ?? null) : null,
+    created_at: row.created_at,
+  };
+}
+
+/** Where an attachment's image is served, to accounts that can open the project. */
+export function attachmentUrl(row: Pick<AttachmentRow, 'id' | 'task_id'>): string {
+  return `/api/tasks/${row.task_id}/attachments/${row.id}/file`;
+}
+
+export function attachmentView(row: AttachmentRow, people: Map<string, ProjectPersonRef>): TaskAttachment {
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    name: row.name,
+    mime_type: row.mime_type,
+    size: row.size,
+    url: attachmentUrl(row),
+    uploaded_by: row.uploaded_by ? (people.get(row.uploaded_by) ?? null) : null,
     created_at: row.created_at,
   };
 }

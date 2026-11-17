@@ -13,12 +13,14 @@ export async function projectsRouteTypes(): Promise<void> {
 
   const board = await (await projects[':id'].tasks.$get({ param: { id: 'p' }, query: {} })).json();
   if (board.success) {
-    const revisions: number = board.data.tasks[0].revisi_count;
-    void revisions;
+    const counts: number[] = [board.data.tasks[0].revisi_count, board.data.tasks[0].comment_count, board.data.tasks[0].attachment_count];
+    void counts;
   }
 
   // @ts-expect-error an edit carries the revision it was based on
   await projects[':id'].$patch({ param: { id: 'p' }, json: { name: 'No revision' } });
+  // @ts-expect-error a comment is text under `content`
+  await tasks[':id'].comments.$post({ param: { id: 't' }, json: { body: 'Wrong field' } });
   // @ts-expect-error tasks move only between the kanban columns
   await tasks[':id'].move.$patch({ param: { id: 't' }, json: { column_id: 'archive' } });
 

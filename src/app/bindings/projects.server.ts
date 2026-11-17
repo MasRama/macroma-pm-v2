@@ -1,7 +1,18 @@
+import { resolve } from 'node:path';
 import type { Hono } from 'hono';
 import { findAccountByEmail, findAccountsByIds, getCurrentUser, onAccountsDeleted, SESSION_COOKIE_NAME } from '../../features/auth';
-import { createProjectRoutes, createTaskRoutes, forgetAccounts, type ProjectPerson, type ProjectsServerHost } from '../../features/projects';
+import {
+  createProjectRoutes,
+  createTaskAttachmentRoutes,
+  createTaskRoutes,
+  forgetAccounts,
+  TASK_ATTACHMENT_ROUTE_POLICIES,
+  type ProjectPerson,
+  type ProjectsServerHost,
+} from '../../features/projects';
 import { isWorkspaceMember, workspaceMemberIds, workspacesOf } from '../../features/workspaces';
+import { declareRoutePolicies } from '../../shared/security';
+import { createLocalAssetStorage } from '../../shared/storage';
 
 function person(account: ProjectPerson): ProjectPerson {
   return { id: account.id, name: account.name, email: account.email, avatar: account.avatar };
@@ -22,6 +33,7 @@ export const projectsServerHost: ProjectsServerHost = {
   isWorkspaceMember,
   workspaceMemberIds,
   workspacesOf,
+  assetStorage: createLocalAssetStorage({ root: resolve(process.cwd(), 'storage') }),
 };
 
 // Projects keep no foreign keys into Auth's users table; deleted accounts are forgotten here.
@@ -30,4 +42,6 @@ onAccountsDeleted((userIds) => forgetAccounts(projectsServerHost, userIds));
 export default function composeProjectsServer(app: Hono): void {
   app.route('/api/projects', createProjectRoutes(projectsServerHost));
   app.route('/api/tasks', createTaskRoutes(projectsServerHost));
+  declareRoutePolicies(app, '/api/task-attachments', TASK_ATTACHMENT_ROUTE_POLICIES);
+  app.route('/api/task-attachments', createTaskAttachmentRoutes(projectsServerHost));
 }

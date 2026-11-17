@@ -29,8 +29,19 @@ export const PROJECT_ACTIVITY_EVENTS = [
   'task.deleted',
   'batch.created',
   'batch.activated',
+  'task.attachment_added',
+  'task.attachment_removed',
 ] as const;
 export type ProjectActivityEvent = (typeof PROJECT_ACTIVITY_EVENTS)[number];
+
+/** Comments are plain text of at most this many characters. */
+export const TASK_COMMENT_MAX_LENGTH = 2000;
+
+/** Task image uploads: at most this many files per request, each at most this size. */
+export const TASK_ATTACHMENT_MAX_FILES = 8;
+export const TASK_ATTACHMENT_MAX_FILE_SIZE_MB = 5;
+export const TASK_ATTACHMENT_MAX_FILE_SIZE_BYTES = TASK_ATTACHMENT_MAX_FILE_SIZE_MB * 1024 * 1024;
+export const TASK_ATTACHMENT_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
 
 export const STALE_REVISION = 'STALE_REVISION' as const;
 
@@ -44,6 +55,10 @@ export const PROJECTS_REFUSAL_CODES = [
   'MEMBER_NOT_FOUND',
   'OWNER_CANNOT_BE_REMOVED',
   'TASK_ALREADY_IN_COLUMN',
+  'COMMENT_NOT_FOUND',
+  'ATTACHMENT_NOT_FOUND',
+  /** An upload in which no file was a usable image; `errors.files` says why for each. */
+  'NO_FILES_PROCESSED',
   STALE_REVISION,
 ] as const;
 
@@ -149,6 +164,17 @@ export const moveTaskInputSchema = z
     path: ['note'],
   });
 
+export const createCommentInputSchema = z.object({
+  content: z
+    .string()
+    .trim()
+    .min(1, 'Comment is required')
+    .max(TASK_COMMENT_MAX_LENGTH, `Comment must be at most ${TASK_COMMENT_MAX_LENGTH} characters`),
+});
+
+/** Uploads name their task in the query: the upload path stays static so it can carry its own body budget. */
+export const uploadAttachmentsQuerySchema = z.object({ task_id: idSchema });
+
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectInputSchema>;
 export type ListProjectsQuery = z.input<typeof listProjectsQuerySchema>;
@@ -158,6 +184,8 @@ export type BoardQuery = z.input<typeof boardQuerySchema>;
 export type CreateTaskInput = z.infer<typeof createTaskInputSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
 export type MoveTaskInput = z.infer<typeof moveTaskInputSchema>;
+export type CreateCommentInput = z.infer<typeof createCommentInputSchema>;
+export type UploadAttachmentsQuery = z.input<typeof uploadAttachmentsQuerySchema>;
 
 /**
  * Response schemas, built on demand: routes type their responses against them
@@ -243,6 +271,8 @@ export function projectsResponseSchemas() {
     revision: z.number(),
     /** How many times the task moved to `revisi`. */
     revisi_count: z.number(),
+    comment_count: z.number(),
+    attachment_count: z.number(),
     created_at: z.number(),
     updated_at: z.number(),
   });
@@ -263,6 +293,28 @@ export function projectsResponseSchemas() {
     created_by: personRef.nullable(),
     /** Every version the task went through, oldest first. */
     logs: z.array(taskLog),
+  });
+  const comment = z.strictObject({
+    id: z.string(),
+    task_id: z.string(),
+    content: z.string(),
+    /** `null` once the author's account is deleted. */
+    user: personRef.nullable(),
+    created_at: z.number(),
+  });
+  const attachment = z.strictObject({
+    id: z.string(),
+    task_id: z.string(),
+    /** The file name as uploaded. */
+    name: z.string(),
+    /** Always `image/webp`: uploads are converted. */
+    mime_type: z.string(),
+    size: z.number(),
+    /** The signed-in route serving the image to accounts that can open the project. */
+    url: z.string(),
+    /** `null` once the uploader's account is deleted. */
+    uploaded_by: personRef.nullable(),
+    created_at: z.number(),
   });
   const activity = z.strictObject({
     id: z.string(),
@@ -293,6 +345,8 @@ export function projectsResponseSchemas() {
     task,
     taskLog,
     taskDetail,
+    comment,
+    attachment,
     activityEntry: activity,
     error,
     /** 409 for a project edit based on an older revision; `current` is the project as it is now. */
@@ -320,6 +374,11 @@ export function projectsResponseSchemas() {
     taskMoved: success(z.strictObject({ task, log: taskLog })),
     taskDetailFound: success(z.strictObject({ task: taskDetail })),
     taskLogs: success(z.strictObject({ logs: z.array(taskLog) })),
+    comments: success(z.strictObject({ comments: z.array(comment) })),
+    commentAdded: success(z.strictObject({ comment })),
+    attachments: success(z.strictObject({ attachments: z.array(attachment) })),
+    /** Some files may fail while others upload; `errors` names each failed file and why. */
+    attachmentsUploaded: success(z.strictObject({ attachments: z.array(attachment), errors: z.array(z.string()) })),
   };
 }
 
@@ -337,6 +396,8 @@ export type ProjectMember = Infer<'member'>;
 export type Task = Infer<'task'>;
 export type TaskLog = Infer<'taskLog'>;
 export type TaskDetail = Infer<'taskDetail'>;
+export type TaskComment = Infer<'comment'>;
+export type TaskAttachment = Infer<'attachment'>;
 export type ProjectActivity = Infer<'activityEntry'>;
 export type ProjectsError = Infer<'error'>;
 export type StaleProjectError = Infer<'staleProject'>;
@@ -354,6 +415,10 @@ export type TaskSavedSuccess = Infer<'taskSaved'>;
 export type TaskMovedSuccess = Infer<'taskMoved'>;
 export type TaskDetailSuccess = Infer<'taskDetailFound'>;
 export type TaskLogsSuccess = Infer<'taskLogs'>;
+export type CommentsSuccess = Infer<'comments'>;
+export type CommentAddedSuccess = Infer<'commentAdded'>;
+export type AttachmentsSuccess = Infer<'attachments'>;
+export type AttachmentsUploadedSuccess = Infer<'attachmentsUploaded'>;
 
 export type ProjectsResponse = ProjectsSuccess | ProjectsError;
 export type ProjectSavedResponse = ProjectSavedSuccess | ProjectsError;
@@ -368,5 +433,9 @@ export type TasksResponse = TasksSuccess | ProjectsError;
 export type TaskSavedResponse = TaskSavedSuccess | ProjectsError;
 export type UpdateTaskResponse = TaskSavedSuccess | StaleTaskError | ProjectsError;
 export type TaskMovedResponse = TaskMovedSuccess | ProjectsError;
+export type CommentsResponse = CommentsSuccess | ProjectsError;
+export type CommentAddedResponse = CommentAddedSuccess | ProjectsError;
+export type AttachmentsResponse = AttachmentsSuccess | ProjectsError;
+export type AttachmentsUploadedResponse = AttachmentsUploadedSuccess | ProjectsError;
 export type TaskDetailResponse = TaskDetailSuccess | ProjectsError;
 export type TaskLogsResponse = TaskLogsSuccess | ProjectsError;
