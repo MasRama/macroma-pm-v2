@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { csrfHeaders, ensureCsrfToken, useAuthSession } from '../../features/auth/web';
 import { createNotificationsClient, createNotificationsFeed } from '../../features/notifications/web';
-import { ChatDrawer, createWorkspacesClient, NewWorkspaceModal, type WorkspacesError } from '../../features/workspaces/web';
+import { ChatDrawer, createWorkspacesClient, NewWorkspaceModal, workspacesRefusalText } from '../../features/workspaces/web';
 import { navigationLinks } from '../navigation';
 import AppFrame from './AppFrame.vue';
 import type { ShellLink } from './shell-types';
@@ -37,14 +37,6 @@ onMounted(() => {
 });
 onBeforeUnmount(() => stopFeed?.());
 
-/** What the bell says when an invitation cannot be answered, by refusal code. */
-const INVITATION_REFUSALS: Partial<Record<WorkspacesError['code'], string>> = {
-  INVITATION_NOT_FOUND: 'Undangan ini sudah tidak berlaku.',
-  INVITATION_NOT_PENDING: 'Undangan ini sudah dijawab.',
-  INVITATION_EXPIRED: 'Undangan ini sudah kedaluwarsa. Minta undangan baru ke pemilik workspace.',
-  FORBIDDEN: 'Undangan ini untuk akun lain.',
-};
-
 async function busyWith(work: () => Promise<void>): Promise<void> {
   if (notificationsBusy.value) return;
   notificationsBusy.value = true;
@@ -60,7 +52,9 @@ function answerInvitation(token: string, action: 'accept' | 'decline'): Promise<
     let message = '';
     try {
       const response = await workspacesClient.respondInvitation(token, { action });
-      if (!response.success) message = INVITATION_REFUSALS[response.code] ?? response.message;
+      // Answering is refused as FORBIDDEN only when the invitation was sent to another account.
+      if (!response.success)
+        message = response.code === 'FORBIDDEN' ? 'Undangan ini untuk akun lain.' : workspacesRefusalText(response.code);
     } catch (cause) {
       console.error(cause);
       message = 'Undangan belum bisa dijawab. Coba lagi.';
@@ -96,7 +90,8 @@ async function logout(): Promise<void> {
   try {
     const response = await authSession.logout();
     if (!response.success) {
-      error.value = response.message;
+      // Sign-out is refused only for a stale page or too many requests; either way, trying again is the answer.
+      error.value = 'Belum bisa keluar. Coba lagi.';
       return;
     }
     await router.replace({ name: 'login' });

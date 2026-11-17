@@ -2,6 +2,7 @@ import { computed, ref, type Ref } from 'vue';
 import { onServerEvent } from '../../../shared/realtime/browser';
 import { NOTIFICATIONS_CHANGED_EVENT, type NotificationsMarkResponse } from '../contract';
 import type { NotificationsClient } from './client';
+import { notificationsRefusalText } from './refusals';
 import { toNotificationItem, type NotificationItem } from './view';
 
 export interface NotificationsFeed {
@@ -38,7 +39,7 @@ export function createNotificationsFeed(client: NotificationsClient): Notificati
         items.value = [];
         unread.value = 0;
         // The session ending is the shell's business; the bell just empties.
-        error.value = response.code === 'UNAUTHORIZED' ? '' : response.message;
+        error.value = response.code === 'UNAUTHORIZED' ? '' : notificationsRefusalText(response.code);
         return;
       }
       items.value = response.data.notifications.map(toNotificationItem).filter((item) => item !== null);
@@ -56,7 +57,7 @@ export function createNotificationsFeed(client: NotificationsClient): Notificati
     try {
       const response = await call();
       // Gone already (say, an invitation answered elsewhere): the reload drops it.
-      if (!response.success && response.code !== 'NOTIFICATION_NOT_FOUND') message = response.message;
+      if (!response.success && response.code !== 'NOTIFICATION_NOT_FOUND') message = notificationsRefusalText(response.code);
     } catch (cause) {
       console.error(cause);
       message = 'Notifikasi belum bisa ditandai dibaca. Coba lagi.';

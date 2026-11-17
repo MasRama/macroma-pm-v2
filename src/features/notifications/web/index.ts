@@ -17,6 +17,12 @@ export type {
 } from '../contract';
 export { default as NotificationsMenu } from './components/NotificationsMenu.vue';
 export { createNotificationsFeed } from './feed';
+export {
+  NOTIFICATIONS_GENERIC_REFUSAL_TEXT,
+  NOTIFICATIONS_REFUSAL_TEXT,
+  notificationsRefusalText,
+  type NotificationsRefusal,
+} from './refusals';
 export type { NotificationsFeed } from './feed';
 export { toNotificationItem } from './view';
 export type { NotificationItem, NotificationKind } from './view';
