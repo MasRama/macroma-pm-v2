@@ -42,7 +42,7 @@ export function createNotificationsFeed(client: NotificationsClient): Notificati
         error.value = response.code === 'UNAUTHORIZED' ? '' : notificationsRefusalText(response.code);
         return;
       }
-      items.value = response.data.notifications.map(toNotificationItem).filter((item) => item !== null);
+      items.value = response.data.notifications.map(toNotificationItem);
       unread.value = response.data.unread_count;
       error.value = '';
     } catch (cause) {

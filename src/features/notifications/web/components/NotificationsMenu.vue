@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { CountBadge, DropdownMenu, formatAgoLong, UiAvatar, UiButton, UiIcon } from '../../../../shared/ui';
+import { StatusBlock } from '../../../projects/web';
 import type { NotificationItem } from '../view';
 
 /**
  * Bell button with a red dot while anything is unread; opens the 380px
  * notification panel. Clicking an unread row marks it read; invitation rows
- * answer with Terima/Tolak.
+ * answer with Terima/Tolak; a task move opens that task.
  */
 const props = withDefaults(
   defineProps<{
@@ -19,8 +20,24 @@ const props = withDefaults(
   }>(),
   { items: () => [], unreadCount: null, now: null, busy: false, error: '' },
 );
-const emit = defineEmits<{ accept: [token: string]; decline: [token: string]; read: [id: string]; markAllRead: [] }>();
+const emit = defineEmits<{
+  accept: [token: string];
+  decline: [token: string];
+  read: [id: string];
+  markAllRead: [];
+  /** A task-moved row was clicked: open its task (and mark the row read when it is unread). */
+  openTask: [item: NotificationItem];
+}>();
 const open = defineModel<boolean>('open', { default: false });
+
+function pick(item: NotificationItem): void {
+  if (item.move) {
+    open.value = false;
+    emit('openTask', item);
+  } else if (item.unread) {
+    emit('read', item.id);
+  }
+}
 
 const unread = computed(() => props.unreadCount ?? props.items.filter((item) => item.unread).length);
 // "5 menit lalu" counts from when the panel opened, not from when the page loaded.
@@ -58,18 +75,30 @@ const now = computed(() => props.now ?? openedAt.value);
       <ul v-if="items.length" class="notif__list">
         <li v-for="item in items" :key="item.id" class="notif__item" :data-notification-id="item.id" :data-unread="item.unread">
           <i class="notif__unread" :class="{ 'notif__unread--on': item.unread }" />
-          <UiAvatar :person="item.actor" :size="30" />
+          <UiAvatar v-if="item.actor" :person="item.actor" :size="30" />
+          <span v-else class="notif__icon"><UiIcon name="bell" :size="15" /></span>
           <div class="notif__body">
             <component
-              :is="item.unread ? 'button' : 'div'"
-              :type="item.unread ? 'button' : undefined"
+              :is="item.unread || item.move ? 'button' : 'div'"
+              :type="item.unread || item.move ? 'button' : undefined"
               class="notif__text"
-              :class="{ 'notif__text--unread focus-ring': item.unread }"
-              :title="item.unread ? 'Tandai dibaca' : undefined"
-              :disabled="item.unread ? busy : undefined"
-              @click="item.unread && emit('read', item.id)"
+              :class="{ 'notif__text--unread focus-ring': item.unread || item.move }"
+              :title="item.move ? 'Buka task' : item.unread ? 'Tandai dibaca' : undefined"
+              :disabled="item.unread || item.move ? busy : undefined"
+              :data-testid="item.move ? 'notification-open-task' : undefined"
+              @click="pick(item)"
             >
-              <span v-if="item.kind === 'invited'"><b>{{ item.actor.name }}</b> ngundang kamu ke workspace <b>{{ item.subject }}</b></span>
+              <span v-if="item.kind === 'other' || !item.actor">Notifikasi baru</span>
+              <span v-else-if="item.kind === 'invited'"><b>{{ item.actor.name }}</b> ngundang kamu ke workspace <b>{{ item.subject }}</b></span>
+              <template v-else-if="item.move">
+                <span><b>{{ item.actor.name }}</b> mindahin <b>{{ item.subject }}</b> ke</span>
+                <span class="notif__move">
+                  <StatusBlock :status="item.move.from" />
+                  <UiIcon name="arrow" :size="12" :stroke="2.2" class="notif__arrow" />
+                  <StatusBlock :status="item.move.to" />
+                  <span class="mono notif__version">{{ item.move.version }}</span>
+                </span>
+              </template>
               <span v-else><b>{{ item.actor.name }}</b> nerima undangan ke <b>{{ item.subject }}</b></span>
               <time class="notif__when" :datetime="item.at">{{ formatAgoLong(item.at, now) }}</time>
             </component>
@@ -129,6 +158,16 @@ const now = computed(() => props.now ?? openedAt.value);
   max-height: min(480px, 70vh);
   overflow-y: auto;
 }
+.notif__icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--ink2);
+}
 .notif__item {
   display: flex;
   gap: 11px;
@@ -183,6 +222,21 @@ const now = computed(() => props.now ?? openedAt.value);
   margin-top: 2px;
   font-size: 11.5px;
   color: var(--mute);
+}
+.notif__move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.notif__arrow {
+  color: var(--mute);
+}
+.notif__version {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
 }
 .notif__acts {
   display: flex;
