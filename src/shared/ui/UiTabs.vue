@@ -1,12 +1,22 @@
 <script setup lang="ts">
+import { nextTick, onMounted, ref, watch } from 'vue';
 import type { TabOption } from './options';
 
 defineProps<{ tabs: TabOption[]; label: string }>();
 const model = defineModel<string>({ required: true });
+
+/* When the row is wider than a phone, keep the chosen tab in sight on open and on every change. */
+const list = ref<HTMLElement | null>(null);
+function revealActive(): void {
+  const active = list.value?.querySelector<HTMLElement>('[aria-selected="true"]');
+  active?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+}
+onMounted(revealActive);
+watch(model, () => void nextTick(revealActive));
 </script>
 
 <template>
-  <div class="tabs" role="tablist" :aria-label="label">
+  <div ref="list" class="tabs" role="tablist" :aria-label="label">
     <button
       v-for="tab in tabs"
       :key="tab.value"
@@ -62,6 +72,19 @@ const model = defineModel<string>({ required: true });
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0 5px;
+}
+@media (max-width: 420px) {
+  .tabs {
+    gap: 12px;
+  }
+  .tabs__tab {
+    gap: 4px;
+    font-size: 13px;
+  }
+  .tabs__count {
+    font-size: 10.5px;
+    padding: 0 4px;
+  }
 }
 .tabs__tab--on .tabs__count {
   background: var(--primary-bg);

@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { File as NodeFile } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { createApp, nextTick } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,6 +75,45 @@ class StreamedEventSource extends EventTarget {
   }
 }
 
+/**
+ * jsdom's FormData takes only jsdom files and Node's Request cannot read it,
+ * so uploads use this stand-in and go to the server as real multipart bodies.
+ */
+class TabFormData {
+  readonly entries: Array<[string, string | NodeFile, string | undefined]> = [];
+
+  append(name: string, value: string | NodeFile, filename?: string): void {
+    this.entries.push([name, value, filename]);
+  }
+}
+
+async function encodeMultipart(form: TabFormData): Promise<{ body: ArrayBuffer; contentType: string }> {
+  const boundary = `----macroma-test-${randomUUID()}`;
+  const encoder = new TextEncoder();
+  const parts: Uint8Array[] = [];
+  for (const [name, value, filename] of form.entries) {
+    if (typeof value === 'string') {
+      parts.push(encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+      continue;
+    }
+    parts.push(
+      encoder.encode(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename ?? value.name}"\r\nContent-Type: ${value.type}\r\n\r\n`,
+      ),
+      new Uint8Array(await value.arrayBuffer()),
+      encoder.encode('\r\n'),
+    );
+  }
+  parts.push(encoder.encode(`--${boundary}--\r\n`));
+  const body = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    body.set(part, at);
+    at += part.length;
+  }
+  return { body: body.buffer as ArrayBuffer, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 function installTabFetch(): void {
   vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
     track(
@@ -81,7 +121,13 @@ function installTabFetch(): void {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://nara.test');
         const headers = new Headers(init?.headers);
         if (tabCookie) headers.set('Cookie', tabCookie);
-        const response = await serverApp.request(url.pathname + url.search, { method: init?.method ?? 'GET', headers, body: init?.body });
+        let body = init?.body;
+        if (body instanceof TabFormData) {
+          const encoded = await encodeMultipart(body);
+          body = encoded.body;
+          headers.set('Content-Type', encoded.contentType);
+        }
+        const response = await serverApp.request(url.pathname + url.search, { method: init?.method ?? 'GET', headers, body });
         tabCookie = mergeResponseCookies(tabCookie, response);
         for (const pair of tabCookie.split('; ')) if (pair.startsWith('csrf_token=')) document.cookie = pair;
         return response;
@@ -156,6 +202,7 @@ beforeEach(async () => {
   tabCookie = '';
   pending = new Set();
   installTabFetch();
+  vi.stubGlobal('FormData', TabFormData);
   vi.stubGlobal('EventSource', StreamedEventSource);
   await useAuthSession().refresh();
   await router.push('/');
@@ -891,5 +938,214 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(row?.textContent).toContain('Wajom Portal');
     expect(row?.textContent).toContain('0/2');
     expect(container.querySelector('.feed__list')?.textContent).toContain('mindahin task di Wajom Portal');
+  });
+
+  const ONE_PIXEL_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const pngFile = (name: string) => new NodeFile([ONE_PIXEL_PNG], name, { type: 'image/png' });
+  const textFile = (name: string) => new NodeFile(['not an image'], name, { type: 'text/plain' });
+
+  /** Picks files in a dropzone's file input, as the file dialog would. */
+  async function chooseFiles(selector: string, files: NodeFile[]): Promise<void> {
+    const input = document.querySelector<HTMLInputElement>(selector);
+    expect(input).not.toBeNull();
+    Object.defineProperty(input!, 'files', { configurable: true, value: files });
+    input!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  }
+
+  async function showDetailTab(label: string): Promise<void> {
+    const found = [...document.querySelectorAll<HTMLButtonElement>('.td__main [role="tab"]')].find((tab) => tab.textContent?.trim().startsWith(label));
+    expect(found).toBeDefined();
+    found!.click();
+    await settle();
+  }
+
+  const comments = (taskId: string) =>
+    db().prepare('SELECT user_id, content FROM task_comments WHERE task_id = ? ORDER BY created_at').all(taskId) as Array<{ user_id: string; content: string }>;
+  const images = (taskId: string) =>
+    db().prepare('SELECT id, name, uploaded_by FROM task_attachments WHERE task_id = ? ORDER BY created_at').all(taskId) as Array<{
+      id: string;
+      name: string;
+      uploaded_by: string;
+    }>;
+
+  it('refuses an over-long comment in Indonesian, sends one, and follows comments and moves from another device', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    await addMember(owner, projectId, member);
+    const taskId = await createTask(owner, projectId, 'Pairing code');
+    await openTab(owner.cookie, `/projects/${projectId}/tasks/${taskId}`);
+    await showDetailTab('Komentar');
+    expect(document.querySelector('.td__pane')?.textContent).toContain('Belum ada komentar.');
+
+    typeIn('#task-comment', 'x'.repeat(2001));
+    await settle();
+    await submit('.td__reply');
+    expect(document.body.textContent).toContain('Komentar wajib diisi, maksimal 2000 karakter.');
+    expect(comments(taskId)).toEqual([]);
+
+    typeIn('#task-comment', 'Kode expired terlalu cepat di Android lama.');
+    await settle();
+    await submit('.td__reply');
+    expect(comments(taskId)).toEqual([{ user_id: owner.id, content: 'Kode expired terlalu cepat di Android lama.' }]);
+    expect(document.querySelector<HTMLTextAreaElement>('#task-comment')?.value).toBe('');
+    expect(document.querySelector('.td__comments')?.textContent).toContain('Kode expired terlalu cepat di Android lama.');
+    expect(document.body.textContent).not.toContain('Komentar wajib diisi');
+
+    expect((await asDevice(member.cookie, `/api/tasks/${taskId}/comments`, 'POST', { content: 'Siap, aku cek.' })).status).toBe(201);
+    await settle();
+    const lines = [...document.querySelectorAll('.td__comment')].map((row) => row.textContent);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('Ayu Member');
+    expect(lines[1]).toContain('Siap, aku cek.');
+
+    // A move made elsewhere refreshes the detail without dropping the open tab or a draft being typed.
+    typeIn('#task-comment', 'Draft yang belum dikirim');
+    await settle();
+    await move(member, taskId, 'ongoing');
+    await settle();
+    expect(document.querySelector('.td__main [role="tab"][aria-selected="true"]')?.textContent).toContain('Komentar');
+    expect(document.querySelector<HTMLTextAreaElement>('#task-comment')?.value).toBe('Draft yang belum dikirim');
+    expect(document.querySelector('.td__rail')?.textContent).toContain('On going');
+  });
+
+  it("keeps the next task's draft when a comment sent on the previous task lands after switching", async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const first = await createTask(owner, projectId, 'Pairing code');
+    const second = await createTask(owner, projectId, 'Halaman 404');
+    await openTab(owner.cookie, `/projects/${projectId}/tasks/${first}`);
+    await showDetailTab('Komentar');
+
+    // Hold the comment's POST until the person has moved on to the other task.
+    const send = globalThis.fetch;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'POST' && String(input).includes(`/tasks/${first}/comments`) ? held.then(() => send(input, init)) : send(input, init),
+    );
+    typeIn('#task-comment', 'Untuk task pertama');
+    await settle();
+    await submit('.td__reply');
+
+    await router.push(`/projects/${projectId}/tasks/${second}`);
+    await settle();
+    await showDetailTab('Komentar');
+    typeIn('#task-comment', 'Draft task kedua');
+    await settle();
+    release();
+    await settle();
+    await settle();
+
+    expect(comments(first)).toEqual([{ user_id: owner.id, content: 'Untuk task pertama' }]);
+    expect(document.querySelector<HTMLTextAreaElement>('#task-comment')?.value).toBe('Draft task kedua');
+    expect(document.querySelector('.td__pane')?.textContent).not.toContain('Untuk task pertama');
+  });
+
+  it('scrolls the chosen detail tab into sight, for phones where the tab row is wider than the screen', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    const taskId = await createTask(owner, projectId, 'Pairing code');
+    const revealed: { tab: string; options: unknown }[] = [];
+    // jsdom has no layout, so record the calls instead of scrolling.
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value(this: HTMLElement, options: unknown) {
+        if (this.getAttribute('role') === 'tab' && this.closest('.td__main')) revealed.push({ tab: this.textContent!.trim(), options });
+      },
+    });
+    try {
+      await openTab(owner.cookie, `/projects/${projectId}/tasks/${taskId}`);
+      expect(revealed.at(-1)?.tab).toBe('Detail');
+      await showDetailTab('Gambar');
+      expect(revealed.at(-1)).toEqual({ tab: 'Gambar 0', options: { inline: 'nearest', block: 'nearest' } });
+    } finally {
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it('uploads images from the detail, shows them by the API url, and lets only the uploader or owner delete them', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    await addMember(owner, projectId, member);
+    const taskId = await createTask(owner, projectId, 'Halaman 404');
+    await openTab(member.cookie, `/projects/${projectId}/tasks/${taskId}`);
+    await showDetailTab('Gambar');
+    expect(document.querySelector('.td__pane')?.textContent).toContain('Belum ada gambar.');
+
+    // A wrong file is named in Indonesian and never sent.
+    await chooseFiles('#task-detail-images', [textFile('catatan.txt')]);
+    expect(document.querySelector('[data-testid="task-image-error"]')?.textContent).toBe('catatan.txt: harus JPEG, PNG, GIF, atau WebP.');
+    expect(images(taskId)).toEqual([]);
+
+    await chooseFiles('#task-detail-images', [pngFile('layar-member.png')]);
+    expect(document.querySelector('[data-testid="task-image-error"]')).toBeNull();
+    const [mine] = images(taskId);
+    expect(mine).toMatchObject({ name: 'layar-member.png', uploaded_by: member.id });
+    const listed = (await (await serverApp.request(`/api/tasks/${taskId}/attachments`, { headers: { Cookie: member.cookie } })).json()) as {
+      data: { attachments: Array<{ id: string; url: string }> };
+    };
+    const img = document.querySelector<HTMLImageElement>(`[data-image-id="${mine!.id}"] img`);
+    expect(img?.getAttribute('src')).toBe(listed.data.attachments[0]!.url);
+
+    // Another member's image has no delete button for this member.
+    const ownerUpload = new TabFormData();
+    ownerUpload.append('files', pngFile('layar-owner.png'));
+    const encoded = await encodeMultipart(ownerUpload);
+    const state = await issueCsrf(serverApp, owner.cookie);
+    const uploaded = await serverApp.request(`/api/task-attachments?task_id=${taskId}`, {
+      method: 'POST',
+      headers: csrfHeaders(state, { 'Content-Type': encoded.contentType }),
+      body: encoded.body,
+    });
+    expect(uploaded.status).toBe(201);
+    await settle();
+    const ownersImage = images(taskId).find((row) => row.name === 'layar-owner.png')!;
+    expect(document.querySelector(`[data-image-id="${ownersImage.id}"]`)).not.toBeNull();
+    expect(document.querySelector(`[data-image-id="${ownersImage.id}"] .td__unshot`)).toBeNull();
+
+    await press(`[data-image-id="${mine!.id}"] .td__unshot`);
+    expect(images(taskId).map((row) => row.name)).toEqual(['layar-owner.png']);
+    expect(document.querySelector(`[data-image-id="${mine!.id}"]`)).toBeNull();
+
+    // The project owner may delete anyone's image.
+    application?.unmount();
+    application = undefined;
+    await openTab(owner.cookie, `/projects/${projectId}/tasks/${taskId}`);
+    await showDetailTab('Gambar');
+    await press(`[data-image-id="${ownersImage.id}"] .td__unshot`);
+    expect(images(taskId)).toEqual([]);
+    expect(document.querySelector('.td__pane')?.textContent).toContain('Belum ada gambar.');
+  });
+
+  it('uploads the images picked in Task baru once the task exists, and names a wrong file before making it', async () => {
+    const owner = await register('Ren Owner');
+    const projectId = await createProject(owner);
+    await openBatch(owner, projectId);
+    await openTab(owner.cookie, `/projects/${projectId}/board`);
+
+    await click('[data-testid="new-task"]');
+    typeIn('#new-task-title', 'Logo baru di email');
+    await chooseFiles('#new-task-images', [textFile('brief.txt')]);
+    await submit('#new-task-form');
+    expect(document.querySelector('#new-task-form')?.textContent).toContain('brief.txt: harus JPEG, PNG, GIF, atau WebP.');
+    expect(db().prepare('SELECT 1 FROM tasks WHERE title = ?').get('Logo baru di email')).toBeUndefined();
+
+    await press('#new-task-form .form__files .link');
+    await chooseFiles('#new-task-images', [pngFile('logo.png')]);
+    await submit('#new-task-form');
+    expect(document.querySelector('#new-task-form')).toBeNull();
+    const taskId = (db().prepare('SELECT id FROM tasks WHERE title = ?').get('Logo baru di email') as { id: string }).id;
+    expect(images(taskId)).toMatchObject([{ name: 'logo.png', uploaded_by: owner.id }]);
+    expect(document.body.textContent).not.toContain('belum terunggah');
   });
 });

@@ -22,6 +22,8 @@ const clickIfShown = (locator) => locator.isVisible().then((shown) => (shown ? l
 const SCREENS = [
   ['board'],
   ['task-detail'],
+  ['task-comments'],
+  ['task-images'],
   ['new-task'],
   ['move-task'],
   ['edit-task'],

@@ -9,6 +9,8 @@ import type {
   ProjectPersonRef as PersonRefRow,
   ProjectSummary as ProjectSummaryRow,
   Task as TaskRow,
+  TaskAttachment as TaskAttachmentRow,
+  TaskComment as TaskCommentRow,
   TaskDetail as TaskDetailRow,
   TaskLog as TaskLogRow,
 } from '../contract';
@@ -97,8 +99,11 @@ export interface TaskComment {
 
 export interface TaskImage {
   id: string;
+  /** The API's guarded file route: only accounts that can open the project get the image. */
   url: string;
   name: string;
+  /** `null` once the uploader's account is deleted. */
+  uploaderId: string | null;
 }
 
 /** Tabs of the task detail modal. */
@@ -407,4 +412,12 @@ export function toDashboard(data: DashboardSuccess['data']): DashboardData {
     health: data.board_health.map(toBoardHealth),
     activity: data.recent_activity.map((row) => toActivityEntry(row, names.get(row.project_id) ?? 'project')),
   };
+}
+
+export function toTaskComment(row: TaskCommentRow): TaskComment {
+  return { id: row.id, author: toPerson(row.user, row.id), body: row.content, at: iso(row.created_at) };
+}
+
+export function toTaskImage(row: TaskAttachmentRow): TaskImage {
+  return { id: row.id, url: row.url, name: row.name, uploaderId: row.uploaded_by?.id ?? null };
 }

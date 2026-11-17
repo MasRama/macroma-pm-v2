@@ -1,6 +1,8 @@
 export const SCREENS = [
   'board',
   'task-detail',
+  'task-comments',
+  'task-images',
   'new-task',
   'move-task',
   'edit-task',
@@ -31,6 +33,8 @@ export function screenName(value: string | null): Screen {
 export function pathFor(screen: Screen): string {
   switch (screen) {
     case 'task-detail':
+    case 'task-comments':
+    case 'task-images':
       return '/projects/p1/tasks/t4';
     case 'releases':
       return '/projects/p1/releases';
