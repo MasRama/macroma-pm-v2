@@ -3,7 +3,9 @@ export type { AuthRoutesOptions } from './server/routes';
 export {
   createAccountWithRoles,
   deleteAccounts,
+  findAccountByEmail,
   findAccountById,
+  findAccountsByIds,
   isDuplicateEmailError,
   listAccounts,
   onAccountsDeleted,
