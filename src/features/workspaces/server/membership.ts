@@ -28,21 +28,33 @@ export function withdrawInvitationNotices(host: Pick<WorkspacesServerHost, 'with
  * Forgets deleted accounts the way V1's foreign keys did: the workspaces they
  * owned go with everything inside, and their memberships, sent invitations
  * and messages go too, with the notices of the pending invitations among
- * them. Returns the deleted workspaces, so the application can detach the
- * projects that lived in them.
+ * them. Returns the deleted workspaces with the remaining accounts that
+ * belonged to them, so the application can detach the projects that lived
+ * in them.
  */
-export function forgetAccounts(host: Pick<WorkspacesServerHost, 'withdrawNotifications'>, userIds: readonly string[]): string[] {
+export function forgetAccounts(
+  host: Pick<WorkspacesServerHost, 'withdrawNotifications'>,
+  userIds: readonly string[],
+): Array<{ workspaceId: string; formerMemberIds: string[] }> {
   const database = getDatabase();
   const touched = new Set<string>();
+  const members = new Map<string, string[]>();
   const deleted = database.transaction(() => {
     for (const userId of userIds) {
-      for (const workspaceId of workspaceIdsForUser(userId)) for (const member of memberIds(workspaceId)) touched.add(member);
+      for (const workspaceId of workspaceIdsForUser(userId)) {
+        if (!members.has(workspaceId)) members.set(workspaceId, memberIds(workspaceId));
+        for (const member of members.get(workspaceId) ?? []) touched.add(member);
+      }
     }
     const forgotten = forgetAccountRows(userIds);
     withdrawInvitationNotices(host, forgotten.invitationTokens);
     return forgotten.workspaces;
   })();
+  const forgottenIds = new Set(userIds);
   for (const userId of userIds) touched.delete(userId);
   announceWorkspaceChange(touched);
-  return deleted;
+  return deleted.map((workspaceId) => ({
+    workspaceId,
+    formerMemberIds: (members.get(workspaceId) ?? []).filter((member) => !forgottenIds.has(member)),
+  }));
 }

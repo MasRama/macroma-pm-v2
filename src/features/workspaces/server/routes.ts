@@ -184,7 +184,7 @@ export function createWorkspaceRoutes(host: WorkspacesServerHost) {
       const members = memberIds(workspace.id);
       getDatabase().transaction(() => {
         withdrawInvitationNotices(host, deleteWorkspace(workspace.id));
-        host.workspaceDeleted(workspace.id);
+        host.workspaceDeleted(workspace.id, members);
       })();
       announceWorkspaceChange(members);
       return context.json({ success: true as const, message: 'Workspace deleted' } satisfies WorkspacesDone);
@@ -241,7 +241,12 @@ export function createWorkspaceRoutes(host: WorkspacesServerHost) {
         return refuse(context, 409, 'OWNER_CANNOT_LEAVE', 'The owner cannot leave or be removed from the workspace');
       }
       const members = memberIds(workspace.id);
-      if (!removeMember(workspace.id, targetId)) return refuse(context, 404, 'MEMBER_NOT_FOUND', 'This account is not a member of the workspace');
+      const removed = getDatabase().transaction(() => {
+        if (!removeMember(workspace.id, targetId)) return false;
+        host.membersLeft(workspace.id, [targetId]);
+        return true;
+      })();
+      if (!removed) return refuse(context, 404, 'MEMBER_NOT_FOUND', 'This account is not a member of the workspace');
       announceWorkspaceChange(members);
       return context.json({
         success: true as const,
