@@ -104,6 +104,8 @@ export function dashboardData(
       actor: row.actor_id ? (actors.get(row.actor_id) ?? null) : null,
       task_id: row.task_id,
       batch_id: row.batch_id,
+      task_title: row.task_title,
+      batch_version: row.batch_version,
       meta: row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : null,
       created_at: row.created_at,
     })),
