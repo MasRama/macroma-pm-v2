@@ -8,6 +8,7 @@ import {
   findAccountByEmail,
   findAccountById,
   findAccountsByIds,
+  importAccounts,
   listAccounts,
   onAccountsDeleted,
   resetAccountPassword,
@@ -15,7 +16,8 @@ import {
   updateAccountWithRoles,
 } from '../server/accounts';
 import { createRole } from '../server/access';
-import { startSession } from '../server/service';
+import { checkPassword, hashPassword, startSession } from '../server/service';
+import { findUserById } from '../server/repository';
 
 function uniqueEmail(): string {
   return `${randomUUID()}@example.com`;
@@ -168,5 +170,30 @@ describe('auth account directory', () => {
     expect(findAccountById(account.id)).toBeUndefined();
     expect(getDatabase().prepare('SELECT * FROM user_roles WHERE user_id = ?').all(account.id)).toEqual([]);
     expect(getDatabase().prepare('SELECT * FROM sessions WHERE user_id = ?').all(account.id)).toEqual([]);
+  });
+
+  it('imports accounts with their ids, password hashes, timestamps and roles', async () => {
+    const role = createRole({ id: randomUUID(), name: `Imported ${randomUUID()}`, slug: `imported-${randomUUID()}`, description: null });
+    const id = randomUUID();
+    const email = uniqueEmail();
+    importAccounts([
+      {
+        id,
+        name: 'Imported',
+        email,
+        passwordHash: await hashPassword('kept-password'),
+        avatar: 'https://example.com/avatar.png',
+        phone: '+620000',
+        verified: true,
+        createdAt: 1000,
+        updatedAt: 2000,
+        roleIds: [role.id, role.id],
+      },
+    ]);
+
+    expect(findAccountByEmail(email)).toMatchObject({ id, name: 'Imported', avatar: 'https://example.com/avatar.png', phone: '+620000', verified: true });
+    expect(await checkPassword('kept-password', findUserById(id))).toBe(true);
+    expect(getDatabase().prepare('SELECT created_at, updated_at FROM users WHERE id = ?').get(id)).toEqual({ created_at: 1000, updated_at: 2000 });
+    expect(getDatabase().prepare('SELECT role_id FROM user_roles WHERE user_id = ?').all(id)).toEqual([{ role_id: role.id }]);
   });
 });

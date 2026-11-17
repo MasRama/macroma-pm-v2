@@ -28,6 +28,8 @@ export type {
   UsersFilter,
   UsersResponse,
 } from './contract';
+export { avatarLocation, importAvatarAssets } from './server/assets';
+export type { ImportedAvatarAsset } from './server/assets';
 export { createAssetRoutes, USERS_ASSET_ROUTE_POLICIES } from './server/assets-routes';
 export type { UsersServerHost } from './server/host';
 export { createUserRoutes } from './server/routes';

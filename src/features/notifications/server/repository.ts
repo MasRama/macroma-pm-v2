@@ -112,3 +112,25 @@ export function deleteNotificationsOf(userIds: readonly string[]): number {
   const placeholders = userIds.map(() => '?').join(', ');
   return getDatabase().prepare(`DELETE FROM notifications WHERE user_id IN (${placeholders})`).run(...userIds).changes;
 }
+
+/** A notification carried over from another installation. */
+export interface ImportedNotification {
+  id: string;
+  userId: string;
+  type: string;
+  data: NotificationData;
+  readAt: number | null;
+  createdAt: number;
+}
+
+/** How many notifications exist; an import only goes into an empty table. */
+export function countNotificationRows(): number {
+  return (getDatabase().prepare('SELECT COUNT(*) AS count FROM notifications').get() as { count: number }).count;
+}
+
+/** Writes imported notifications inside the caller's transaction; announces nothing. */
+export function importNotificationRows(notifications: readonly ImportedNotification[]): void {
+  getDatabase().transaction(() => {
+    for (const notification of notifications) insertNotification(notification);
+  })();
+}

@@ -23,3 +23,6 @@ export {
   TASK_ATTACHMENT_ROUTE_POLICIES,
 } from './server/routes';
 export { detachWorkspace, forgetAccounts, workspaceMembersLeft, workspaceProjectCounts } from './server/membership';
+export { countProjectRows, importProjectRows } from './server/repository';
+export type { ProjectImport } from './server/repository';
+export { taskAttachmentStorageKey } from './server/attachments';
