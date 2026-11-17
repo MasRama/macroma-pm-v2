@@ -6,6 +6,7 @@ export {
   findAccountById,
   isDuplicateEmailError,
   listAccounts,
+  onAccountsDeleted,
   resetAccountPassword,
   updateAccountWithRoles,
 } from './server/accounts';

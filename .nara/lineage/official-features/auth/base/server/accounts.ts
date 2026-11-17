@@ -249,10 +249,27 @@ export function resetAccountPassword(userId: string, passwordHash: string): Acco
   return account;
 }
 
+type AccountsDeletedListener = (userIds: readonly string[]) => void;
+const accountsDeletedListeners: AccountsDeletedListener[] = [];
+
+/**
+ * Runs `listener` inside the transaction that deletes accounts, for Features
+ * that keep rows about accounts without a foreign key into Auth's users
+ * table. A listener that throws rolls the deletion back.
+ */
+export function onAccountsDeleted(listener: AccountsDeletedListener): void {
+  if (!accountsDeletedListeners.includes(listener)) accountsDeletedListeners.push(listener);
+}
+
 export function deleteAccounts(userIds: string[]): number {
   if (userIds.length === 0) return 0;
   const placeholders = userIds.map(() => '?').join(', ');
-  const deleted = getDatabase().prepare(`DELETE FROM users WHERE id IN (${placeholders})`).run(...userIds).changes;
+  const database = getDatabase();
+  const deleted = database.transaction(() => {
+    const removed = database.prepare(`DELETE FROM users WHERE id IN (${placeholders})`).run(...userIds).changes;
+    if (removed > 0) for (const listener of accountsDeletedListeners) listener(userIds);
+    return removed;
+  })();
   sessionsChanged(userIds);
   if (deleted > 0) rolesChanged();
   return deleted;
