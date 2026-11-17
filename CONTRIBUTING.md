@@ -31,9 +31,10 @@ would turn CI red stops on your machine instead.
 `npm ci` works with npm 10.9.8. Changing a dependency does not: npm 10.9.8
 stops with `Cannot read properties of null (reading 'edgesOut')` on this
 dependency tree. Run that one step with npm 11 (`npx npm@11 install <package>`)
-and check that the lockfile still lists the native builds for every platform
-(`@rolldown/binding-darwin-arm64`, `@img/sharp-win32-x64`); CI installs and
-builds on macOS and Windows to catch a lockfile that lost them.
+and check that the lockfile still lists the native builds for other systems
+(`@rolldown/binding-darwin-arm64`, `@img/sharp-win32-x64`), so contributors on
+macOS and Windows can still run `npm ci`. CI runs on Linux only, the same as
+the server Macroma runs on, so it cannot catch a lockfile that lost them.
 
 ## Architecture
 
@@ -79,13 +80,10 @@ Do not mix unrelated cleanup into a feature or bug-fix pull request.
 
 ## What CI checks
 
-On a pull request:
-
-| Check | What it runs |
-| --- | --- |
-| App validation | `npm ci`, then `npm run check:fast`: Vue typecheck, the fast Vitest projects, the production build (server TypeScript) and `nara doctor` |
-| Install, build and set up (macos-latest) | `npm ci`, `npm run build`, `npm run setup` |
-| Install, build and set up (windows-latest) | the same on Windows |
+Macroma runs on a Linux server, so CI runs on Ubuntu only. A pull request
+must pass one required check, **App validation**: `npm ci`, then
+`npm run verify` (Vue typecheck, the fast Vitest projects, the production
+build with the server TypeScript, and `nara doctor`).
 
 After a merge, CI on `main` runs the full suite (`npm run check:frontend && npm test`),
 the build, `nara doctor` and the production serving and startup tests.
