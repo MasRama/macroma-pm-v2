@@ -9,6 +9,7 @@ import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.vue';
 import LoginPage from './pages/auth/LoginPage.vue';
 import RegisterPage from './pages/auth/RegisterPage.vue';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage.vue';
+import UsersAdminPage from './pages/admin/UsersAdminPage.vue';
 import NotFoundPage from './pages/NotFoundPage.vue';
 import ProfilePage from './pages/ProfilePage.vue';
 
@@ -18,8 +19,9 @@ const signedIn = { requiresAuth: true } as const;
 /*
  * Macroma screens. Pages render from props; until they are wired to the
  * Macroma API (phase 2) the routes pass only what the URL says, so each shows
- * its empty state. The official Users binding keeps /users; its /profile is
- * replaced by the app's Profil page.
+ * its empty state. The official Users binding keeps the /users route, name
+ * and access rule; Macroma draws it with its own Pengguna page, and its
+ * /profile is replaced by the app's Profil page.
  */
 export const appRoutes = [
   { path: '/', redirect: '/dashboard' },
@@ -80,7 +82,9 @@ export const appRoutes = [
     meta: { requiresAuth: true, standaloneAuth: true },
   },
   // Admin pages: meta.nav lists them in the sidebar's ADMIN section, in this order.
-  ...usersWebRoutes.filter((route) => route.name !== 'profile'),
+  ...usersWebRoutes
+    .filter((route) => route.name === 'users')
+    .map((route) => ({ ...route, component: UsersAdminPage, props: false })),
   {
     path: '/roles',
     name: 'roles',
