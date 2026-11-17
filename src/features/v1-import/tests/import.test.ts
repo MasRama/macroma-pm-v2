@@ -437,7 +437,21 @@ describe('V1 import', () => {
     expect(parsed(projects.activity, activity)).toBe('ok');
     const events = activity.data.activity.map((entry: { event_type: string }) => entry.event_type);
     expect(events).not.toContain('task.log_added');
-    expect(activity.data.activity.find((entry: { id: string }) => entry.id === ids.badMetaActivity)).toMatchObject({ meta: null });
+    // The emptied meta now records only the task title the import filled in.
+    expect(activity.data.activity.find((entry: { id: string }) => entry.id === ids.badMetaActivity)).toMatchObject({
+      task_title: 'Outside batches',
+      meta: { task_title: 'Outside batches' },
+    });
+    // Imported rows record the task title and batch version they name, so they outlive later deletes.
+    const named = activity.data.activity.map((entry: { event_type: string; task_title: string | null; batch_version: string | null; meta: unknown }) => [
+      entry.event_type,
+      entry.task_title,
+      entry.batch_version,
+      entry.meta,
+    ]);
+    expect(named).toContainEqual(['task.moved', 'Shipped in 0.2', null, { from: 'review', to: 'done', note: '', version: 'v0.2.2', task_title: 'Shipped in 0.2' }]);
+    expect(named).toContainEqual(['batch.activated', null, '0.2', { batch_version: '0.2' }]);
+    expect(named).toContainEqual(['project.created', null, null, null]);
     expect(parsed(projects.dashboard, await read('/api/dashboard'))).toBe('ok');
     expect(parsed(projects.projects, await read('/api/projects'))).toBe('ok');
     expect(parsed(projects.projectDetail, await read(`/api/projects/${ids.project}`))).toBe('ok');

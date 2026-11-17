@@ -20,7 +20,10 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 /** How many entries a project's activity feed returns, newest first. */
 export const PROJECT_ACTIVITY_LIMIT = 50;
 
-/** What a project activity entry records; `meta` carries `{ from, to, version }` where it applies. */
+/**
+ * What a project activity entry records; `meta` carries `{ from, to, version }`
+ * where it applies, and `task_title` / `batch_version` as recorded with the event.
+ */
 export const PROJECT_ACTIVITY_EVENTS = [
   'project.created',
   'task.created',
@@ -323,6 +326,10 @@ export function projectsResponseSchemas() {
     actor: personRef.nullable(),
     task_id: z.string().nullable(),
     batch_id: z.string().nullable(),
+    /** Task events: the task's title when the event happened (its current one for older rows); else null. */
+    task_title: z.string().nullable(),
+    /** Batch events: the batch's `major.minor`, like `1.8`; else null. */
+    batch_version: z.string().nullable(),
     meta: z.record(z.string(), z.unknown()).nullable(),
     created_at: z.number(),
   });

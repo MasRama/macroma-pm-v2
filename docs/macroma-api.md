@@ -184,7 +184,7 @@ data: {
   tasks_per_project: [{ project_id, name, count }],                     // most tasks first
   board_health: [{ project_id, name, workspace_id, active_batch: batchRef | null,
                    counts, total, done }],
-  recent_activity: [activity & { project_id }],                         // latest 8
+  recent_activity: [activity & { project_id }],                         // latest 8; activity as in Projects, with task_title and batch_version
   projects: [{ id, name, workspace_id }]                                // newest first
 }
 ```
@@ -282,12 +282,24 @@ unread count.
   `source` is `project` for a direct member or `workspace` for access through
   the workspace. Only direct members can be removed; removing one who has no
   workspace way in unassigns their tasks.
-- `activity[]`: `{ id, event_type, description, actor: { id, name, avatar } | null, task_id, batch_id, meta, created_at }`.
+- `activity[]`: `{ id, event_type, description, actor: { id, name, avatar } | null, task_id, batch_id, task_title, batch_version, meta, created_at }`.
   `event_type` is one of `project.created`, `task.created`, `task.moved`,
   `task.updated`, `task.deleted`, `batch.created`, `batch.activated`,
-  `task.attachment_added`, `task.attachment_removed`. `meta` is
-  `{ version }` on `task.created` and `{ from, to, note, version }` on
-  `task.moved`, otherwise `null`. `description` is English text. V1 rows with
+  `task.attachment_added`, `task.attachment_removed`.
+  - `task_title` (`string | null`): on `task.*` events, the task's title when
+    the event happened, kept after the task is deleted (then `task_id` is
+    `null`). Rows recorded without it fall back to the task's current title.
+    `null` when neither exists, and on every other event.
+  - `batch_version` (`string | null`): on `batch.created` and
+    `batch.activated`, the batch's `major.minor` like `1.8` (no `v`),
+    recorded with the event, else the batch's current one. `null` on every
+    other event.
+  - `meta` is the recorded detail: `{ version }` on `task.created`,
+    `{ from, to, note, version }` on `task.moved`, `{ count }` and
+    `{ attachment_id }` on the image events, plus the recorded `task_title`
+    or `batch_version`. It is `null` when nothing was recorded. Read the two
+    names from the top-level fields, which also cover older rows.
+  `description` is English text. V1 rows with
   an event type V2 does not have, `task.log_added` (written by V1's old +Log
   button, removed in V1 on 2026-08-04), are left out by the V1 import.
 
@@ -555,6 +567,10 @@ npm run import:v1 -- --from /path/to/v1/database/dev.sqlite3 --storage /path/to/
   emptied; unknown columns on tasks and task logs become `backlog` and
   unknown priorities `medium`; invitations with a status V2 does not have
   and notification data fields that are not flat values are left out.
+- Each imported activity entry records the `task_title` and `batch_version`
+  it names in its `meta`, from the imported task or batch, so the names
+  outlive later deletes. An entry whose task or batch V1 no longer had keeps
+  `null`.
 - Batch activation times come from V1's `batch.activated` activity entries
   (the latest per batch); a batch with none falls back to its creation order.
   The batch active in V1 stays active.
