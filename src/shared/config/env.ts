@@ -69,12 +69,12 @@ export function parseEnv(input: NodeJS.ProcessEnv): Env {
 function loadEnvFile(): void {
   const productionPath = join(process.cwd(), '.env.production');
   if (existsSync(productionPath)) {
-    dotenv.config({ path: productionPath });
+    dotenv.config({ path: productionPath, quiet: true });
     process.env.NODE_ENV = 'production';
     return;
   }
 
-  dotenv.config({ path: join(process.cwd(), '.env') });
+  dotenv.config({ path: join(process.cwd(), '.env'), quiet: true });
   process.env.NODE_ENV ??= 'development';
 }
 

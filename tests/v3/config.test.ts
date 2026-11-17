@@ -1,3 +1,9 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { environmentVariables, parseEnv, readFeatureEnv } from '../../src/shared/config';
@@ -107,4 +113,34 @@ describe('feature-owned environment', () => {
       'Environment variable SHARED_SETTING is read by both first and the second feature',
     );
   });
+});
+
+describe('environment file loading', () => {
+  it('loads .env without printing anything', () => {
+    const require = createRequire(import.meta.url);
+    const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+    const dir = mkdtempSync(path.join(tmpdir(), 'macroma-env-'));
+    try {
+      writeFileSync(path.join(dir, '.env'), 'PORT=5600\n');
+      const { NODE_ENV: _nodeEnv, PORT: _port, ...childEnv } = process.env;
+      const result = spawnSync(
+        process.execPath,
+        [
+          '-r', require.resolve('ts-node/register'),
+          '-r', require.resolve('tsconfig-paths/register'),
+          '-e', `require(${JSON.stringify(path.join(root, 'src/shared/config/env.ts'))}); console.log('PORT=' + process.env.PORT);`,
+        ],
+        {
+          cwd: dir,
+          encoding: 'utf8',
+          env: { ...childEnv, TS_NODE_PROJECT: path.join(root, 'tsconfig.json'), TS_NODE_TRANSPILE_ONLY: 'true' },
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe('PORT=5600\n');
+      expect(result.stderr).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
