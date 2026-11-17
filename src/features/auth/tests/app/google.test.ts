@@ -33,7 +33,8 @@ async function signInWithGoogle(options: { tamperState?: boolean } = {}) {
   expect(redirect.status).toBe(302);
   const cookie = mergeResponseCookies(undefined, redirect);
   const state = new URL(redirect.headers.get('location')!).searchParams.get('state')!;
-  const returned = options.tamperState ? `${state.slice(0, -1)}0` : state;
+  // Changes the last character, whatever it is.
+  const returned = options.tamperState ? `${state.slice(0, -1)}${state.endsWith('0') ? '1' : '0'}` : state;
   const callback = await app.request(`/api/auth/google/callback?code=google-code&state=${returned}`, {
     headers: { Cookie: cookie },
   });
