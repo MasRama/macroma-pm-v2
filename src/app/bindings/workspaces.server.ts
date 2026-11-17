@@ -44,7 +44,7 @@ export const workspacesServerHost: WorkspacesServerHost = {
 
 // Workspaces keep no foreign keys into Auth's users table; deleted accounts are forgotten here.
 onAccountsDeleted((userIds) => {
-  for (const workspaceId of forgetAccounts(userIds)) workspacesServerHost.workspaceDeleted(workspaceId);
+  for (const workspaceId of forgetAccounts(workspacesServerHost, userIds)) workspacesServerHost.workspaceDeleted(workspaceId);
 });
 
 export default function composeWorkspacesServer(app: Hono): void {

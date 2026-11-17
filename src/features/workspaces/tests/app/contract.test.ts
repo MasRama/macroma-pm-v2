@@ -42,7 +42,7 @@ describe('workspaces web client contract', () => {
 
     // An invitation to the signed-in account, from a workspace it does not belong to yet.
     const other = schemas.workspaceSaved.parse(await client.create({ name: 'Other Space' })).data.workspace;
-    const received = createInvitation({ workspaceId: other.id, inviterId: invitee.id, email: owner.email });
+    const received = createInvitation({ workspaceId: other.id, inviterId: invitee.id, email: owner.email }).invitation;
     expect(schemas.receivedInvitations.parse(await client.receivedInvitations()).data.invitations[0].token).toBe(received.token);
     schemas.invitationAnswered.parse(await client.respondInvitation(received.token, { action: 'decline' }));
 

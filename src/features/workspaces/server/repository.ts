@@ -120,8 +120,21 @@ export function updateWorkspace(
   })();
 }
 
-export function deleteWorkspace(id: string): boolean {
-  return getDatabase().prepare('DELETE FROM workspaces WHERE id = ?').run(id).changes > 0;
+/** The tokens of the pending invitations of these workspaces, read before a deletion takes them. */
+function pendingTokensOfWorkspaces(workspaceIds: readonly string[]): string[] {
+  if (workspaceIds.length === 0) return [];
+  return (
+    getDatabase()
+      .prepare(`SELECT token FROM workspace_invitations WHERE status = 'pending' AND workspace_id IN (${placeholders(workspaceIds)})`)
+      .all(...workspaceIds) as Array<{ token: string }>
+  ).map((row) => row.token);
+}
+
+/** Deletes the workspace with everything inside; returns the tokens of the pending invitations it took. */
+export function deleteWorkspace(id: string): string[] {
+  const tokens = pendingTokensOfWorkspaces([id]);
+  getDatabase().prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+  return tokens;
 }
 
 export function memberRole(workspaceId: string, userId: string): WorkspaceRole | undefined {
@@ -180,7 +193,11 @@ export function hasOpenInvitation(workspaceId: string, email: string, now = Date
   );
 }
 
-export function createInvitation(input: { workspaceId: string; inviterId: string; email: string }): InvitationRow {
+/** Sends an invitation; returns it with the tokens of the expired ones it replaced. */
+export function createInvitation(input: { workspaceId: string; inviterId: string; email: string }): {
+  invitation: InvitationRow;
+  replacedTokens: string[];
+} {
   const database = getDatabase();
   const now = Date.now();
   const row: InvitationRow = {
@@ -194,19 +211,22 @@ export function createInvitation(input: { workspaceId: string; inviterId: string
     created_at: now,
     updated_at: now,
   };
-  database.transaction(() => {
+  const replaced = database.transaction(() => {
     // An expired invitation of the same email is replaced, not kept beside the new one.
-    database
-      .prepare(`DELETE FROM workspace_invitations WHERE workspace_id = ? AND invitee_email = ? AND status = 'pending' AND expires_at <= ?`)
-      .run(input.workspaceId, input.email, now);
+    const expired = (
+      database
+        .prepare(`DELETE FROM workspace_invitations WHERE workspace_id = ? AND invitee_email = ? AND status = 'pending' AND expires_at <= ? RETURNING token`)
+        .all(input.workspaceId, input.email, now) as Array<{ token: string }>
+    ).map((entry) => entry.token);
     database
       .prepare(
         `INSERT INTO workspace_invitations (id, workspace_id, inviter_id, invitee_email, token, status, expires_at, created_at, updated_at)
          VALUES (@id, @workspace_id, @inviter_id, @invitee_email, @token, @status, @expires_at, @created_at, @updated_at)`,
       )
       .run(row);
+    return expired;
   })();
-  return row;
+  return { invitation: row, replacedTokens: replaced };
 }
 
 const INVITATION_COLUMNS = 'id, workspace_id, inviter_id, invitee_email, token, status, expires_at, created_at, updated_at';
@@ -274,18 +294,23 @@ export function insertMessage(input: { workspaceId: string; userId: string; mess
 /**
  * Forgets deleted accounts as V1's foreign keys did: their workspaces go (with
  * everything inside), and so do their memberships, sent invitations and
- * messages. Returns the ids of the workspaces deleted.
+ * messages. Returns the ids of the workspaces deleted and the tokens of the
+ * pending invitations that went with them.
  */
-export function forgetAccountRows(userIds: readonly string[]): string[] {
-  if (userIds.length === 0) return [];
+export function forgetAccountRows(userIds: readonly string[]): { workspaces: string[]; invitationTokens: string[] } {
+  if (userIds.length === 0) return { workspaces: [], invitationTokens: [] };
   const database = getDatabase();
   const list = placeholders(userIds);
   const owned = (database.prepare(`SELECT id FROM workspaces WHERE owner_id IN (${list})`).all(...userIds) as Array<{ id: string }>).map(
     (row) => row.id,
   );
+  const tokens = new Set(pendingTokensOfWorkspaces(owned));
   if (owned.length > 0) database.prepare(`DELETE FROM workspaces WHERE id IN (${placeholders(owned)})`).run(...owned);
   database.prepare(`DELETE FROM workspace_members WHERE user_id IN (${list})`).run(...userIds);
-  database.prepare(`DELETE FROM workspace_invitations WHERE inviter_id IN (${list})`).run(...userIds);
+  const sent = database
+    .prepare(`DELETE FROM workspace_invitations WHERE inviter_id IN (${list}) RETURNING token, status`)
+    .all(...userIds) as Array<{ token: string; status: string }>;
+  for (const invitation of sent) if (invitation.status === 'pending') tokens.add(invitation.token);
   database.prepare(`DELETE FROM workspace_messages WHERE user_id IN (${list})`).run(...userIds);
-  return owned;
+  return { workspaces: owned, invitationTokens: [...tokens] };
 }

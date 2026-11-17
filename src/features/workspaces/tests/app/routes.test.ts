@@ -29,6 +29,12 @@ async function notificationsOf(persona: Persona) {
   }>;
 }
 
+async function invitationTokensOf(persona: Persona): Promise<string[]> {
+  return (await notificationsOf(persona))
+    .filter((notification) => notification.type === 'workspace_invitation')
+    .map((notification) => notification.data.token as string);
+}
+
 describe('workspaces', () => {
   // Registration shares the strict per-client limit; each case starts afresh.
   beforeEach(() => resetSecurityState());
@@ -139,8 +145,14 @@ describe('workspaces', () => {
     });
     expect((await callApi(invitee, 'GET', '/api/invitations')).body.data.invitations).toEqual([]);
 
-    expect((await callApi(owner, 'POST', path, { email: invitee.email })).status).toBe(201);
+    expect(await invitationTokensOf(invitee)).toEqual([secondToken]);
+
+    const third = await callApi(owner, 'POST', path, { email: invitee.email });
+    expect(third.status).toBe(201);
     expect(getDatabase().prepare('SELECT 1 FROM workspace_invitations WHERE id = ?').get(secondId)).toBeUndefined();
+    const thirdToken = (getDatabase().prepare('SELECT token FROM workspace_invitations WHERE id = ?').get(third.body.data.invitation.id) as { token: string }).token;
+    // The replaced invitation's notice goes with it; only the new one is left to answer.
+    expect(await invitationTokensOf(invitee)).toEqual([thirdToken]);
   });
 
   it('lets only the owner cancel a pending invitation, and withdraws its notice', async () => {
@@ -178,6 +190,9 @@ describe('workspaces', () => {
     expect(await callApi(owner, 'DELETE', members(owner.id))).toMatchObject({ status: 409, body: { code: 'OWNER_CANNOT_LEAVE' } });
     expect((await callApi(first, 'DELETE', members(first.id))).body.message).toBe('You left the workspace');
     expect((await callApi(owner, 'DELETE', members(second.id))).body.message).toBe('Member removed');
+    // Not belonging to the workspace refuses like every other non-member access, before any member lookup.
+    expect((await callApi(second, 'DELETE', members(second.id))).status).toBe(403);
+    expect((await callApi(second, 'DELETE', members(randomUUID()))).status).toBe(403);
     expect(await callApi(owner, 'DELETE', members(second.id))).toMatchObject({ status: 404, body: { code: 'MEMBER_NOT_FOUND' } });
     expect((await callApi(owner, 'GET', `/api/workspaces/${workspace.id}`)).body.data.workspace.member_count).toBe(1);
   });
@@ -218,6 +233,22 @@ describe('workspaces', () => {
     });
   });
 
+  it('withdraws the pending invitation notices of a deleted workspace', async () => {
+    const owner = await signUp('Closing Owner');
+    const invitee = await signUp('Stranded Invitee');
+    const workspace = await createWorkspace(owner);
+    const other = await createWorkspace(owner, 'Other');
+    expect((await callApi(owner, 'POST', `/api/workspaces/${workspace.id}/invitations`, { email: invitee.email })).status).toBe(201);
+    expect((await callApi(owner, 'POST', `/api/workspaces/${other.id}/invitations`, { email: invitee.email })).status).toBe(201);
+    expect(await invitationTokensOf(invitee)).toHaveLength(2);
+
+    expect((await callApi(owner, 'DELETE', `/api/workspaces/${workspace.id}`)).status).toBe(200);
+    const left = await notificationsOf(invitee);
+    expect(left.filter((notification) => notification.type === 'workspace_invitation').map((notification) => notification.data.workspace_id)).toEqual([
+      other.id,
+    ]);
+  });
+
   it('forgets deleted accounts: their workspaces, memberships and messages', async () => {
     const admin = await signUp('Workspace Admin');
     grantAdmin(admin.id);
@@ -234,5 +265,27 @@ describe('workspaces', () => {
     const shown = await callApi(survivor, 'GET', `/api/workspaces/${kept.id}`);
     expect(shown.body.data.members.map((entry: { user: { id: string } }) => entry.user.id)).toEqual([survivor.id]);
     expect((await callApi(survivor, 'GET', `/api/workspaces/${kept.id}/messages`)).body.data.messages).toEqual([]);
+  });
+
+  it('withdraws the pending invitation notices a deleted account sent or that its workspaces held', async () => {
+    const admin = await signUp('Notice Admin');
+    grantAdmin(admin.id);
+    const survivor = await signUp('Notice Survivor');
+    const inviter = await signUp('Departing Inviter');
+    const invitee = await signUp('Waiting Invitee');
+    const kept = await createWorkspace(survivor, 'Kept');
+    const owned = await createWorkspace(inviter, 'Owned');
+    await inviteAndAccept(survivor, kept.id, inviter);
+    expect((await callApi(inviter, 'POST', `/api/workspaces/${kept.id}/invitations`, { email: invitee.email })).status).toBe(201);
+    expect((await callApi(inviter, 'POST', `/api/workspaces/${owned.id}/invitations`, { email: invitee.email })).status).toBe(201);
+    const fromSurvivor = await createWorkspace(survivor, 'Still Open');
+    expect((await callApi(survivor, 'POST', `/api/workspaces/${fromSurvivor.id}/invitations`, { email: invitee.email })).status).toBe(201);
+    expect(await invitationTokensOf(invitee)).toHaveLength(3);
+
+    expect((await callApi(admin, 'DELETE', '/api/users', { ids: [inviter.id] })).status).toBe(200);
+    const left = await notificationsOf(invitee);
+    expect(left.filter((notification) => notification.type === 'workspace_invitation').map((notification) => notification.data.workspace_id)).toEqual([
+      fromSurvivor.id,
+    ]);
   });
 });

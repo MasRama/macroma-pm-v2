@@ -54,6 +54,7 @@ import {
   type MessageRow,
   type WorkspaceRole,
 } from './repository';
+import { withdrawInvitationNotices } from './membership';
 
 function refuse<C extends WorkspacesRefusalCode>(context: Context, status: 404 | 409, code: C, message: string) {
   return context.json({ success: false as const, message, code }, status);
@@ -182,7 +183,7 @@ export function createWorkspaceRoutes(host: WorkspacesServerHost) {
       const { workspace } = current(context);
       const members = memberIds(workspace.id);
       getDatabase().transaction(() => {
-        deleteWorkspace(workspace.id);
+        withdrawInvitationNotices(host, deleteWorkspace(workspace.id));
         host.workspaceDeleted(workspace.id);
       })();
       announceWorkspaceChange(members);
@@ -199,7 +200,8 @@ export function createWorkspaceRoutes(host: WorkspacesServerHost) {
       if (hasOpenInvitation(workspace.id, inviteeEmail)) {
         return refuse(context, 409, 'INVITATION_PENDING', 'This email already has a pending invitation');
       }
-      const invitation = createInvitation({ workspaceId: workspace.id, inviterId: actor.id, email: inviteeEmail });
+      const { invitation, replacedTokens } = createInvitation({ workspaceId: workspace.id, inviterId: actor.id, email: inviteeEmail });
+      withdrawInvitationNotices(host, replacedTokens);
       host.notify(invitee.id, WORKSPACE_NOTIFICATION_TYPES.invitation, {
         workspace_id: workspace.id,
         workspace_name: workspace.name,
@@ -224,15 +226,14 @@ export function createWorkspaceRoutes(host: WorkspacesServerHost) {
       }
       if (invitation.status !== 'pending') return refuse(context, 409, 'INVITATION_NOT_PENDING', 'This invitation was already answered');
       deleteInvitation(invitation.id);
-      host.withdrawNotifications(WORKSPACE_NOTIFICATION_TYPES.invitation, 'token', invitation.token);
+      withdrawInvitationNotices(host, [invitation.token]);
       const invitee = host.findAccountByEmail(invitation.invitee_email);
       announceWorkspaceChange([...memberIds(workspace.id), ...(invitee ? [invitee.id] : [])]);
       return context.json({ success: true as const, message: 'Invitation cancelled' } satisfies WorkspacesDone);
     })
-    .delete('/:id/members/:userId', guard.signedIn, (context) => {
+    .delete('/:id/members/:userId', guard.signedIn, workspaceAccess('member'), (context) => {
       const actor = guard.actor(context);
-      const workspace = findWorkspace(context.req.param('id'));
-      if (!workspace) return workspaceNotFound(context);
+      const { workspace } = current(context);
       const targetId = context.req.param('userId');
       const isOwner = workspace.owner_id === actor.id;
       if (!isOwner && targetId !== actor.id) return forbidden(context, 'Only the workspace owner can remove other members');
@@ -315,7 +316,7 @@ export function createInvitationRoutes(host: WorkspacesServerHost) {
         setInvitationStatus(invitation.id, status);
         if (status === 'accepted') addMember(workspace.id, actor.id, 'member');
       })();
-      host.withdrawNotifications(WORKSPACE_NOTIFICATION_TYPES.invitation, 'token', invitation.token);
+      withdrawInvitationNotices(host, [invitation.token]);
       if (status === 'accepted') {
         host.notify(invitation.inviter_id, WORKSPACE_NOTIFICATION_TYPES.invitationAccepted, {
           workspace_id: workspace.id,
