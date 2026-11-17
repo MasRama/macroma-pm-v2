@@ -27,6 +27,7 @@ const SCREENS = [
   ['edit-task'],
   ['confirm'],
   ['bump', (page) => clickIfShown(page.getByRole('button', { name: 'Bump versi' }))],
+  ['first-bump', (page) => clickIfShown(page.getByRole('button', { name: 'Bump versi' }))],
   ['notifications', (page) => clickIfShown(page.locator('.bell'))],
   ['releases'],
   ['dashboard'],

@@ -7,12 +7,22 @@ import BumpVersionMenu from './BumpVersionMenu.vue';
 import ProjectTopBar from './ProjectTopBar.vue';
 import TaskCard from './TaskCard.vue';
 import { formatVersion, STATUS_COLOR, STATUS_LABEL } from '../format';
-import { TASK_STATUSES, type BatchSummary, type BumpKind, type ProjectSummary, type TaskCardData, type TaskStatus } from '../view';
+import {
+  latestBatchVersion,
+  nextBatchVersion,
+  TASK_STATUSES,
+  type BatchSummary,
+  type BumpKind,
+  type ProjectSummary,
+  type TaskCardData,
+  type TaskStatus,
+} from '../view';
 
 /**
  * Project board, presentational: page head with batch filter, members, Bump
- * versi and Task baru; the active batch strip; five status columns (one
- * status at a time on phones). Dropping a card on another column asks the
+ * versi and Task baru; the active batch strip, or without one a hint at Bump
+ * versi; five status columns (one status at a time on phones), where only
+ * Backlog offers a new task since tasks always start there. Dropping a card on another column asks the
  * parent to move it; the parent owns the modals.
  */
 const props = withDefaults(
@@ -48,6 +58,9 @@ const emit = defineEmits<{
 }>();
 
 const activeBatch = computed(() => props.batches.find((batch) => batch.isActive) ?? null);
+const latestBatch = computed(() => latestBatchVersion(props.batches));
+const nextMinor = computed(() => formatVersion(nextBatchVersion(latestBatch.value, 'minor')));
+const nextMajor = computed(() => formatVersion(nextBatchVersion(latestBatch.value, 'major')));
 const batchOptions = computed<SegmentOption[]>(() => [
   ...[...props.batches]
     .sort((a, b) => a.major - b.major || a.minor - b.minor)
@@ -104,7 +117,7 @@ function onDragTask(id: string | null): void {
       </template>
       <template #actions>
         <AvatarStack v-if="members.length" class="board-page__members" :people="members" />
-        <BumpVersionMenu v-if="canBump && activeBatch" :current="activeBatch" @bump="emit('bump', $event)" />
+        <BumpVersionMenu v-if="canBump" :current="latestBatch" :closing="activeBatch" @bump="emit('bump', $event)" />
         <UiButton v-if="canCreate" variant="primary" icon="plus" data-testid="new-task" :disabled="busy" @click="emit('newTask')">
           Task baru
         </UiButton>
@@ -120,6 +133,18 @@ function onDragTask(id: string | null): void {
 
     <BatchStrip v-if="activeBatch" class="board-page__strip" :batch="activeBatch" />
     <BatchStrip v-if="activeBatch" class="board-page__strip-phone" :batch="activeBatch" compact />
+    <div v-if="!activeBatch && project" class="no-batch" data-testid="no-batch">
+      <p v-if="canBump">
+        <b>Belum ada batch aktif.</b> Buka batch lewat <b>Bump versi</b>: Minor jadi
+        <span class="mono">{{ nextMinor }}</span>, Major jadi
+        <span class="mono">{{ nextMajor }}</span>. Task yang dibuat sebelum itu dapat versi
+        <span class="mono">v0.0.x</span>.
+      </p>
+      <p v-else>
+        <b>Belum ada batch aktif.</b> Task baru dapat versi <span class="mono">v0.0.x</span> sampai owner project bump versi.
+      </p>
+      <BumpVersionMenu v-if="canBump" class="no-batch__bump" :current="latestBatch" @bump="emit('bump', $event)" />
+    </div>
 
     <div class="board" @dragend="onDragTask(null)">
       <BoardColumn
@@ -127,7 +152,7 @@ function onDragTask(id: string | null): void {
         :key="status"
         :status="status"
         :tasks="byStatus[status]"
-        :can-add="canCreate"
+        :can-add="canCreate && status === 'backlog'"
         :drop-target="dragging !== null && dragOver === status && findTask(dragging)?.status !== status"
         :lifted-task-id="dragging"
         @add="emit('newTask')"
@@ -183,6 +208,28 @@ function onDragTask(id: string | null): void {
 .phone-board {
   display: none;
 }
+.no-batch {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 28px;
+  padding: 14px 18px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-panel);
+}
+.no-batch p {
+  margin: 0;
+  flex: 1;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink2);
+}
+.no-batch b {
+  color: var(--ink);
+}
+.no-batch__bump {
+  display: none;
+}
 .board {
   flex: 1;
   min-height: 0;
@@ -218,6 +265,14 @@ function onDragTask(id: string | null): void {
   .board-page__strip-phone {
     display: block;
     margin: 12px 16px 0;
+  }
+  .no-batch {
+    flex-direction: column;
+    align-items: stretch;
+    margin: 12px 16px 0;
+  }
+  .no-batch__bump {
+    display: block;
   }
   .phone-board {
     flex: 1;

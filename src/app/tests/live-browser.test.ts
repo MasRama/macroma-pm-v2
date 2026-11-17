@@ -795,6 +795,42 @@ describe('projects, the board and the dashboard in the open tab', () => {
     expect(document.querySelector('[data-testid="task-delete"]')).toBeNull();
   });
 
+  it('lets the owner of a project without batches open its first one from the board', async () => {
+    const owner = await register('Ren Owner');
+    const member = await register('Ayu Member');
+    const projectId = await createProject(owner);
+    await addMember(owner, projectId, member);
+
+    await openTab(owner.cookie, `/projects/${projectId}/board`);
+    const hint = () => container.querySelector('[data-testid="no-batch"]');
+    expect(hint()?.textContent).toContain('Belum ada batch aktif.');
+    expect(hint()?.textContent).toMatch(/Minor jadi\s+v0\.1, Major jadi\s+v1\.0/);
+    // Tasks always start in Backlog, so only that column offers one; Task baru stays open (it counts on v0.0.x).
+    const adders = [...container.querySelectorAll('.board [data-status]')].filter((node) => node.querySelector('[aria-label^="Task baru di"]'));
+    expect(adders.map((node) => node.getAttribute('data-status'))).toEqual(['backlog']);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="new-task"]')?.disabled).toBe(false);
+
+    await click('.board-page__head [data-testid="bump-version"]');
+    const option = (kind: string) => container.querySelector<HTMLButtonElement>(`.board-page__head [data-testid="bump-${kind}"]`)!;
+    expect(option('minor').textContent).toContain('→ v0.1');
+    expect(option('major').textContent).toContain('→ v1.0');
+    expect(option('minor').textContent).toContain('Batch pertama project ini.');
+    option('minor').click();
+    await settle();
+    const active = db().prepare('SELECT major, minor FROM project_batches WHERE project_id = ? AND is_active = 1').get(projectId);
+    expect(active).toEqual({ major: 0, minor: 1 });
+    expect(hint()).toBeNull();
+    expect(container.querySelector('.batch')?.textContent).toContain('v0.1');
+
+    application?.unmount();
+    application = undefined;
+    const empty = await createProject(owner, 'Proyek Kosong');
+    await addMember(owner, empty, member);
+    await openTab(member.cookie, `/projects/${empty}/board`);
+    expect(hint()?.textContent).toContain('sampai owner project bump versi');
+    expect(container.querySelector('[data-testid="bump-version"]')).toBeNull();
+  });
+
   it('merges a task edit saved elsewhere and asks only about the field both changed', async () => {
     const owner = await register('Ren Owner');
     const projectId = await createProject(owner);

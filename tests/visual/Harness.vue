@@ -30,7 +30,9 @@ const selectedRelease = ref('b22');
 const editForm = ref({ title: f.detail.title, description: f.detail.description ?? '', priority: f.detail.priority, assigneeId: '1' });
 const framed = !['login', 'register', 'forgot-password', 'reset-password', 'not-found'].includes(screen);
 const chatOpen = screen === 'chat';
-const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'edit-task', 'confirm', 'bump', 'notifications'];
+const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'edit-task', 'confirm', 'bump', 'first-bump', 'notifications'];
+/** A new project: no batch yet, so the owner opens the first one. */
+const firstBump = screen === 'first-bump';
 </script>
 
 <template>
@@ -55,8 +57,8 @@ const boardScreens = ['board', 'task-detail', 'new-task', 'move-task', 'edit-tas
         v-model:batch-filter="batchFilter"
         project-id="p1"
         :project="f.project"
-        :batches="f.batches"
-        :tasks="f.tasks"
+        :batches="firstBump ? [] : f.batches"
+        :tasks="firstBump ? [] : f.tasks"
         :members="f.team"
         :can-bump="true"
         :can-create="true"

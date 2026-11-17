@@ -6,6 +6,7 @@ export const SCREENS = [
   'edit-task',
   'confirm',
   'bump',
+  'first-bump',
   'notifications',
   'releases',
   'dashboard',

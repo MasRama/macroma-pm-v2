@@ -140,6 +140,23 @@ export interface MoveTaskInput {
 
 export type BumpKind = 'minor' | 'major';
 
+/** The project's highest batch version, which a bump counts on; `null` before its first batch. */
+export function latestBatchVersion(batches: readonly BatchVersion[]): BatchVersion | null {
+  return batches.reduce<BatchVersion | null>(
+    (highest, batch) =>
+      !highest || batch.major > highest.major || (batch.major === highest.major && batch.minor > highest.minor)
+        ? { major: batch.major, minor: batch.minor }
+        : highest,
+    null,
+  );
+}
+
+/** The batch Bump versi opens: the next minor or major after `latest`, or v0.1 / v1.0 as a project's first. */
+export function nextBatchVersion(latest: BatchVersion | null, kind: BumpKind): BatchVersion {
+  if (kind === 'major') return { major: (latest?.major ?? 0) + 1, minor: 0 };
+  return latest ? { major: latest.major, minor: latest.minor + 1 } : { major: 0, minor: 1 };
+}
+
 export interface ReleaseSummary extends BatchVersion {
   id: string;
   label: string;
