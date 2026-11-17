@@ -12,7 +12,12 @@ export const SCREENS = [
   'chat',
   'feed',
   'login',
+  'register',
+  'forgot-password',
+  'reset-password',
   'profile',
+  'users',
+  'users-edit',
   'not-found',
 ] as const;
 export type Screen = (typeof SCREENS)[number];
@@ -36,8 +41,17 @@ export function pathFor(screen: Screen): string {
       return '/feed';
     case 'login':
       return '/login';
+    case 'register':
+      return '/register';
+    case 'forgot-password':
+      return '/forgot-password';
+    case 'reset-password':
+      return '/reset-password?token=preview';
     case 'profile':
       return '/profile';
+    case 'users':
+    case 'users-edit':
+      return '/users';
     case 'not-found':
       return '/nowhere';
     default:
