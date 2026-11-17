@@ -28,7 +28,7 @@ import {
 } from '../contract';
 import { createPresence, publish } from '../../../shared/realtime';
 import { ADMINISTRATOR, createGuard, forbidden, jsonInput, queryInput } from '../../../shared/security';
-import { cleanupUserAvatarAssets } from './assets-routes';
+import { cleanupPreviousUserAvatar, cleanupUserAvatarAssets } from './assets-routes';
 import type { UsersServerHost } from './host';
 import { announceAccountsChanged, usersTopics } from './live';
 
@@ -121,6 +121,24 @@ export function createUserRoutes(host: UsersServerHost) {
     const user = host.findAccountById(sessionUser.id);
     if (!user) return context.json({ success: false as const, message: 'User not found', code: 'NOT_FOUND' as const }, 404);
     return context.json({ success: true as const, message: 'OK', data: { user: toProfile(user) } } satisfies UserProfileSuccess);
+  };
+
+  /** Idempotent: an account without a photo is answered as it is. */
+  const removeAvatarHandler = async (context: Context) => {
+    const sessionUser = guard.actor(context);
+    const user = host.findAccountById(sessionUser.id);
+    if (!user) return context.json({ success: false as const, message: 'User not found', code: 'NOT_FOUND' as const }, 404);
+    if (user.avatar === null) {
+      return context.json({ success: true as const, message: 'No avatar to remove', data: { user: toProfile(user) } } satisfies UserProfileSuccess);
+    }
+    // Removing a photo is not a form edit: it applies whatever the revision, and raises it.
+    const update = host.updateAccount(sessionUser.id, { avatar: null });
+    if (update.status !== 'updated') {
+      return context.json({ success: false as const, message: 'User not found', code: 'NOT_FOUND' as const }, 404);
+    }
+    await cleanupPreviousUserAvatar(host, sessionUser.id, user.avatar);
+    announceAccountsChanged(host, [sessionUser.id]);
+    return context.json({ success: true as const, message: 'Avatar removed', data: { user: toProfile(update.account) } } satisfies UserProfileSuccess);
   };
 
   const updateProfileHandler = async (context: Context, input: ProfileInput) => {
@@ -401,6 +419,7 @@ export function createUserRoutes(host: UsersServerHost) {
     .put('/:id/editing', canManage('edit'), startEditingHandler)
     .delete('/:id/editing', canManage('edit'), stopEditingHandler)
     .patch('/me', guard.signedIn, jsonInput(profileInputSchema), (context) => updateProfileHandler(context, context.req.valid('json')))
+    .delete('/me/avatar', guard.signedIn, removeAvatarHandler)
     .get('/', canManage('view'), queryInput(listUsersQuerySchema), (context) => listUsersHandler(context, context.req.valid('query')))
     .post('/', canManage('create'), jsonInput(createUserInputSchema), (context) => createUserHandler(context, context.req.valid('json')))
     .put('/:id', canEditTarget, jsonInput(updateUserInputSchema), (context) =>

@@ -28,6 +28,8 @@ export interface UsersClient {
   resetPassword(id: string, input: ResetUserPasswordInput): Promise<ManagedUserResponse>;
   deleteUsers(input: DeleteUsersInput): Promise<DeleteUsersResponse>;
   uploadAvatar(file: File): Promise<AvatarUploadResponse>;
+  /** Removes the signed-in account's photo; answering as it is when there is none. */
+  removeAvatar(): Promise<UserProfileResponse>;
   listEditing(): Promise<UsersEditingResponse>;
   startEditing(id: string): Promise<EditingResponse>;
   stopEditing(id: string): Promise<EditingResponse>;
@@ -67,6 +69,7 @@ export function createUsersClient(options: UsersClientOptions = {}): UsersClient
     resetPassword: async (id, input) => (await users[':id']['reset-password'].$post({ param: { id }, json: input })).json(),
     deleteUsers: async (input) => (await users.index.$delete({ json: input })).json(),
     uploadAvatar: async (file) => (await assets.avatar.$post({ form: { file } })).json(),
+    removeAvatar: async () => (await users.me.avatar.$delete()).json(),
     listEditing: async () => (await users.editing.$get()).json(),
     startEditing: async (id) => (await users[':id'].editing.$put({ param: { id } })).json(),
     stopEditing: async (id) => (await users[':id'].editing.$delete({ param: { id } })).json(),

@@ -35,6 +35,7 @@ describe('users web client contract', () => {
 
   it('reads and edits the signed-in profile in the declared shapes', async () => {
     expect(schemas.error.parse(await client.me())).toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(schemas.error.parse(await client.removeAvatar())).toMatchObject({ code: 'UNAUTHORIZED' });
 
     const account = await browser.signUp('Profile Owner');
     const { revision } = schemas.profileSaved.parse(await client.me()).data.user;
@@ -63,6 +64,8 @@ describe('users web client contract', () => {
       await client.uploadAvatar(new File([ONE_PIXEL_PNG], 'avatar.png', { type: 'image/png' })),
     );
     await rm(resolve(process.cwd(), 'storage', 'avatars', uploaded.data.url.split('/').pop()!), { force: true });
+    expect(schemas.profileSaved.parse(await client.removeAvatar()).data.user.avatar).toBeNull();
+    expect(schemas.profileSaved.parse(await client.removeAvatar()).message).toBe('No avatar to remove');
 
     expect(
       schemas.error.parse(await client.uploadAvatar(new File(['not an image'], 'note.txt', { type: 'text/plain' }))),
