@@ -45,6 +45,15 @@ describe('v3 configuration', () => {
     expect(() => parseEnv({ ...base, AUTH_RATE_LIMIT_MAX: '0' })).toThrow(/AUTH_RATE_LIMIT_MAX/);
   });
 
+  it('counts days in an IANA time zone, Asia/Jakarta unless told otherwise', () => {
+    const base = { NODE_ENV: 'development' } as Record<string, string>;
+    expect(parseEnv(base).APP_TIMEZONE).toBe('Asia/Jakarta');
+    expect(parseEnv({ ...base, APP_TIMEZONE: 'UTC' }).APP_TIMEZONE).toBe('UTC');
+    expect(parseEnv({ ...base, APP_TIMEZONE: 'Europe/Amsterdam' }).APP_TIMEZONE).toBe('Europe/Amsterdam');
+    expect(() => parseEnv({ ...base, APP_TIMEZONE: 'Asia/Atlantis' })).toThrow(/APP_TIMEZONE/);
+    expect(() => parseEnv({ ...base, APP_TIMEZONE: '+07:00' })).toThrow(/APP_TIMEZONE/);
+  });
+
   it('backs the database up daily in production and not elsewhere, unless told otherwise', () => {
     const production = { NODE_ENV: 'production', APP_URL: 'https://app.example.com' };
     expect(parseEnv(production)).toMatchObject({

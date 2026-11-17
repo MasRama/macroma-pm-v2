@@ -5,6 +5,17 @@ import { z } from 'zod';
 
 import { DATABASE, LOGGING, RATE_LIMIT, SECURITY, SERVER } from './constants';
 
+/** An IANA zone name (`Asia/Jakarta`, `UTC`) the runtime knows; offsets such as `+07:00` are not names. */
+function isTimeZone(value: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(SERVER.DEFAULT_PORT),
@@ -23,6 +34,8 @@ const EnvSchema = z.object({
   MAX_JSON_BODY_BYTES: z.coerce.number().int().positive().default(SECURITY.MAX_JSON_BODY_BYTES),
   TRUST_PROXY: z.enum(['true', 'false']).default('false'),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(1).max(10).default(1),
+  /** The IANA time zone whose calendar days and weeks the app counts in, whatever zone the server runs in. */
+  APP_TIMEZONE: z.string().trim().default('Asia/Jakarta').refine(isTimeZone, 'must be an IANA time zone name, such as Asia/Jakarta'),
 });
 
 type ParsedEnv = z.infer<typeof EnvSchema>;
