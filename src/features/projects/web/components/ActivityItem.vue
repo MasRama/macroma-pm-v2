@@ -2,9 +2,21 @@
 import { formatAgo, UiAvatar } from '../../../../shared/ui';
 import StatusBlock from './StatusBlock.vue';
 import VersionText from './VersionText.vue';
-import type { ActivityEntry } from '../view';
+import type { ActivityEntry, ActivityKind } from '../view';
 
 withDefaults(defineProps<{ entry: ActivityEntry; now?: Date }>(), { now: () => new Date() });
+
+/** How a task event reads when the row names its task: "<verb> <b>title</b>". */
+const TASK_VERBS: Partial<Record<ActivityKind, string>> = {
+  created: 'bikin task',
+  moved: 'mindahin',
+  completed: 'nyelesaiin',
+  commented: 'komentar di',
+  edited: 'ngedit',
+  deleted: 'hapus task',
+  'image-added': 'nambah gambar di',
+  'image-removed': 'hapus gambar di',
+};
 </script>
 
 <template>
@@ -13,7 +25,8 @@ withDefaults(defineProps<{ entry: ActivityEntry; now?: Date }>(), { now: () => n
     <div class="act__body">
       <p class="act__text">
         <b>{{ entry.actor.name }}</b>
-        <template v-if="entry.kind === 'moved'"> mindahin task di <b>{{ entry.subject }}</b> ke</template>
+        <template v-if="entry.task && TASK_VERBS[entry.kind]">{{ ` ${TASK_VERBS[entry.kind]} ` }}<b>{{ entry.task }}</b>{{ entry.kind === 'moved' ? ' ke' : '' }}</template>
+        <template v-else-if="entry.kind === 'moved'"> mindahin task di <b>{{ entry.subject }}</b> ke</template>
         <template v-else-if="entry.kind === 'completed'"> nyelesaiin task di <b>{{ entry.subject }}</b></template>
         <template v-else-if="entry.kind === 'commented'"> komentar di <b>{{ entry.subject }}</b></template>
         <template v-else-if="entry.kind === 'bumped'"> bump <b>{{ entry.subject }}</b> ke batch{{ entry.version ? '' : ' baru' }}</template>

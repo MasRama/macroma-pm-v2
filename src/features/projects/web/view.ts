@@ -210,8 +210,10 @@ export interface ActivityEntry {
   id: string;
   actor: PersonRef;
   kind: ActivityKind;
-  /** The task title, or the project name where the API gives no task title. */
+  /** The project the event happened in. */
   subject: string;
+  /** The task's title for task events; `null` on rows recorded without one, which name the project instead. */
+  task: string | null;
   status?: TaskStatus | null;
   version?: BatchVersion | TaskVersion | null;
   at: string;
@@ -373,22 +375,30 @@ const ACTIVITY_KINDS: Record<DashboardActivityRow['event_type'], ActivityKind> =
 
 const isStatus = (value: unknown): value is TaskStatus => typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value);
 
+/** A batch's `major.minor` as the activity feed writes it (`1.8`, no `v`). */
+function parseBatchVersion(label: string | null): BatchVersion | null {
+  const match = label === null ? null : /^(\d+)\.(\d+)$/.exec(label);
+  return match ? { major: Number(match[1]), minor: Number(match[2]) } : null;
+}
+
 /**
- * An activity row. The API gives the task title only inside its English
- * `description`, so the line names the project instead; status and version
- * come from `meta` where the event records them.
+ * An activity row: the task by `task_title` and a batch event's version by
+ * `batch_version`, each `null` on rows recorded without them; status and a
+ * task's version come from `meta` where the event records them.
  */
 export function toActivityEntry(row: DashboardActivityRow, projectName: string): ActivityEntry {
   const to = row.meta?.to;
   const version = row.meta?.version;
   const moved = row.event_type === 'task.moved';
+  const batchVersion = parseBatchVersion(row.batch_version);
   return {
     id: row.id,
     actor: toPerson(row.actor, row.id),
     kind: moved && to === 'done' ? 'completed' : ACTIVITY_KINDS[row.event_type],
     subject: projectName,
+    task: row.task_title,
     status: moved && isStatus(to) ? to : null,
-    version: typeof version === 'string' ? parseTaskVersion(version) : null,
+    version: batchVersion ?? (typeof version === 'string' ? parseTaskVersion(version) : null),
     at: iso(row.created_at),
   };
 }
