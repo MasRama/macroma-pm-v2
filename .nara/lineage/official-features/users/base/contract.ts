@@ -3,7 +3,7 @@ import type { PermissionDeclaration } from '../../shared/security/permissions';
 import { ADMINISTRATOR, permissionRules, type AccessRule } from '../../shared/security/access';
 import type { ActivityDeclaration } from '../../shared/security/activity';
 import { API_REFUSAL_CODES } from '../../shared/security/codes';
-import { emailSchema, personNameSchema } from '../../shared/security/input';
+import { emailSchema, personNameSchema, phoneSchema } from '../../shared/security/input';
 
 export const AVATAR_MAX_FILE_SIZE_MB = 5;
 export const AVATAR_MAX_FILE_SIZE_BYTES = AVATAR_MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -93,7 +93,13 @@ export const profileInputSchema = z.object({
   revision: revisionSchema,
   name: personNameSchema,
   email: emailSchema,
+  /** Left out keeps the number; null or empty removes it. */
+  phone: phoneSchema.optional(),
 });
+
+/** Which accounts the directory lists, by whether they are verified. */
+export const USERS_FILTERS = ['all', 'verified', 'unverified'] as const;
+export type UsersFilter = (typeof USERS_FILTERS)[number];
 
 export const createUserInputSchema = z.object({
   name: personNameSchema,
@@ -101,6 +107,8 @@ export const createUserInputSchema = z.object({
   // Passwords are length-bounded only: never trimmed or transformed.
   password: z.string().min(8, 'Password must be at least 8 characters').max(100),
   roles: z.array(z.string().min(1, 'Role is required')).max(100).optional(),
+  phone: phoneSchema.optional(),
+  verified: z.boolean().optional(),
 });
 
 export const updateUserInputSchema = z
@@ -113,13 +121,17 @@ export const updateUserInputSchema = z
     // reset-password endpoint.
     password: z.string().min(8, 'Password must be at least 8 characters').max(100).optional().or(z.literal('')),
     roles: z.array(z.string().min(1, 'Role is required')).max(100).optional(),
+    phone: phoneSchema.optional(),
+    verified: z.boolean().optional(),
   })
   .refine(
     (value) =>
       value.name !== undefined ||
       value.email !== undefined ||
       value.password !== undefined ||
-      value.roles !== undefined,
+      value.roles !== undefined ||
+      value.phone !== undefined ||
+      value.verified !== undefined,
     { message: 'At least one field is required to update', path: ['_root'] },
   );
 
@@ -153,6 +165,8 @@ export function usersResponseSchemas() {
     name: z.string(),
     email: z.string(),
     avatar: z.string().nullable(),
+    phone: z.string().nullable(),
+    verified: z.boolean(),
     revision: z.number(),
   });
   const managedUser = z.strictObject({ ...profile.shape, roles: z.array(z.string()) });

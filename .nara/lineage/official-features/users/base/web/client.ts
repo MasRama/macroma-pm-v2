@@ -13,6 +13,7 @@ import type {
   UpdateUserResponse,
   UserProfileResponse,
   UsersEditingResponse,
+  UsersFilter,
   UsersResponse,
 } from '../contract';
 import type { createAssetRoutes, createUserRoutes } from '..';
@@ -21,12 +22,14 @@ import type { UsersWebCsrf } from './host';
 export interface UsersClient {
   me(): Promise<UserProfileResponse>;
   updateProfile(input: ProfileInput): Promise<UpdateProfileResponse>;
-  listUsers(input?: { page?: number; limit?: number; search?: string }): Promise<UsersResponse>;
+  listUsers(input?: { page?: number; limit?: number; search?: string; filter?: UsersFilter }): Promise<UsersResponse>;
   createUser(input: CreateUserInput): Promise<ManagedUserResponse>;
   updateUser(id: string, input: UpdateUserInput): Promise<UpdateUserResponse>;
   resetPassword(id: string, input: ResetUserPasswordInput): Promise<ManagedUserResponse>;
   deleteUsers(input: DeleteUsersInput): Promise<DeleteUsersResponse>;
   uploadAvatar(file: File): Promise<AvatarUploadResponse>;
+  /** Removes the signed-in account's photo; answering as it is when there is none. */
+  removeAvatar(): Promise<UserProfileResponse>;
   listEditing(): Promise<UsersEditingResponse>;
   startEditing(id: string): Promise<EditingResponse>;
   stopEditing(id: string): Promise<EditingResponse>;
@@ -59,13 +62,14 @@ export function createUsersClient(options: UsersClientOptions = {}): UsersClient
   return {
     me: async () => (await users.me.$get()).json(),
     updateProfile: async (input) => (await users.me.$patch({ json: input })).json(),
-    listUsers: async ({ page = 1, limit = 10, search = '' } = {}) =>
-      (await users.index.$get({ query: { page: String(page), limit: String(limit), search } })).json(),
+    listUsers: async ({ page = 1, limit = 10, search = '', filter = 'all' } = {}) =>
+      (await users.index.$get({ query: { page: String(page), limit: String(limit), search, filter } })).json(),
     createUser: async (input) => (await users.index.$post({ json: input })).json(),
     updateUser: async (id, input) => (await users[':id'].$put({ param: { id }, json: input })).json(),
     resetPassword: async (id, input) => (await users[':id']['reset-password'].$post({ param: { id }, json: input })).json(),
     deleteUsers: async (input) => (await users.index.$delete({ json: input })).json(),
     uploadAvatar: async (file) => (await assets.avatar.$post({ form: { file } })).json(),
+    removeAvatar: async () => (await users.me.avatar.$delete()).json(),
     listEditing: async () => (await users.editing.$get()).json(),
     startEditing: async (id) => (await users[':id'].editing.$put({ param: { id } })).json(),
     stopEditing: async (id) => (await users[':id'].editing.$delete({ param: { id } })).json(),

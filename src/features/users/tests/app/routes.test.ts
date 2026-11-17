@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../../../app/server';
 import { csrfHeaders, issueCsrf, mergeResponseCookies } from '../../../../shared/security/tests/helpers';
+import { grantPermissions, signUp } from '../../../../app/tests/personas';
 
 async function registerUser(email: string): Promise<string> {
   const bootstrap = await issueCsrf(app);
@@ -103,5 +104,26 @@ describe('users feature', () => {
     const self = await put(target, targetProfile.data.user.id);
     expect(self.status).toBe(422);
     await expect(self.json()).resolves.toMatchObject({ code: 'VALIDATION_ERROR', errors: { email: ['Invalid email format'] } });
+  });
+
+  it('lets only holders of the edit rule mark an account verified, never the account itself', async () => {
+    const member = await signUp('Self Verifier');
+    const put = async (cookie: string, id: string, body: unknown) => {
+      const state = await issueCsrf(app, cookie);
+      return app.request(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { ...csrfHeaders(state), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    };
+
+    expect((await put(member.cookie, member.id, { revision: 1, verified: true })).status).toBe(403);
+    expect((await put(member.cookie, member.id, { revision: 1, phone: '+1 555 0100' })).status).toBe(200);
+
+    const editor = await signUp('Verifying Editor');
+    grantPermissions(editor.id, ['users.edit']);
+    const verified = await put(editor.cookie, member.id, { revision: 2, verified: true });
+    expect(verified.status).toBe(200);
+    await expect(verified.json()).resolves.toMatchObject({ data: { user: { verified: true, phone: '+1 555 0100' } } });
   });
 });

@@ -35,14 +35,24 @@ describe('users web client contract', () => {
 
   it('reads and edits the signed-in profile in the declared shapes', async () => {
     expect(schemas.error.parse(await client.me())).toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(schemas.error.parse(await client.removeAvatar())).toMatchObject({ code: 'UNAUTHORIZED' });
 
     const account = await browser.signUp('Profile Owner');
     const { revision } = schemas.profileSaved.parse(await client.me()).data.user;
     const saved = schemas.profileSaved.parse(await client.updateProfile({ revision, name: 'Profile Renamed', email: account.email }));
-    expect(saved.data.user).toMatchObject({ name: 'Profile Renamed', revision: revision + 1 });
+    expect(saved.data.user).toMatchObject({ name: 'Profile Renamed', revision: revision + 1, phone: null, verified: false });
+    const withPhone = schemas.profileSaved.parse(
+      await client.updateProfile({ revision: revision + 1, name: 'Profile Renamed', email: account.email, phone: '0812-3456' }),
+    );
+    expect(withPhone.data.user).toMatchObject({ phone: '0812-3456', revision: revision + 2 });
+    expect(
+      schemas.error.parse(
+        await client.updateProfile({ revision: revision + 2, name: 'Profile Renamed', email: account.email, phone: 'call me' }),
+      ),
+    ).toMatchObject({ code: 'VALIDATION_ERROR' });
     expect(
       schemas.staleProfile.parse(await client.updateProfile({ revision, name: 'Profile Stale', email: account.email })).current,
-    ).toMatchObject({ name: 'Profile Renamed', revision: revision + 1 });
+    ).toMatchObject({ name: 'Profile Renamed', revision: revision + 2 });
     expect(schemas.error.parse(await client.updateProfile({ revision, name: '', email: account.email }))).toMatchObject({
       code: 'VALIDATION_ERROR',
     });
@@ -54,6 +64,8 @@ describe('users web client contract', () => {
       await client.uploadAvatar(new File([ONE_PIXEL_PNG], 'avatar.png', { type: 'image/png' })),
     );
     await rm(resolve(process.cwd(), 'storage', 'avatars', uploaded.data.url.split('/').pop()!), { force: true });
+    expect(schemas.profileSaved.parse(await client.removeAvatar()).data.user.avatar).toBeNull();
+    expect(schemas.profileSaved.parse(await client.removeAvatar()).message).toBe('No avatar to remove');
 
     expect(
       schemas.error.parse(await client.uploadAvatar(new File(['not an image'], 'note.txt', { type: 'text/plain' }))),
@@ -69,8 +81,21 @@ describe('users web client contract', () => {
 
     const email = `${randomUUID()}@example.com`;
     const created = schemas.userSaved.parse(
-      await client.createUser({ name: 'Managed Account', email, password: 'correct horse battery staple' }),
+      await client.createUser({
+        name: 'Managed Account',
+        email,
+        password: 'correct horse battery staple',
+        phone: '+62 811 1111',
+        verified: true,
+      }),
     );
+    expect(created.data.user).toMatchObject({ phone: '+62 811 1111', verified: true });
+    const verifiedIds = schemas.users.parse(await client.listUsers({ limit: 100, filter: 'verified' })).data.users.map((user) => user.id);
+    expect(verifiedIds).toContain(created.data.user.id);
+    const unverifiedIds = schemas.users
+      .parse(await client.listUsers({ limit: 100, filter: 'unverified' }))
+      .data.users.map((user) => user.id);
+    expect(unverifiedIds).not.toContain(created.data.user.id);
     expect(
       schemas.error.parse(
         await client.createUser({ name: 'Managed Account', email, password: 'correct horse battery staple' }),
@@ -78,7 +103,9 @@ describe('users web client contract', () => {
     ).toMatchObject({ code: 'DUPLICATE_EMAIL' });
 
     const { id, revision } = created.data.user;
-    schemas.userSaved.parse(await client.updateUser(id, { revision, name: 'Managed Renamed' }));
+    expect(
+      schemas.userSaved.parse(await client.updateUser(id, { revision, name: 'Managed Renamed', verified: false })).data.user,
+    ).toMatchObject({ verified: false, phone: '+62 811 1111' });
     expect(schemas.staleUser.parse(await client.updateUser(id, { revision, name: 'Managed Stale' })).current).toMatchObject({
       name: 'Managed Renamed',
       revision: revision + 1,

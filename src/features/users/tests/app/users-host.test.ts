@@ -34,6 +34,8 @@ interface MockAccount {
   email: string;
   passwordHash: string;
   avatar: string | null;
+  phone: string | null;
+  verified: boolean;
   revision: number;
 }
 
@@ -65,6 +67,8 @@ function createMockHost(cookieName = 'mock_session'): { host: UsersServerHost; s
     name: account.name,
     email: account.email,
     avatar: account.avatar,
+    phone: account.phone,
+    verified: account.verified,
     revision: account.revision,
   });
   const host: UsersServerHost = {
@@ -93,12 +97,13 @@ function createMockHost(cookieName = 'mock_session'): { host: UsersServerHost; s
       const account = state.accounts.get(userId);
       return account ? visible(account) : undefined;
     },
-    listAccounts: (page, limit, search = '') => {
+    listAccounts: (page, limit, search = '', filter = 'all') => {
       const normalizedPage = Math.max(1, page);
       const normalizedLimit = Math.max(1, Math.min(100, limit));
       const needle = search.toLowerCase();
       const matching = [...state.accounts.values()]
         .filter((account) => account.name.toLowerCase().includes(needle) || account.email.toLowerCase().includes(needle))
+        .filter((account) => filter === 'all' || account.verified === (filter === 'verified'))
         .map(visible);
       return {
         data: matching.slice((normalizedPage - 1) * normalizedLimit, normalizedPage * normalizedLimit),
@@ -115,6 +120,8 @@ function createMockHost(cookieName = 'mock_session'): { host: UsersServerHost; s
         email: input.email,
         passwordHash: input.passwordHash,
         avatar: null,
+        phone: input.phone ?? null,
+        verified: input.verified ?? false,
         revision: 1,
       };
       state.accounts.set(account.id, account);
@@ -135,6 +142,8 @@ function createMockHost(cookieName = 'mock_session'): { host: UsersServerHost; s
       }
       if (patch.name !== undefined) account.name = patch.name;
       if (patch.avatar !== undefined) account.avatar = patch.avatar;
+      if (patch.phone !== undefined) account.phone = patch.phone;
+      if (patch.verified !== undefined) account.verified = patch.verified;
       if (options.roleIds !== undefined) state.assignments.set(userId, [...options.roleIds]);
       account.revision += 1;
       return { status: 'updated', account: visible(account) };

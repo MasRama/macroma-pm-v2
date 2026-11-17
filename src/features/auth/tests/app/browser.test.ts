@@ -303,6 +303,8 @@ describe('browser authentication lifecycle', () => {
       name: 'Session User',
       email: 'session@example.com',
       avatar: null,
+      phone: null,
+      verified: false,
       roles: ['admin'],
       permissions: ['users.view'],
       mustChangePassword: false,

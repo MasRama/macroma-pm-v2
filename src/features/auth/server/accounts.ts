@@ -18,9 +18,16 @@ export interface AccountRecord {
   name: string;
   email: string;
   avatar: string | null;
+  /** A contact number; never a sign-in identifier. */
+  phone: string | null;
+  /** An administrator, or Google, vouched for the account. */
+  verified: boolean;
   /** Raised by every edit of the account's profile or roles. */
   revision: number;
 }
+
+/** Which accounts a listing returns, by `verified`. */
+export type AccountFilter = 'all' | 'verified' | 'unverified';
 
 /** `stale` carries the account as it is now; nothing was written. */
 export type AccountUpdate =
@@ -40,12 +47,34 @@ export interface AccountCreateInput {
   passwordHash: string;
   /** The password is temporary: the account must replace it before using the API. */
   mustChangePassword?: boolean;
+  phone?: AccountRecord['phone'];
+  verified?: AccountRecord['verified'];
 }
 
 export interface AccountUpdateInput {
   name?: AccountRecord['name'];
   email?: AccountRecord['email'];
   avatar?: AccountRecord['avatar'];
+  phone?: AccountRecord['phone'];
+  verified?: AccountRecord['verified'];
+}
+
+interface AccountRow extends Omit<AccountRecord, 'verified'> {
+  verified: number;
+}
+
+const ACCOUNT_COLUMNS = 'id, name, email, avatar, phone, verified, revision';
+
+function toAccount(row: AccountRow): AccountRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    avatar: row.avatar,
+    phone: row.phone,
+    verified: row.verified === 1,
+    revision: row.revision,
+  };
 }
 
 const MAX_PAGE = 1_000_000;
@@ -79,39 +108,56 @@ export function accountEmailTaken(email: string): boolean {
 }
 
 export function findAccountById(userId: string): AccountRecord | undefined {
-  return getDatabase()
-    .prepare('SELECT id, name, email, avatar, revision FROM users WHERE id = ?')
-    .get(userId) as AccountRecord | undefined;
+  const row = getDatabase().prepare(`SELECT ${ACCOUNT_COLUMNS} FROM users WHERE id = ?`).get(userId) as AccountRow | undefined;
+  return row ? toAccount(row) : undefined;
 }
 
-export function listAccounts(page: number, limit: number, search = ''): AccountList {
+const FILTER_CLAUSE: Record<AccountFilter, string> = {
+  all: '',
+  verified: ' AND verified = 1',
+  unverified: ' AND verified = 0',
+};
+
+export function listAccounts(page: number, limit: number, search = '', filter: AccountFilter = 'all'): AccountList {
   const normalizedPage = boundedInteger(page, 1, 1, MAX_PAGE);
   const normalizedLimit = boundedInteger(limit, 10, 1, MAX_PAGE_SIZE);
   const pattern = `%${escapeLikeLiteral(search)}%`;
+  const where = `(name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!')${FILTER_CLAUSE[filter] ?? ''}`;
   const database = getDatabase();
-  const count = database
-    .prepare("SELECT COUNT(*) AS count FROM users WHERE name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!'")
-    .get(pattern, pattern) as { count: number };
+  const count = database.prepare(`SELECT COUNT(*) AS count FROM users WHERE ${where}`).get(pattern, pattern) as {
+    count: number;
+  };
   const data = database
     .prepare(
-      `SELECT id, name, email, avatar, revision
+      `SELECT ${ACCOUNT_COLUMNS}
        FROM users
-       WHERE name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!'
+       WHERE ${where}
        ORDER BY created_at DESC
        LIMIT ? OFFSET ?`,
     )
-    .all(pattern, pattern, normalizedLimit, (normalizedPage - 1) * normalizedLimit) as AccountRecord[];
-  return { data, total: count.count };
+    .all(pattern, pattern, normalizedLimit, (normalizedPage - 1) * normalizedLimit) as AccountRow[];
+  return { data: data.map(toAccount), total: count.count };
 }
 
 export function createAccount(data: AccountCreateInput): AccountRecord {
   const now = Date.now();
   getDatabase()
     .prepare(
-      `INSERT INTO users (id, name, email, password, avatar, must_change_password, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, name, email, password, avatar, phone, verified, must_change_password, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(data.id, data.name, data.email, data.passwordHash, null, data.mustChangePassword ? 1 : 0, now, now);
+    .run(
+      data.id,
+      data.name,
+      data.email,
+      data.passwordHash,
+      null,
+      data.phone ?? null,
+      data.verified ? 1 : 0,
+      data.mustChangePassword ? 1 : 0,
+      now,
+      now,
+    );
   return findAccountById(data.id)!;
 }
 
@@ -145,6 +191,14 @@ export function updateAccount(userId: string, data: AccountUpdateInput, revision
   if (data.avatar !== undefined) {
     fields.push('avatar = ?');
     values.push(data.avatar);
+  }
+  if (data.phone !== undefined) {
+    fields.push('phone = ?');
+    values.push(data.phone);
+  }
+  if (data.verified !== undefined) {
+    fields.push('verified = ?');
+    values.push(data.verified ? 1 : 0);
   }
   fields.push('revision = revision + 1', 'updated_at = ?');
   values.push(Date.now(), userId);

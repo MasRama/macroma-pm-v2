@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -54,6 +55,31 @@ describe('users asset capability', () => {
 
     const filename = payload.data.url.split('/').pop();
     if (filename) await rm(resolve(process.cwd(), 'storage', 'avatars', filename), { force: true });
+  });
+
+  it('removes the signed-in account\'s avatar and its stored file, idempotently', async () => {
+    const cookie = await registerUser();
+    const state = await issueCsrf(app, cookie);
+    const headers = { Cookie: state.cookie, 'X-CSRF-Token': state.token };
+
+    const uploadResponse = await app.request('/api/assets/avatar', { method: 'POST', headers, body: avatarForm() });
+    expect(uploadResponse.status).toBe(200);
+    const { data } = (await uploadResponse.json()) as { data: { url: string } };
+    const filename = data.url.split('/').pop()!;
+    const stored = resolve(process.cwd(), 'storage', 'avatars', filename);
+    expect(existsSync(stored)).toBe(true);
+
+    const removed = await app.request('/api/users/me/avatar', { method: 'DELETE', headers });
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toMatchObject({ success: true, message: 'Avatar removed', data: { user: { avatar: null } } });
+    expect(existsSync(stored)).toBe(false);
+    expect((await app.request(data.url)).status).toBe(404);
+
+    const again = await app.request('/api/users/me/avatar', { method: 'DELETE', headers });
+    expect(again.status).toBe(200);
+    await expect(again.json()).resolves.toMatchObject({ success: true, data: { user: { avatar: null } } });
+
+    expect((await app.request('/api/users/me/avatar', { method: 'DELETE', headers: { 'X-CSRF-Token': state.token, Cookie: state.cookie.replace(/auth_id=[^;]*;?\s*/, '') } })).status).toBe(401);
   });
 
   it('rejects unauthenticated uploads', async () => {

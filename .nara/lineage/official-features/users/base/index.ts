@@ -8,6 +8,7 @@ export {
   USERS_CHANGED_EVENT,
   USERS_EDITING_EVENT,
   USERS_ACTIVITY,
+  USERS_FILTERS,
   USERS_PERMISSIONS,
   usersAccess,
 } from './contract';
@@ -24,6 +25,7 @@ export type {
   UserProfile,
   UserProfileResponse,
   UsersAccess,
+  UsersFilter,
   UsersResponse,
 } from './contract';
 export { createAssetRoutes, USERS_ASSET_ROUTE_POLICIES } from './server/assets-routes';

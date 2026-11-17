@@ -65,7 +65,8 @@ export function assetStorageKey(asset: { storage_key: string | null; url: string
   return asset.storage_key ?? legacyAvatarStorageKey(asset.url);
 }
 
-async function cleanupPreviousUserAvatar(
+/** Deletes the replaced or removed avatar's asset row and stored file, best-effort. */
+export async function cleanupPreviousUserAvatar(
   host: UsersServerHost,
   userId: string,
   previousAvatarUrl: string | null | undefined,
