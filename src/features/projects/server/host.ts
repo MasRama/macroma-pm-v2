@@ -19,6 +19,8 @@ export interface ProjectsServerHost {
   workspaceMemberIds(workspaceId: string): string[];
   /** The workspaces the account belongs to. */
   workspacesOf(userId: string): string[];
+  /** When each of the account's workspaces was created, for the dashboard's trends. */
+  workspaceOpenings(userId: string): number[];
   /** Where task images are stored, under `task-attachments/`. */
   readonly assetStorage: AssetStorage;
 }

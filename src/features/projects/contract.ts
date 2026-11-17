@@ -389,6 +389,44 @@ export function projectsResponseSchemas() {
     /** Distinct tasks of the batch the account is assigned to or logged a change on. */
     task_count: z.number(),
   });
+  const dashboardStats = z.strictObject({
+    workspace_count: z.number(),
+    project_count: z.number(),
+    /** Every task of the account's projects per column. */
+    counts,
+    total: z.number(),
+    /** Tasks in `done` whose latest move into `done` falls in the last 7 days. */
+    done_this_week: z.number(),
+    /** The same, 7 to 14 days ago. */
+    done_last_week: z.number(),
+    /** Tasks in `ongoing` assigned to the signed-in account. */
+    ongoing_mine: z.number(),
+    /** Tasks in `revisi` that moved to `revisi` more than once. */
+    revisi_repeated: z.number(),
+  });
+  /** One day of the trends, each value counted as it stood at the end of that day. */
+  const trendDay = z.strictObject({
+    /** The server-local calendar date, `YYYY-MM-DD`. */
+    day: z.string(),
+    workspace: z.number(),
+    project: z.number(),
+    /** Tasks in `ongoing`, `revisi` or `review`, from each task's latest move that day or before. */
+    active: z.number(),
+    done: z.number(),
+  });
+  const projectTaskCount = z.strictObject({ project_id: z.string(), name: z.string(), count: z.number() });
+  const boardHealth = z.strictObject({
+    project_id: z.string(),
+    name: z.string(),
+    workspace_id: z.string().nullable(),
+    active_batch: batchRef.nullable(),
+    /** The active batch's tasks, or every task of the project when no batch is active. */
+    counts,
+    total: z.number(),
+    done: z.number(),
+  });
+  const dashboardActivity = z.strictObject({ ...activity.shape, project_id: z.string() });
+  const projectLink = z.strictObject({ id: z.string(), name: z.string(), workspace_id: z.string().nullable() });
   const error = z.strictObject({
     success: z.literal(false),
     message: z.string(),
@@ -418,6 +456,10 @@ export function projectsResponseSchemas() {
     releaseStats,
     changelogEntry,
     contributor,
+    dashboardStats,
+    trendDay,
+    boardHealth,
+    dashboardActivity,
     error,
     /** 409 for a project edit based on an older revision; `current` is the project as it is now. */
     staleProject: z.strictObject({ ...error.shape, code: z.literal(STALE_REVISION), current: project }),
@@ -468,6 +510,20 @@ export function projectsResponseSchemas() {
         contributors: z.array(contributor),
       }),
     ),
+    dashboard: success(
+      z.strictObject({
+        stats: dashboardStats,
+        /** The last 7 days, oldest first, today last. */
+        trends: z.array(trendDay),
+        /** Most tasks first. */
+        tasks_per_project: z.array(projectTaskCount),
+        board_health: z.array(boardHealth),
+        /** The latest 8 entries across the account's projects. */
+        recent_activity: z.array(dashboardActivity),
+        /** Newest first. */
+        projects: z.array(projectLink),
+      }),
+    ),
   };
 }
 
@@ -495,6 +551,10 @@ export type ReleaseBatch = Infer<'releaseBatch'>;
 export type ReleaseStats = Infer<'releaseStats'>;
 export type ChangelogEntry = Infer<'changelogEntry'>;
 export type ReleaseContributor = Infer<'contributor'>;
+export type DashboardStats = Infer<'dashboardStats'>;
+export type DashboardTrendDay = Infer<'trendDay'>;
+export type BoardHealth = Infer<'boardHealth'>;
+export type DashboardActivity = Infer<'dashboardActivity'>;
 export type ProjectsError = Infer<'error'>;
 export type StaleProjectError = Infer<'staleProject'>;
 export type StaleTaskError = Infer<'staleTask'>;
@@ -517,6 +577,7 @@ export type AttachmentsSuccess = Infer<'attachments'>;
 export type AttachmentsUploadedSuccess = Infer<'attachmentsUploaded'>;
 export type ReleasesSuccess = Infer<'releases'>;
 export type ReleaseDetailSuccess = Infer<'releaseDetail'>;
+export type DashboardSuccess = Infer<'dashboard'>;
 
 export type ProjectsResponse = ProjectsSuccess | ProjectsError;
 export type ProjectSavedResponse = ProjectSavedSuccess | ProjectsError;
@@ -538,4 +599,5 @@ export type AttachmentsUploadedResponse = AttachmentsUploadedSuccess | ProjectsE
 export type TaskDetailResponse = TaskDetailSuccess | ProjectsError;
 export type ReleasesResponse = ReleasesSuccess | ProjectsError;
 export type ReleaseDetailResponse = ReleaseDetailSuccess | ProjectsError;
+export type DashboardResponse = DashboardSuccess | ProjectsError;
 export type TaskLogsResponse = TaskLogsSuccess | ProjectsError;

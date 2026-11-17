@@ -70,6 +70,7 @@ describe('projects web client contract', () => {
     schemas.done.parse(await client.removeComment(task.id, comment.id));
     schemas.done.parse(await client.removeAttachment(task.id, uploaded[0].id));
     schemas.projectDetail.parse(await client.get(id));
+    expect(schemas.dashboard.parse(await client.dashboard()).data.stats.project_count).toBe(1);
     schemas.activity.parse(await client.activity(id));
 
     schemas.done.parse(await client.removeTask(task.id));
@@ -79,6 +80,7 @@ describe('projects web client contract', () => {
 
   it('answers refusals in the declared error shapes', async () => {
     expect(schemas.error.parse(await client.list())).toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(schemas.error.parse(await client.dashboard())).toMatchObject({ code: 'UNAUTHORIZED' });
     await browser.signUp();
     expect(schemas.error.parse(await client.get(randomUUID()))).toMatchObject({ code: 'PROJECT_NOT_FOUND' });
     expect(schemas.error.parse(await client.task(randomUUID()))).toMatchObject({ code: 'TASK_NOT_FOUND' });

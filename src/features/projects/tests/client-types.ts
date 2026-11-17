@@ -1,5 +1,5 @@
 import { hc } from 'hono/client';
-import type { createProjectRoutes, createTaskRoutes } from '..';
+import type { createDashboardRoutes, createProjectRoutes, createTaskRoutes } from '..';
 import type { ProjectsError } from '../contract';
 
 /**
@@ -29,6 +29,13 @@ export async function projectsRouteTypes(): Promise<void> {
     const duration: number | null = release.data.stats.duration_days;
     const email: string = release.data.contributors[0].user.email;
     void [duration, email];
+  }
+
+  const dashboard = await (await hc<ReturnType<typeof createDashboardRoutes>>('/api/dashboard').index.$get()).json();
+  if (dashboard.success) {
+    const doneThisWeek: number = dashboard.data.stats.done_this_week;
+    const day: string = dashboard.data.trends[0].day;
+    void [doneThisWeek, day];
   }
 
   // @ts-expect-error an edit carries the revision it was based on

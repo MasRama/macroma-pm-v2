@@ -165,6 +165,15 @@ export function workspaceIdsForUser(userId: string): string[] {
   );
 }
 
+/** When each of the account's workspaces was created. */
+export function workspaceOpeningsForUser(userId: string): number[] {
+  return (
+    getDatabase()
+      .prepare('SELECT w.created_at FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id WHERE m.user_id = ?')
+      .all(userId) as Array<{ created_at: number }>
+  ).map((row) => row.created_at);
+}
+
 /** Adds the account unless it already belongs; whether it was added. */
 export function addMember(workspaceId: string, userId: string, role: WorkspaceRole, createdAt = Date.now()): boolean {
   return (

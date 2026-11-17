@@ -22,6 +22,7 @@ import {
   type BatchSavedSuccess,
   type CommentAddedSuccess,
   type CommentsSuccess,
+  type DashboardSuccess,
   type MemberAddedSuccess,
   type Project,
   type ProjectActivitySuccess,
@@ -62,6 +63,7 @@ import {
   taskViews,
 } from './access';
 import { removeStoredImages, storeImages, uploadedFiles } from './attachments';
+import { dashboardData } from './dashboard';
 import type { ProjectsServerHost } from './host';
 import { announceBoardChange, announceProjectChange, projectsBoardChangedTopic, projectsChangedTopic } from './live';
 import {
@@ -663,6 +665,16 @@ export function createTaskRoutes(host: ProjectsServerHost) {
  * a body budget for eight images; the task is named in the query and checked
  * (404, then 403) before the body is read.
  */
+/** The signed-in account's dashboard, over the projects it can open. */
+export function createDashboardRoutes(host: ProjectsServerHost) {
+  const guard = guardFor(host);
+  return new Hono().get('/', guard.signedIn, (context) => {
+    const actor = guard.actor(context);
+    const projects = listProjectsFor(actor.id, host.workspacesOf(actor.id));
+    return context.json({ success: true as const, message: 'OK', data: dashboardData(host, actor.id, projects) } satisfies DashboardSuccess);
+  });
+}
+
 export function createTaskAttachmentRoutes(host: ProjectsServerHost) {
   const guard = guardFor(host);
   return new Hono().post('/', guard.signedIn, queryInput(uploadAttachmentsQuerySchema), async (context) => {
