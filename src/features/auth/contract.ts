@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { API_REFUSAL_CODES } from '../../shared/security/codes';
-import { CONTROL_MESSAGE, emailSchema, hasNoControlChars, personNameSchema } from '../../shared/security/input';
+import { CONTROL_MESSAGE, emailSchema, hasNoControlChars, personNameSchema, phoneSchema } from '../../shared/security/input';
 import type { ActivityDeclaration } from '../../shared/security/activity';
 import { permissionRules } from '../../shared/security/access';
 import type { PermissionDeclaration } from '../../shared/security/permissions';
@@ -25,6 +25,7 @@ export const AUTH_REFUSAL_CODES = [
   'CURRENT_SESSION',
   'DUPLICATE_EMAIL',
   'DUPLICATE_SLUG',
+  'GOOGLE_DISABLED',
   'INVALID_CREDENTIALS',
   'INVALID_ID',
   'INVALID_PASSWORD',
@@ -32,6 +33,7 @@ export const AUTH_REFUSAL_CODES = [
   'LOGIN_LOCKED',
   'NOT_FOUND',
   'PROTECTED_ROLE',
+  'RESET_TOKEN_INVALID',
   STALE_REVISION,
   'TWO_FACTOR_CHALLENGE_EXPIRED',
   'TWO_FACTOR_DISABLED',
@@ -46,6 +48,7 @@ export const AUTH_ACTIVITY = [
   { action: 'login', label: 'Signed in', kind: 'access' },
   { action: 'logout', label: 'Signed out', kind: 'access' },
   { action: 'password-changed', label: 'Password changed', kind: 'access' },
+  { action: 'password-reset', label: 'Password reset by email', kind: 'access' },
   { action: 'session-revoked', label: 'Session signed out', kind: 'access' },
   { action: 'sessions-revoked', label: 'Other sessions signed out', kind: 'access' },
   { action: 'two-factor-enabled', label: 'Two-factor turned on', kind: 'access' },
@@ -108,6 +111,8 @@ export const registerInputSchema = z.object({
   email: emailSchema,
   // Passwords are length-bounded only: never trimmed or transformed.
   password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+  /** A contact number for the profile; sign-in is by email only. */
+  phone: phoneSchema.optional(),
 });
 
 export const loginInputSchema = z.object({
@@ -121,7 +126,32 @@ export const changePasswordInputSchema = z.object({
   new_password: z.string().min(8, 'Password must be at least 8 characters').max(100),
 });
 
+/** Asks for a reset link; the answer never says whether the email has an account. */
+export const forgotPasswordInputSchema = z.object({
+  email: emailSchema,
+});
+
+/** Sets a new password with the token from an emailed reset link. */
+export const resetPasswordInputSchema = z.object({
+  token: z.string().trim().min(1, 'Reset token is required').max(200),
+  // Passwords are length-bounded only: never trimmed or transformed.
+  password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+});
+
+/**
+ * Where Google sign-in starts: the browser navigates here (it is a redirect,
+ * not a fetch). It comes back to `/` signed in, to `/login?two-factor=1` when
+ * the account asks for its second factor, or to `/login?google-error=<reason>`.
+ */
+export const GOOGLE_SIGN_IN_PATH = '/api/auth/google/redirect';
+
+/** Why a Google sign-in came back to `/login` without signing in. */
+export const GOOGLE_SIGN_IN_ERRORS = ['state', 'denied', 'unavailable', 'unverified', 'registration-closed'] as const;
+export type GoogleSignInError = (typeof GOOGLE_SIGN_IN_ERRORS)[number];
+
 export type RegisterInput = z.infer<typeof registerInputSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordInputSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordInputSchema>;
 export type LoginInput = z.infer<typeof loginInputSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordInputSchema>;
 
@@ -199,6 +229,8 @@ export function authResponseSchemas() {
   });
   const currentUser = z.strictObject({
     ...publicUser.shape,
+    phone: z.string().nullable(),
+    verified: z.boolean(),
     roles: z.array(z.string()).readonly(),
     permissions: z.array(z.string()).readonly(),
     mustChangePassword: z.boolean(),
@@ -312,6 +344,8 @@ export type RegisterResponse = RegisterSuccess | AuthError;
 export type LoginResponse = LoginSuccess | AuthError;
 export type TwoFactorChallengeResponse = AuthSuccess | AuthError;
 export type ChangePasswordResponse = AuthSuccess | AuthError;
+export type ForgotPasswordResponse = AuthSuccess | AuthError;
+export type ResetPasswordResponse = AuthSuccess | AuthError;
 export type CurrentUserResponse = CurrentUserSuccess | AuthError;
 export type SessionsResponse = SessionsSuccess | AuthError;
 export type RevokeSessionsResponse = RevokeSessionsSuccess | AuthError;

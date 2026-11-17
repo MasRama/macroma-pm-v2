@@ -53,7 +53,7 @@ function createUsersServerHost(recordActivity?: UsersServerHost['recordActivity'
 
     findAccountById: (userId) => findAccountById(userId),
 
-    listAccounts: (page, limit, search) => listAccounts(page, limit, search),
+    listAccounts: (page, limit, search, filter) => listAccounts(page, limit, search, filter),
 
     // Auth refuses a taken email by throwing; Users expects it as an outcome.
     createAccount: (input, roleIds) => {

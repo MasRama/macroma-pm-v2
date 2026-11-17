@@ -3,6 +3,7 @@
   "providers": [],
   "packages": {
     "better-sqlite3": "^12.4.1",
+    "nodemailer": "^10.6.0",
     "zod": "^4.4.3"
   }
 }

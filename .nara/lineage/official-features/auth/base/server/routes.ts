@@ -47,6 +47,8 @@ import type { AuthActivitySink } from './activity';
 import { setSessionCookie } from './http';
 import { beginTwoFactorChallenge, createSecurityRoutes } from './security-routes';
 import { sessionGuard } from './guard';
+import { createGoogleRoutes } from './google';
+import { createPasswordResetRoutes } from './password-reset';
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE';
@@ -67,7 +69,7 @@ const registerHandler = async (context: Context, input: RegisterInput, activity?
   const password = await hashPassword(input.password);
   try {
     const user = getDatabase().transaction(() => {
-      const created = createUser({ id: randomUUID(), name: input.name, email: input.email, password });
+      const created = createUser({ id: randomUUID(), name: input.name, email: input.email, password, phone: input.phone ?? null });
       if (roleSlug !== undefined) {
         const role = findRoleBySlug(roleSlug);
         if (!role) throw new Error(`Registration role "${roleSlug}" does not exist; declare it with declareRoles.`);
@@ -204,6 +206,8 @@ function currentUserPayload(user: SessionUser): CurrentUser {
     name: user.name,
     email: user.email,
     avatar: user.avatar,
+    phone: user.phone,
+    verified: user.verified === 1,
     roles: getUserRoles(user.id).map((role) => role.slug),
     permissions: getUserPermissions(user.id).map((permission) => permission.slug),
     mustChangePassword: user.must_change_password === 1,
@@ -253,6 +257,9 @@ export const AUTH_ROUTE_POLICIES = [
   { path: '/register', sensitive: true },
   { path: '/change-password', sensitive: true },
   { path: '/logout', sensitive: true },
+  { path: '/forgot-password', sensitive: true },
+  { path: '/reset-password', sensitive: true },
+  { path: '/google/*', sensitive: true },
   // The sign-in code step and password-confirmed two-factor management.
   { path: '/two-factor/*', sensitive: true },
 ] as const satisfies readonly RoutePolicy[];
@@ -278,7 +285,9 @@ export function createAuthRoutes(activity?: AuthActivitySink, options: AuthRoute
     )
     .get('/me', sessionGuard.signedIn, currentUserHandler)
     .post('/logout', publicRoute, (context) => logoutHandler(context, activity))
-    .route('/', createSecurityRoutes(activity));
+    .route('/', createSecurityRoutes(activity))
+    .route('/', createPasswordResetRoutes(activity))
+    .route('/', createGoogleRoutes(activity, registration === undefined ? {} : { registration }));
 }
 
 export const authRoutes = createAuthRoutes();

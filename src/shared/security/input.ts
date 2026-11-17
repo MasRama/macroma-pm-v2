@@ -25,3 +25,15 @@ export const emailSchema = z
   .email('Invalid email format')
   .refine(hasNoControlChars, { message: `Email ${CONTROL_MESSAGE}` })
   .transform((value) => value.toLowerCase());
+
+/**
+ * An optional contact phone number: digits with the usual separators and an
+ * optional leading `+`. Empty means no number, stored as null.
+ */
+export const phoneSchema = z
+  .string()
+  .trim()
+  .max(30, 'Phone must be at most 30 characters')
+  .regex(/^(\+?[0-9][0-9 ().-]*)?$/, 'Phone may only contain digits, spaces, dashes, dots, brackets and a leading +')
+  .transform((value) => (value === '' ? null : value))
+  .nullable();

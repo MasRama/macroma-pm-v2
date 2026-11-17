@@ -24,6 +24,7 @@ import {
   type UsersMessageSuccess,
   type UsersManageAction,
   type UsersResponseSuccess,
+  USERS_FILTERS,
 } from '../contract';
 import { createPresence, publish } from '../../../shared/realtime';
 import { ADMINISTRATOR, createGuard, forbidden, jsonInput, queryInput } from '../../../shared/security';
@@ -68,6 +69,7 @@ const listUsersQuerySchema = z.object({
   page: z.string().optional(),
   limit: z.string().optional(),
   search: z.string().optional(),
+  filter: z.enum(USERS_FILTERS).optional(),
 });
 
 function normalizedQueryInteger(raw: string | undefined, fallback: number, maximum: number): number {
@@ -91,7 +93,15 @@ export function createUserRoutes(host: UsersServerHost) {
   // The account provider is application-chosen; copy only declared fields so
   // provider-specific columns never reach the API.
   function toProfile(user: UserProfile): UserProfile {
-    return { id: user.id, name: user.name, email: user.email, avatar: user.avatar, revision: user.revision };
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      phone: user.phone,
+      verified: user.verified,
+      revision: user.revision,
+    };
   }
 
   function withRoles(user: UserProfile): ManagedUser {
@@ -153,7 +163,7 @@ export function createUserRoutes(host: UsersServerHost) {
     const page = normalizedQueryInteger(query.page, 1, MAX_PAGE);
     const limit = normalizedQueryInteger(query.limit, 10, MAX_PAGE_SIZE);
     const search = query.search ?? '';
-    const result = host.listAccounts(page, limit, search);
+    const result = host.listAccounts(page, limit, search, query.filter ?? 'all');
     return context.json({
       success: true as const,
       message: 'OK',
@@ -186,6 +196,8 @@ export function createUserRoutes(host: UsersServerHost) {
         name: input.name,
         email: input.email,
         passwordHash: await host.hashPassword(input.password),
+        ...(input.phone !== undefined ? { phone: input.phone } : {}),
+        ...(input.verified !== undefined ? { verified: input.verified } : {}),
       },
       roleSelection?.ids,
     );
@@ -233,6 +245,8 @@ export function createUserRoutes(host: UsersServerHost) {
     // changing its login identifier.
     if (!self && profile.email !== undefined && !actorIsAdmin) return forbidden(context);
     if (roles !== undefined && !actorIsAdmin) return forbidden(context);
+    // Vouching for an account is the edit rule's to give, never the account's own.
+    if (profile.verified !== undefined && !host.allows(sessionUser.id, host.access.manage('edit'))) return forbidden(context);
 
     const roleSelection = roles === undefined ? undefined : resolveRoleIds(host, roles);
     if (roleSelection && roleSelection.unknown.length > 0) {

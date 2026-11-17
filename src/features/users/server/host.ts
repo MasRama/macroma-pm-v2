@@ -3,7 +3,7 @@
 // Each promise below is part of the contract, not a hint: `describeUsersHost`
 // (tests/host-conformance.ts) checks a provider keeps them, so Users relies
 // on nothing about the provider that is not written here.
-import type { UserProfile, USERS_ACTIVITY, UsersAccess } from '../contract';
+import type { UserProfile, USERS_ACTIVITY, UsersAccess, UsersFilter } from '../contract';
 import type { AccessRule } from '../../../shared/security/access';
 import type { ReportedActivity } from '../../../shared/security/activity';
 import type { AssetStorage } from '../../../shared/storage';
@@ -25,12 +25,16 @@ export interface UsersAccountCreateInput {
   name: string;
   email: string;
   passwordHash: string;
+  phone?: string | null;
+  verified?: boolean;
 }
 
 export interface UsersAccountUpdateInput {
   name?: string;
   email?: string;
   avatar?: string | null;
+  phone?: string | null;
+  verified?: boolean;
 }
 
 export interface UsersAccountUpdateOptions {
@@ -64,8 +68,11 @@ export interface UsersIdentityHost {
   /** Never returns the password itself; the provider later verifies the password against it at sign-in. */
   hashPassword(password: string): Promise<string>;
   findAccountById(userId: string): UserProfile | undefined;
-  /** `page` from 1; `search` matches name or email; `total` counts every match, not just this page. */
-  listAccounts(page: number, limit: number, search?: string): { data: UserProfile[]; total: number };
+  /**
+   * `page` from 1; `search` matches name or email; `filter` keeps verified or
+   * unverified accounts only; `total` counts every match, not just this page.
+   */
+  listAccounts(page: number, limit: number, search?: string, filter?: UsersFilter): { data: UserProfile[]; total: number };
   /** With `roleIds`, the account holds exactly those roles. */
   createAccount(input: UsersAccountCreateInput, roleIds?: string[]): UsersAccountCreate;
   /** With `roleIds`, the account's roles are replaced by exactly those. */

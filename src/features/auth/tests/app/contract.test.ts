@@ -64,6 +64,17 @@ describe('auth web client contract', () => {
     expect(schemas.login.parse(await auth.login({ email, password })).data.twoFactorRequired).toBe(false);
   });
 
+  it('asks for and spends a password reset link in the declared shapes', async () => {
+    const auth = createAuthClient();
+    schemas.message.parse(await auth.forgotPassword({ email: `${randomUUID()}@example.com` }));
+    expect(schemas.error.parse(await auth.forgotPassword({ email: 'not an email' }))).toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    expect(
+      schemas.error.parse(await auth.resetPassword({ token: 'unknown-token', password: 'another long passphrase' })),
+    ).toMatchObject({ code: 'RESET_TOKEN_INVALID' });
+  });
+
   it('changes a password in the declared shapes', async () => {
     const auth = createAuthClient();
     const account = await browser.signUp();

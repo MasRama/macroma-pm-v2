@@ -94,6 +94,37 @@ export function describeUsersHost(provider: string, setup: () => UsersHostFixtur
       expect(host.findAccountById(created.id)).toEqual(created);
     });
 
+    it('keeps the phone and verified fields an account is created and updated with', async () => {
+      const plain = await account();
+      expect(plain).toMatchObject({ phone: null, verified: false });
+
+      const created = host.createAccount({
+        id: randomUUID(),
+        name: 'Phone Holder',
+        email: `${randomUUID()}@example.com`,
+        passwordHash: await host.hashPassword(PASSWORD),
+        phone: '+62 812 0000 0000',
+        verified: true,
+      });
+      if (created.status !== 'created') throw new Error(`Account creation answered ${created.status}`);
+      expect(created.account).toMatchObject({ phone: '+62 812 0000 0000', verified: true });
+
+      const updated = host.updateAccount(created.account.id, { phone: null, verified: false });
+      expect(updated).toMatchObject({ status: 'updated', account: { phone: null, verified: false } });
+      expect(host.findAccountById(created.account.id)).toMatchObject({ phone: null, verified: false });
+    });
+
+    it('lists verified or unverified accounts only when asked', async () => {
+      const marker = randomUUID();
+      const verified = await account({ name: `Filtered ${marker} verified` });
+      host.updateAccount(verified.id, { verified: true });
+      const unverified = await account({ name: `Filtered ${marker} unverified` });
+
+      expect(host.listAccounts(1, 10, marker, 'all').total).toBe(2);
+      expect(host.listAccounts(1, 10, marker, 'verified').data.map((listed) => listed.id)).toEqual([verified.id]);
+      expect(host.listAccounts(1, 10, marker, 'unverified').data.map((listed) => listed.id)).toEqual([unverified.id]);
+    });
+
     it('answers missing for an unknown account', () => {
       expect(host.updateAccount(randomUUID(), { name: 'Nobody' })).toEqual({ status: 'missing' });
     });

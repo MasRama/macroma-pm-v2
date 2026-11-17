@@ -83,6 +83,8 @@ export function createAuthSession(client: AuthClient = createAuthClient()): Auth
     const previousUser = user.value;
     user.value = {
       ...nextUser,
+      phone: 'phone' in nextUser ? nextUser.phone : previousUser?.phone ?? null,
+      verified: 'verified' in nextUser ? nextUser.verified : previousUser?.verified ?? false,
       roles: 'roles' in nextUser ? nextUser.roles : previousUser?.roles ?? [],
       permissions: 'permissions' in nextUser ? nextUser.permissions : previousUser?.permissions ?? [],
       mustChangePassword:

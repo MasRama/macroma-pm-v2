@@ -21,7 +21,7 @@ describe('auth feature', () => {
     const registerResponse = await app.request('/api/auth/register', {
       method: 'POST',
       headers: { ...csrfHeaders(bootstrap), ...json },
-      body: JSON.stringify({ name: 'Ada Lovelace', email, password: 'correct horse battery staple' }),
+      body: JSON.stringify({ name: 'Ada Lovelace', email, password: 'correct horse battery staple', phone: '+44 20 7946 0000' }),
     });
 
     expect(registerResponse.status).toBe(201);
@@ -41,7 +41,7 @@ describe('auth feature', () => {
     expect(meResponse.status).toBe(200);
     await expect(meResponse.json()).resolves.toMatchObject({
       success: true,
-      data: { user: { email, name: 'Ada Lovelace' } },
+      data: { user: { email, name: 'Ada Lovelace', phone: '+44 20 7946 0000', verified: false } },
     });
 
     const logoutState = await issueCsrf(app, sessionCookie);

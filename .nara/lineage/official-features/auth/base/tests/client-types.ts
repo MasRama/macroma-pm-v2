@@ -16,6 +16,8 @@ export async function authRouteTypes(): Promise<void> {
   await auth.login.$post({ json: { username: 'grace', password: 'secret' } });
   // @ts-expect-error a role's permissions are a list of slugs
   await roles.index.$post({ json: { name: 'Editors', slug: 'editors', permissions: 'roles.view' } });
+  // @ts-expect-error a reset needs the token from the emailed link
+  await auth['reset-password'].$post({ json: { password: 'a long new passphrase' } });
   // @ts-expect-error the code is a string
   await auth['two-factor'].enable.$post({ json: { code: 123456 } });
 

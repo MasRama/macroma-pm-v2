@@ -7,6 +7,8 @@ export interface StoredUser {
   email: string;
   password: string;
   avatar: string | null;
+  phone: string | null;
+  verified: number;
   must_change_password: number;
   created_at: number;
   updated_at: number;
@@ -17,18 +19,22 @@ export interface SessionUser {
   name: string;
   email: string;
   avatar: string | null;
+  phone: string | null;
+  verified: number;
   must_change_password: number;
 }
 
+const STORED_USER_COLUMNS = 'id, name, email, password, avatar, phone, verified, must_change_password, created_at, updated_at';
+
 export function findUserByEmail(email: string): StoredUser | undefined {
   return getDatabase()
-    .prepare('SELECT id, name, email, password, avatar, must_change_password, created_at, updated_at FROM users WHERE email = ?')
+    .prepare(`SELECT ${STORED_USER_COLUMNS} FROM users WHERE email = ?`)
     .get(email) as StoredUser | undefined;
 }
 
 export function findUserById(userId: string): StoredUser | undefined {
   return getDatabase()
-    .prepare('SELECT id, name, email, password, avatar, must_change_password, created_at, updated_at FROM users WHERE id = ?')
+    .prepare(`SELECT ${STORED_USER_COLUMNS} FROM users WHERE id = ?`)
     .get(userId) as StoredUser | undefined;
 }
 
@@ -37,14 +43,16 @@ export function createUser(data: {
   name: string;
   email: string;
   password: string;
+  phone?: string | null;
+  verified?: boolean;
 }): StoredUser {
   const now = Date.now();
   getDatabase()
     .prepare(
-      `INSERT INTO users (id, name, email, password, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, name, email, password, phone, verified, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(data.id, data.name, data.email, data.password, now, now);
+    .run(data.id, data.name, data.email, data.password, data.phone ?? null, data.verified ? 1 : 0, now, now);
 
   return findUserByEmail(data.email)!;
 }
@@ -102,7 +110,8 @@ export function createSession(data: {
 export function findUserBySessionId(sessionId: string): (SessionUser & { session_last_seen_at: number | null }) | undefined {
   return getDatabase()
     .prepare(
-      `SELECT u.id, u.name, u.email, u.avatar, u.must_change_password, s.last_seen_at AS session_last_seen_at
+      `SELECT u.id, u.name, u.email, u.avatar, u.phone, u.verified, u.must_change_password,
+              s.last_seen_at AS session_last_seen_at
        FROM users u
        INNER JOIN sessions s ON s.user_id = u.id
        WHERE s.id = ? AND s.expires_at > ?`,
@@ -156,7 +165,8 @@ export function cleanupExpiredSessions(now: number = Date.now()): number {
     .prepare('DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at <= ?')
     .run(now);
   const challenges = database.prepare('DELETE FROM two_factor_challenges WHERE expires_at <= ?').run(now);
-  return Number(sessions.changes) + Number(challenges.changes);
+  const resets = database.prepare('DELETE FROM password_reset_tokens WHERE expires_at <= ?').run(now);
+  return Number(sessions.changes) + Number(challenges.changes) + Number(resets.changes);
 }
 
 export interface TwoFactorState {
@@ -303,4 +313,41 @@ export function recordChallengeFailure(id: string): number {
 
 export function deleteTwoFactorChallenge(id: string): void {
   getDatabase().prepare('DELETE FROM two_factor_challenges WHERE id = ?').run(id);
+}
+
+/** Issues a reset token for the account, replacing any it still had. */
+export function createPasswordResetToken(data: { id: string; userId: string; tokenHash: string; expiresAt: number }): void {
+  const database = getDatabase();
+  database.transaction(() => {
+    database.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(data.userId);
+    database
+      .prepare(
+        `INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, used_at, created_at)
+         VALUES (?, ?, ?, ?, NULL, ?)`,
+      )
+      .run(data.id, data.userId, data.tokenHash, data.expiresAt, Date.now());
+  })();
+}
+
+/**
+ * Spends an unused, unexpired reset token: sets the password, marks the token
+ * used, and ends every session of the account, all at once. Answers the
+ * account id, or undefined when the token does not work.
+ */
+export function redeemPasswordResetToken(tokenHash: string, passwordHash: string, now: number = Date.now()): string | undefined {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const token = database
+      .prepare('SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?')
+      .get(tokenHash, now) as { id: string; user_id: string } | undefined;
+    if (!token) return undefined;
+    const updated = database
+      .prepare('UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+      .run(passwordHash, now, token.user_id);
+    if (updated.changes === 0) return undefined;
+    database.prepare('UPDATE password_reset_tokens SET used_at = ? WHERE id = ?').run(now, token.id);
+    database.prepare('DELETE FROM password_reset_tokens WHERE user_id = ? AND id <> ?').run(token.user_id, token.id);
+    database.prepare('DELETE FROM sessions WHERE user_id = ?').run(token.user_id);
+    return token.user_id;
+  })();
 }
