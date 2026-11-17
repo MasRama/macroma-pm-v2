@@ -86,6 +86,7 @@ covers migrations, backups and restores.
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md): the architecture rules
 - [`docs/feature-model.md`](./docs/feature-model.md): feature ownership and boundaries
+- [`docs/macroma-api.md`](./docs/macroma-api.md): the Macroma API per screen, changes from V1, importing V1 data
 - [`docs/auth.md`](./docs/auth.md): sign-in, roles and limits
 - [`docs/cli.md`](./docs/cli.md): the `nara` CLI
 - [`docs/deployment.md`](./docs/deployment.md): production behind Caddy or nginx

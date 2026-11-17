@@ -82,6 +82,7 @@ Database-backed routes need migrations first: `npm run migrate` (`seed`, `db:che
 - [`docs/cli.md`](./docs/cli.md) — CLI and JSON reference
 - [`docs/database-lifecycle.md`](./docs/database-lifecycle.md) — SQLite lifecycle, scheduled backups, restore
 - [`docs/deployment.md`](./docs/deployment.md) — production behind a reverse proxy
+- [`docs/macroma-api.md`](./docs/macroma-api.md) — Macroma API reference per screen, V1 changes, V1 import
 - [`docs/auth.md`](./docs/auth.md) — registration policy, `declareRoles`, app-owned auth pages, limits
 - [`SECURITY.md`](./SECURITY.md) — security reporting and model notes
 
