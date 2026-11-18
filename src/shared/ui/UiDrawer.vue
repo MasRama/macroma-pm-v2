@@ -12,7 +12,7 @@ useEscape(toRef(props, 'open'), () => emit('close'));
   <Teleport to="body">
     <div v-if="open" class="drawer-layer">
       <div class="drawer-layer__dim" @click="emit('close')" />
-      <aside class="drawer" role="dialog" aria-modal="true" :aria-label="label" :style="{ width: `${width}px` }">
+      <aside class="drawer" role="dialog" aria-modal="true" :aria-label="label" :style="{ '--drawer-w': `${width}px` }">
         <slot />
       </aside>
     </div>
@@ -35,11 +35,20 @@ useEscape(toRef(props, 'open'), () => emit('close'));
   top: 0;
   right: 0;
   bottom: 0;
+  width: var(--drawer-w);
   max-width: 100vw;
   display: flex;
   flex-direction: column;
   background: var(--bg);
   border-left: 1.5px solid var(--ink);
   box-shadow: var(--shadow-drawer);
+}
+/* Phones: the drawer takes the whole screen, with no strip of the page and no side border beside it. */
+@media (max-width: 600px) {
+  .drawer {
+    width: 100%;
+    border-left: 0;
+    box-shadow: none;
+  }
 }
 </style>

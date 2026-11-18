@@ -623,6 +623,54 @@ describe('workspaces and chat in the open tab', () => {
     expect(container.querySelector('.me__text')?.textContent).toContain('Owner');
   });
 
+  it('lists only the selected workspace\'s projects in the sidebar and swaps them on a switch', async () => {
+    const owner = await register('Ren Owner');
+    const studio = await createWorkspace(owner, 'Wajom Studio');
+    const labs = await createWorkspace(owner, 'Dua Labs');
+    const newProject = async (name: string, workspaceId: string | null): Promise<string> => {
+      expect((await asDevice(owner.cookie, '/api/projects', 'POST', { name, workspace_id: workspaceId })).status).toBe(201);
+      return (getDatabase().prepare('SELECT id FROM projects WHERE name = ?').get(name) as { id: string }).id;
+    };
+    await newProject('Wajom Portal', studio);
+    await newProject('Stoko App', studio);
+    const lab = await newProject('Riset AI', labs);
+    await newProject('Catatan pribadi', null);
+    const sidebar = () => [...container.querySelectorAll('.side .proj__name')].map((node) => node.textContent?.trim()).sort();
+
+    await openTab(owner.cookie, `/workspaces/${studio}`);
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Wajom Studio');
+    expect(sidebar()).toEqual(['Stoko App', 'Wajom Portal']);
+
+    // Switching from the switcher swaps the list right away.
+    await click('.ws');
+    [...document.querySelectorAll<HTMLAnchorElement>('.menu-item')].find((item) => item.textContent?.trim() === 'Dua Labs')!.click();
+    await settle();
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Dua Labs');
+    expect(sidebar()).toEqual(['Riset AI']);
+
+    // A project page keeps the sidebar on that project's workspace.
+    await router.push(`/workspaces/${studio}`);
+    await settle();
+    await router.push(`/projects/${lab}/board`);
+    await settle();
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Dua Labs');
+    expect(sidebar()).toEqual(['Riset AI']);
+
+    // A project made in a workspace on another device shows up in that workspace's list.
+    await newProject('Kurikulum', labs);
+    await settle();
+    expect(sidebar()).toEqual(['Kurikulum', 'Riset AI']);
+  });
+
+  it('shows no projects in the sidebar while no workspace is selected', async () => {
+    const owner = await register('Ren Owner');
+    expect((await asDevice(owner.cookie, '/api/projects', 'POST', { name: 'Catatan pribadi' })).status).toBe(201);
+    await openTab(owner.cookie, '/profile');
+    expect(container.querySelector('.ws__text')?.textContent).toContain('Pilih workspace');
+    expect(container.querySelector('.side .proj__name')).toBeNull();
+    expect(container.querySelector('.side .proj__empty')?.textContent).toBe('Belum ada project.');
+  });
+
   it('creates a workspace from the switcher and lands on it', async () => {
     const owner = await register('Ren Owner');
     await openTab(owner.cookie, '/profile');
