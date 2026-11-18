@@ -60,11 +60,17 @@ function remember(id: string): void {
 }
 
 const workspaces = computed(() => workspaceList.items.value);
-/** The workspace in view: the open workspace page, else the last one used, else the first. */
+/**
+ * The workspace in view: the open workspace page, else the open project's workspace, else the
+ * last one used, else the first.
+ */
 const workspaceInView = computed<string | null>(() => {
   const ids = workspaces.value.map((workspace) => workspace.id);
   const onPage = route.name === 'workspace' ? String(route.params.workspaceId) : null;
   if (onPage && ids.includes(onPage)) return onPage;
+  const projectId = route.params.projectId === undefined ? null : String(route.params.projectId);
+  const ofProject = projectId ? projectList.items.value.find((project) => project.id === projectId)?.workspaceId : null;
+  if (ofProject && ids.includes(ofProject)) return ofProject;
   const last = remembered();
   return last && ids.includes(last) ? last : (ids[0] ?? null);
 });
@@ -80,9 +86,17 @@ watch(
 watch(newWorkspaceOpen, (open) => {
   if (open) newWorkspaceError.value = undefined;
 });
-const projects = computed(() =>
-  projectList.items.value.map((project) => ({ id: project.id, name: project.name, batch: project.batch ?? null })),
-);
+/**
+ * The sidebar lists the projects of the workspace in view only, none while no workspace is
+ * selected. The account's list carries each project's workspace, so a switch needs no refetch.
+ */
+const projects = computed(() => {
+  const workspaceId = currentWorkspaceId.value;
+  if (!workspaceId) return [];
+  return projectList.items.value
+    .filter((project) => project.workspaceId === workspaceId)
+    .map((project) => ({ id: project.id, name: project.name, batch: project.batch ?? null }));
+});
 
 let stopLive: (() => void) | undefined;
 onMounted(() => {
