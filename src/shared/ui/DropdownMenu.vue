@@ -2,11 +2,16 @@
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { useEscape } from './useDismiss';
 
-withDefaults(defineProps<{ width?: number; align?: 'left' | 'right'; padded?: boolean }>(), {
-  width: 290,
-  align: 'right',
-  padded: true,
-});
+withDefaults(
+  defineProps<{
+    width?: number;
+    align?: 'left' | 'right';
+    padded?: boolean;
+    /** On phones (600px and below) the open panel sits over a scrim that closes it, like a sheet. */
+    sheet?: boolean;
+  }>(),
+  { width: 290, align: 'right', padded: true, sheet: false },
+);
 const open = defineModel<boolean>('open', { default: false });
 const root = ref<HTMLElement>();
 
@@ -31,10 +36,11 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointer));
 <template>
   <div ref="root" class="dd">
     <slot name="trigger" :open="open" :toggle="toggle" />
+    <div v-if="open && sheet" class="dd__scrim" @click="close" />
     <div
       v-if="open"
       class="dd__panel"
-      :class="[`dd__panel--${align}`, { 'dd__panel--padded': padded }]"
+      :class="[`dd__panel--${align}`, { 'dd__panel--padded': padded, 'dd__panel--sheet': sheet }]"
       :style="{ width: `${width}px` }"
       role="menu"
     >
@@ -67,5 +73,21 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointer));
 }
 .dd__panel--left {
   left: 0;
+}
+.dd__scrim {
+  display: none;
+}
+@media (max-width: 600px) {
+  .dd__scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    background: var(--dim);
+  }
+  /* Keep the sheet inside the page's 16px side gutter, the same on both sides. */
+  .dd__panel--sheet {
+    max-width: calc(100vw - 32px);
+  }
 }
 </style>

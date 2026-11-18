@@ -49,7 +49,7 @@ const now = computed(() => props.now ?? openedAt.value);
 </script>
 
 <template>
-  <DropdownMenu v-model:open="open" :width="380" :padded="false">
+  <DropdownMenu v-model:open="open" :width="380" :padded="false" sheet>
     <template #trigger="{ toggle }">
       <button
         type="button"
