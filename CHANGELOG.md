@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/MasRama/macroma-pm-v2/compare/v2.0.0...v2.0.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* list only the selected workspace's projects and fit drawers to phones ([#34](https://github.com/MasRama/macroma-pm-v2/issues/34)) ([16521ee](https://github.com/MasRama/macroma-pm-v2/commit/16521eeac5645f9a6eb592c2fa02a2fe0b66013a))
+
 ## 2.0.0 (2026-11-17)
 
 

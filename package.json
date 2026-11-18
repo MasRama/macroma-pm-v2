@@ -1,6 +1,6 @@
 {
   "name": "macroma",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "Macroma: web-based project management with a Kanban board, version control per task and batch release tracking.",
   "license": "MIT",
