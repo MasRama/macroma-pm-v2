@@ -235,6 +235,35 @@ describe('live updates in the open tab', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain('Sesi kamu sudah berakhir');
   });
 
+  it('keeps its page when another tab of this browser changes the password and the renewed cookie lands late', async () => {
+    const account = await register();
+    await openTab(account.cookie, '/security');
+
+    // The other tab shares this cookie. The server ends every stream before
+    // its response sets the renewed session, so this tab asks /me with the
+    // old cookie first and is refused; the renewed cookie lands right after.
+    const otherTab = asDevice(tabCookie, '/api/auth/change-password', 'POST', {
+      current_password: PASSWORD,
+      new_password: 'another horse battery staple',
+    });
+    const tabFetch = globalThis.fetch;
+    let renewal: typeof otherTab | undefined = otherTab;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await tabFetch(input, init);
+      if (renewal && String(input).endsWith('/api/auth/me') && response.status === 401) {
+        tabCookie = (await renewal).cookie;
+        renewal = undefined;
+      }
+      return response;
+    });
+    expect((await otherTab).status).toBe(200);
+    await settle();
+
+    expect(renewal).toBeUndefined();
+    expect(useAuthSession().isAuthenticated.value).toBe(true);
+    expect(router.currentRoute.value.fullPath).toBe('/security');
+  });
+
   it('leaves a page as soon as an administrator takes away the permission it needs', async () => {
     const admin = await register();
     grantRole(admin.id, 'admin');
