@@ -185,6 +185,19 @@ describe('public API bearer pipeline', () => {
     expect((await v1(token)).status).toBe(200);
   });
 
+  it('leaves a session cookie’s pending temporary password to the session routes', async () => {
+    // The session gate would refuse this cookie; the public API answers by the token alone.
+    const holder = await loaded.personas.signUp();
+    const token = await loaded.personas.issueApiToken(holder, 'write');
+    const temporary = await loaded.personas.requirePasswordChange(await loaded.personas.signUp());
+    const gated = await sessionCall(temporary.cookie, 'GET', '/api/auth/tokens');
+    expect([gated.status, gated.body.code]).toEqual([403, 'PASSWORD_CHANGE_REQUIRED']);
+
+    const answer = await v1(token, 'POST', { Cookie: temporary.cookie });
+    expect(answer.status).toBe(200);
+    expect(answer.body.data.account.id).toBe(holder.id);
+  });
+
   it('keeps tokens working after the account changes its password', async () => {
     const persona = await loaded.personas.signUp();
     const token = await loaded.personas.issueApiToken(persona, 'write');
@@ -259,6 +272,30 @@ describe('public API bearer pipeline', () => {
     }
     expectRefusal(await v1(`mcr_${'y'.repeat(43)}`, 'GET', fromOne), 429, 'RATE_LIMITED');
     expectRefusal(await v1(`mcr_${'y'.repeat(43)}`, 'GET', { 'x-test-ip': '203.0.113.8' }), 401, 'TOKEN_INVALID');
+  });
+
+  it('keeps public API traffic out of the browser’s RATE_LIMIT_MAX budget', async () => {
+    const shared = loaded;
+    vi.stubEnv('RATE_LIMIT_MAX', '5');
+    try {
+      loaded = await loadApplication();
+      expect(loaded.env.RATE_LIMIT_MAX).toBe(5);
+      const persona = await loaded.personas.signUp();
+      const token = await loaded.personas.issueApiToken(persona, 'read');
+      loaded.resetSecurityState();
+
+      // Twice the browser budget through the public API, from the same address.
+      for (let request = 0; request < 10; request += 1) expect((await v1(token)).status).toBe(200);
+
+      for (let request = 0; request < 5; request += 1) {
+        expect((await sessionCall(persona.cookie, 'GET', '/api/auth/me')).status).toBe(200);
+      }
+      const spent = await sessionCall(persona.cookie, 'GET', '/api/auth/me');
+      expect([spent.status, spent.body.code]).toEqual([429, 'RATE_LIMITED']);
+    } finally {
+      vi.unstubAllEnvs();
+      loaded = shared;
+    }
   });
 
   it('records when a token was last used, at most once a minute', async () => {
