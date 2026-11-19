@@ -1,8 +1,10 @@
+import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDatabase } from '../../shared/database';
 import { closeEventStreams } from '../../shared/realtime';
 import { publicApiOperations, type PublicApiOperation } from '../openapi';
 import { app, PUBLIC_API_PREFIX, resetSecurityState } from '../server';
+import { csrfHeaders, issueCsrf } from '../../shared/security/tests/helpers';
 import { callApi } from './api';
 import { grantAdmin, issueApiToken, signUp, type Persona } from './personas';
 
@@ -66,7 +68,8 @@ async function joinWorkspace(owner: Persona, workspaceId: string, invitee: Perso
 
 const ids = (items: Array<{ id: string }>) => items.map((item) => item.id);
 
-describe('public API v1 reads', () => {
+// Many sign-ups and requests per case; a wide suite run slows them down.
+describe('public API v1 reads', { timeout: 15_000 }, () => {
   let owner: Persona;
   let teammate: Persona;
   let direct: Persona;
@@ -125,14 +128,16 @@ describe('public API v1 reads', () => {
       vi.setSystemTime(base + index * 1000);
       tasks.push((await created(owner, `/api/projects/${project.id}/tasks`, body)).task);
     }
+    // Comments move their task's `updated_at` too; the second task keeps its place.
+    for (const [index, content] of ['First', 'Second', 'Third'].entries()) {
+      vi.setSystemTime(base + 1500 + index);
+      await created(index === 1 ? teammate : owner, `/api/tasks/${tasks[1].id}/comments`, { content });
+    }
     // The first task changes last: it moves to the end of the sync order.
     vi.setSystemTime(base + 10_000);
     expect((await callApi(owner, 'PATCH', `/api/tasks/${tasks[0].id}/move`, { column_id: 'ongoing' })).status).toBe(200);
     vi.useRealTimers();
-    for (const [index, content] of ['First', 'Second', 'Third'].entries()) {
-      await created(index === 1 ? teammate : owner, `/api/tasks/${tasks[1].id}/comments`, { content });
-    }
-  });
+  }, 15_000);
 
   // The public API's per-token limit would otherwise carry across cases.
   beforeEach(() => resetSecurityState());
@@ -343,7 +348,20 @@ describe('public API v1 reads', () => {
   });
 });
 
-describe('public API v1 sync of changes nobody edited', () => {
+type SyncedTask = { id: string; batch_id: string | null; assignee: unknown; revision: number; comment_count: number; attachment_count: number };
+
+/** `changedBy(change)`: a sync point after everything written so far, and what changed since it once `change` ran. */
+function syncOf(token: string, projectId: string) {
+  return async function changedBy(change: () => Promise<{ status: number }>): Promise<SyncedTask[]> {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const since = Date.now();
+    expect((await v1(token, `/projects/${projectId}/tasks?updated_since=${since}`)).body.data.tasks).toEqual([]);
+    expect([200, 201]).toContain((await change()).status);
+    return (await v1(token, `/projects/${projectId}/tasks?updated_since=${since}`)).body.data.tasks;
+  };
+}
+
+describe('public API v1 sync of changes nobody edited', { timeout: 15_000 }, () => {
   it('lists the tasks a batch adopted, a lost member and a deleted account changed, as new revisions', async () => {
     resetSecurityState();
     const owner = await signUp('Sync Owner');
@@ -359,21 +377,7 @@ describe('public API v1 sync of changes nobody edited', () => {
     const { task: left } = await created(owner, tasksPath, { title: 'Left behind', assignee_id: leaving.id });
     const { task: orphaned } = await created(owner, tasksPath, { title: 'Orphaned', assignee_id: deleted.id });
     const { task: adopted } = await created(owner, tasksPath, { title: 'Adopted' });
-    const token = await issueApiToken(owner, 'read');
-
-    /** A sync point after everything written so far, and what changed since it once `change` ran. */
-    async function changedBy(change: () => Promise<{ status: number }>) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
-      const since = Date.now();
-      expect((await v1(token, `/projects/${project.id}/tasks?updated_since=${since}`)).body.data.tasks).toEqual([]);
-      expect([200, 201]).toContain((await change()).status);
-      return (await v1(token, `/projects/${project.id}/tasks?updated_since=${since}`)).body.data.tasks as Array<{
-        id: string;
-        batch_id: string | null;
-        assignee: unknown;
-        revision: number;
-      }>;
-    }
+    const changedBy = syncOf(await issueApiToken(owner, 'read'), project.id);
 
     // The project's first active batch adopts its batch-less tasks.
     const intoBatch = await changedBy(() => callApi(owner, 'POST', `/api/projects/${project.id}/batches`, { activate: true }));
@@ -387,5 +391,50 @@ describe('public API v1 sync of changes nobody edited', () => {
     // A deleted account comes off every task it was assigned.
     const afterDeletion = await changedBy(() => callApi(admin, 'DELETE', '/api/users', { ids: [deleted.id] }));
     expect(afterDeletion).toMatchObject([{ id: orphaned.id, assignee: null, revision: 3 }]);
+  });
+
+  it('lists a task whose comments or images changed, at the same revision', async () => {
+    resetSecurityState();
+    const owner = await signUp('Counts Owner');
+    const { project } = await created(owner, '/api/projects', { name: 'Counts' });
+    const { task } = await created(owner, `/api/projects/${project.id}/tasks`, { title: 'Talked about' });
+    const writeToken = await issueApiToken(owner, 'write');
+    const changedBy = syncOf(await issueApiToken(owner, 'read'), project.id);
+    const counted = (comments: number, images: number) => [
+      { id: task.id, revision: task.revision, comment_count: comments, attachment_count: images },
+    ];
+
+    let commentId = '';
+    const commented = await changedBy(async () => {
+      const answer = await callApi(owner, 'POST', `/api/tasks/${task.id}/comments`, { content: 'On the board' });
+      commentId = answer.body.data.comment.id;
+      return answer;
+    });
+    expect(commented).toMatchObject(counted(1, 0));
+    const commentedByApi = await changedBy(async () =>
+      app.request(`${PUBLIC_API_PREFIX}/tasks/${task.id}/comments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${writeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Through the API' }),
+      }),
+    );
+    expect(commentedByApi).toMatchObject(counted(2, 0));
+    expect(await changedBy(() => callApi(owner, 'DELETE', `/api/tasks/${task.id}/comments/${commentId}`))).toMatchObject(counted(1, 0));
+
+    let attachmentId = '';
+    const withImage = await changedBy(async () => {
+      const form = new FormData();
+      const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer();
+      form.append('files', new File([new Uint8Array(image)], 'shot.png', { type: 'image/png' }), 'shot.png');
+      const response = await app.request(`/api/task-attachments?task_id=${task.id}`, {
+        method: 'POST',
+        headers: csrfHeaders(await issueCsrf(app, owner.cookie)),
+        body: form,
+      });
+      attachmentId = ((await response.json()) as any).data.attachments[0].id;
+      return response;
+    });
+    expect(withImage).toMatchObject(counted(1, 1));
+    expect(await changedBy(() => callApi(owner, 'DELETE', `/api/tasks/${task.id}/attachments/${attachmentId}`))).toMatchObject(counted(1, 0));
   });
 });

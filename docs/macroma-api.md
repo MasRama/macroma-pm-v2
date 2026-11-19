@@ -658,6 +658,9 @@ moment; it is inclusive, so a change in the same millisecond as the last sync
 is not missed. To sync, page through with `cursor`, remember the largest
 `updated_at` seen, and next time start with `updated_since` set to it. A task
 that changes while you page moves to the end and comes again on a later page.
+Adding or removing a comment or an image also moves the task's `updated_at`,
+so its `comment_count` and `attachment_count` sync too; it does not change
+`revision`, so an edit based on the task's last revision still applies.
 A deleted task leaves the list; `GET …/tasks/deleted` names it instead, with
 its `id` and `deleted_at`, ordered by `deleted_at`, then `id`. It pages the
 same way, and `since` (epoch ms, inclusive) keeps only the deletions at or
