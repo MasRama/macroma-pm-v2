@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import {
+  accountHasPassword,
   AUTH_TOKENS_CHANGED_EVENT,
   authFieldTexts,
   authRefusalText,
@@ -9,6 +10,7 @@ import {
   type ApiTokenScope,
   type ApiTokenView,
   type SecurityClient,
+  useAuthSession,
 } from '../../features/auth/web';
 import { onServerEvent } from '../../shared/realtime/browser';
 import { ConfirmDialog, formatAgoLong, PageHead, SegmentedControl, SelectField, ShellTopBar, TextField, TopCrumb, UiButton, UiIcon } from '../../shared/ui';
@@ -16,12 +18,27 @@ import { ConfirmDialog, formatAgoLong, PageHead, SegmentedControl, SelectField, 
 /**
  * Token API: personal access tokens for the public API. The secret of a new
  * token is shown once, right after it is made, and never again; the list
- * shows each token by name and prefix only.
+ * shows each token by name and prefix only. Creating one asks for the
+ * current password; an account without one (made through Google) instead
+ * must have signed in within the last few minutes, or is asked to sign in
+ * again.
  */
 type TokensClient = Pick<SecurityClient, 'listTokens' | 'createToken' | 'revokeToken' | 'revokeAllTokens'>;
 
-const props = defineProps<{ client?: TokensClient }>();
+const props = withDefaults(
+  defineProps<{
+    client?: TokensClient;
+    /** Overrides what the session says (`hasPassword` from GET /api/auth/me). */
+    hasPassword?: boolean;
+    /** Ends the session and opens the sign-in page, back here afterwards. */
+    signInAgain?: () => Promise<void>;
+  }>(),
+  // An explicit undefined default stops Vue casting a missing boolean prop to false.
+  { client: undefined, hasPassword: undefined, signInAgain: undefined },
+);
 const client: TokensClient = props.client ?? createSecurityClient();
+const authSession = useAuthSession();
+const hasPassword = computed(() => props.hasPassword ?? accountHasPassword(authSession.user.value));
 
 const EXPIRY_OPTIONS = [
   { value: '7', label: '7 hari' },
@@ -41,6 +58,8 @@ const SCOPE_HINT: Record<ApiTokenScope, string> = {
   write: 'Melihat sekaligus membuat dan mengubah data.',
 };
 const NAME_TEXT = 'Nama token wajib diisi, maksimal 80 karakter.';
+const PASSWORD_REQUIRED_TEXT = 'Masukkan password kamu saat ini.';
+const PASSWORD_WRONG_TEXT = 'Password salah.';
 const NEVER_EXPIRES_WARNING = 'Token ini aktif terus sampai kamu mencabutnya. Pilih ini hanya kalau memang perlu.';
 
 const tokens = ref<ApiTokenView[]>([]);
@@ -48,11 +67,15 @@ const loading = ref(true);
 const loadError = ref('');
 
 const name = ref('');
+const password = ref('');
 const expiry = ref('90');
 const scope = ref<string>('read');
 const createBusy = ref(false);
 const createError = ref('');
 const fieldErrors = ref<Record<string, string>>({});
+/** 403 REAUTH_REQUIRED: the create error offers signing in again. */
+const reauthNeeded = ref(false);
+const signingIn = ref(false);
 
 /** The new token's secret: only in this page's memory, gone once closed. */
 const created = ref<{ name: string; secret: string } | null>(null);
@@ -103,9 +126,13 @@ async function load(): Promise<void> {
 async function createToken(): Promise<void> {
   createError.value = '';
   fieldErrors.value = {};
+  reauthNeeded.value = false;
   const trimmed = name.value.trim();
-  if (!trimmed || trimmed.length > 80) {
-    fieldErrors.value = { name: NAME_TEXT };
+  const errors: Record<string, string> = {};
+  if (!trimmed || trimmed.length > 80) errors.name = NAME_TEXT;
+  if (hasPassword.value && !password.value) errors.password = PASSWORD_REQUIRED_TEXT;
+  if (Object.keys(errors).length) {
+    fieldErrors.value = errors;
     return;
   }
 
@@ -115,8 +142,15 @@ async function createToken(): Promise<void> {
       name: trimmed,
       scope: scope.value as ApiTokenScope,
       expiresInDays: expiry.value === 'never' ? null : Number(expiry.value),
+      // Only an account with a password confirms with it; the API ignores the field otherwise.
+      ...(hasPassword.value ? { password: password.value } : {}),
     });
     if (!response.success) {
+      if (response.code === 'INVALID_PASSWORD') {
+        fieldErrors.value = { password: PASSWORD_WRONG_TEXT };
+        return;
+      }
+      if (response.code === 'REAUTH_REQUIRED') reauthNeeded.value = true;
       const texts = authFieldTexts(response.errors);
       fieldErrors.value = { ...texts, ...(texts.name ? { name: NAME_TEXT } : {}) };
       createError.value = authRefusalText(response.code);
@@ -129,6 +163,7 @@ async function createToken(): Promise<void> {
     copyError.value = '';
     listNotice.value = '';
     name.value = '';
+    password.value = '';
   } catch (error) {
     console.error(error);
     createError.value = 'Token belum bisa dibuat.';
@@ -151,8 +186,29 @@ async function copySecret(): Promise<void> {
 
 function closeSecret(): void {
   created.value = null;
+  password.value = '';
   copied.value = false;
   copyError.value = '';
+}
+
+async function defaultSignInAgain(): Promise<void> {
+  const response = await authSession.logout();
+  if (!response.success) throw new Error(response.message);
+  window.location.assign(`/login?redirect=${encodeURIComponent('/settings/tokens')}`);
+}
+
+async function signInAgain(): Promise<void> {
+  if (signingIn.value) return;
+  signingIn.value = true;
+  try {
+    await (props.signInAgain ?? defaultSignInAgain)();
+  } catch (error) {
+    console.error(error);
+    createError.value = 'Belum bisa keluar. Coba lagi.';
+    reauthNeeded.value = false;
+  } finally {
+    signingIn.value = false;
+  }
 }
 
 async function revokeOne(): Promise<void> {
@@ -240,7 +296,12 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
         <section class="panel tokens__card" aria-labelledby="tokens-new">
           <h2 id="tokens-new" class="h2 tokens__h">Buat token</h2>
           <form class="tokens__form" data-testid="token-form" novalidate @submit.prevent="createToken">
-            <p v-if="createError" role="alert" class="tokens__err">{{ createError }}</p>
+            <p v-if="createError" role="alert" class="tokens__err" data-testid="create-error">
+              {{ createError }}
+              <button v-if="reauthNeeded" type="button" class="link tokens__reauth" data-testid="sign-in-again" :disabled="signingIn" @click="signInAgain">
+                Masuk ulang
+              </button>
+            </p>
             <TextField
               id="token-name"
               v-model="name"
@@ -261,6 +322,16 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
               <p v-if="fieldErrors.scope" class="tokens__err">{{ fieldErrors.scope }}</p>
               <p v-else class="tokens__hint">{{ scopeHint }}</p>
             </div>
+            <TextField
+              v-if="hasPassword"
+              id="token-password"
+              v-model="password"
+              type="password"
+              label="Password saat ini"
+              autocomplete="current-password"
+              hint="Konfirmasi bahwa ini memang kamu."
+              :error="fieldErrors.password"
+            />
             <div class="tokens__foot">
               <UiButton variant="primary" type="submit" :disabled="createBusy">{{ createBusy ? 'Membuat…' : 'Buat token' }}</UiButton>
             </div>
@@ -388,6 +459,10 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
   margin: 6px 0 0;
   font-size: 12.5px;
   color: var(--mute);
+}
+.tokens__reauth {
+  margin-left: 4px;
+  font-size: 12.5px;
 }
 .tokens__foot {
   display: flex;

@@ -137,7 +137,10 @@ revoke tokens. The web client is `createSecurityClient()` from
 (`/settings/tokens`, `src/app/pages/TokensPage.vue`), linked from Profil and
 the key button next to Keluar in the sidebar; it renders rows through
 `toApiTokenView` (`src/features/auth/web/view.ts`). Expiry defaults to 90 days; "Tidak pernah"
-(`expiresInDays: null`) is the last option and shows a warning when picked.
+(`expiresInDays: null`) is the last option and shows a warning when picked. The
+form asks for "Password saat ini" (sent as `password`) unless `GET /api/auth/me`
+says `hasPassword: false`; `REAUTH_REQUIRED` offers "Masuk ulang", which signs
+out and opens `/login?redirect=/settings/tokens`.
 
 | Method and path | Access | Body | `data` |
 |---|---|---|---|

@@ -46,6 +46,7 @@ const SCREENS = [
     'tokens-secret',
     async (page) => {
       await page.getByLabel('Nama token').fill('Integrasi Slack');
+      await page.getByLabel('Password saat ini').fill('correct horse battery staple');
       await page.getByRole('button', { name: 'Buat token' }).click();
       await page.getByTestId('new-secret').waitFor();
     },
@@ -53,6 +54,17 @@ const SCREENS = [
   ['tokens-revoke', (page) => page.getByTestId('token-row').first().getByRole('button', { name: 'Cabut' }).click()],
   // Empty list, with Tidak pernah picked so its warning line shows.
   ['tokens-empty', (page) => page.locator('#token-expiry').selectOption('never')],
+  // An account made through Google: no password field.
+  ['tokens-nopass'],
+  // That account signed in too long ago: the API asks it to sign in again.
+  [
+    'tokens-reauth',
+    async (page) => {
+      await page.getByLabel('Nama token').fill('Integrasi Google');
+      await page.getByRole('button', { name: 'Buat token' }).click();
+      await page.getByTestId('sign-in-again').waitFor();
+    },
+  ],
   ['users'],
   ['users-edit', (page) => page.locator('[data-testid^="edit-user-"]').nth(1).click()],
   ['not-found'],
@@ -127,10 +139,14 @@ const json = (data) => (route) => route.fulfill({ json: { success: true, message
     }
     if (screen.startsWith('tokens')) {
       const list = screen === 'tokens-empty' ? [] : screen === 'tokens-secret' ? TOKENS.slice(1) : TOKENS;
+      const googleOnly = screen === 'tokens-nopass' || screen === 'tokens-reauth';
+      await page.route('**/api/auth/me', json({ user: { ...ADMIN, roles: [], hasPassword: !googleOnly } }));
       await page.route('**/api/auth/tokens', (route) =>
-        route.request().method() === 'POST'
-          ? route.fulfill({ status: 201, json: { success: true, message: 'Token created', data: { token: NEW_TOKEN, secret: NEW_SECRET } } })
-          : json({ tokens: list })(route),
+        route.request().method() !== 'POST'
+          ? json({ tokens: list })(route)
+          : screen === 'tokens-reauth'
+            ? route.fulfill({ status: 403, json: { success: false, message: 'Sign in again to create a token', code: 'REAUTH_REQUIRED' } })
+            : route.fulfill({ status: 201, json: { success: true, message: 'Token created', data: { token: NEW_TOKEN, secret: NEW_SECRET } } }),
       );
     }
     const errors = [];

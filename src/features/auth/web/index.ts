@@ -25,7 +25,7 @@ export {
 } from './csrf';
 export { createAccessClient, type AccessClient } from './access-client';
 export { createSecurityClient, type SecurityClient } from './security-client';
-export { toApiTokenView, type ApiTokenView } from './view';
+export { accountHasPassword, toApiTokenView, type ApiTokenView } from './view';
 export type {
   ApiTokenData,
   ApiTokenScope,

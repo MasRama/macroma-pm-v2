@@ -24,6 +24,8 @@ export const SCREENS = [
   'tokens-secret',
   'tokens-revoke',
   'tokens-empty',
+  'tokens-nopass',
+  'tokens-reauth',
   'users',
   'users-edit',
   'not-found',
@@ -63,6 +65,8 @@ export function pathFor(screen: Screen): string {
     case 'tokens-secret':
     case 'tokens-revoke':
     case 'tokens-empty':
+    case 'tokens-nopass':
+    case 'tokens-reauth':
       return '/settings/tokens';
     case 'users':
     case 'users-edit':

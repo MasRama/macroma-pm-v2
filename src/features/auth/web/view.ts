@@ -35,3 +35,12 @@ export function toApiTokenView(row: ApiTokenData): ApiTokenView {
     expired: row.expired,
   };
 }
+
+/**
+ * Whether the signed-in account confirms new tokens with its password. Only
+ * an explicit `hasPassword: false` (an account made through Google) hides the
+ * field; a session that does not say keeps it, and the server decides.
+ */
+export function accountHasPassword(user: { hasPassword?: boolean } | null | undefined): boolean {
+  return user?.hasPassword !== false;
+}

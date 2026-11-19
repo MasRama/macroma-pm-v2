@@ -2,7 +2,7 @@
 import { createApp, nextTick, type App } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TokensPage from '../pages/TokensPage.vue';
-import { AUTH_TOKENS_CHANGED_EVENT, type ApiTokenData, type SecurityClient } from '../../features/auth/web';
+import { accountHasPassword, AUTH_TOKENS_CHANGED_EVENT, type ApiTokenData, type SecurityClient } from '../../features/auth/web';
 import { connectServerEvents, disconnectServerEvents } from '../../shared/realtime/browser';
 
 /**
@@ -58,12 +58,12 @@ async function settle(): Promise<void> {
   }
 }
 
-async function mount(client: TokensClient): Promise<HTMLElement> {
+async function mount(client: TokensClient, props: { hasPassword?: boolean; signInAgain?: () => Promise<void> } = {}): Promise<HTMLElement> {
   const topbar = document.createElement('div');
   topbar.id = 'shell-topbar';
   host = document.createElement('div');
   document.body.append(topbar, host);
-  app = createApp(TokensPage, { client });
+  app = createApp(TokensPage, { client, ...props });
   app.mount(host);
   await settle();
   return host;
@@ -78,8 +78,15 @@ function button(label: string, within: ParentNode = document): HTMLButtonElement
   if (!found) throw new Error(`No button "${label}"`);
   return found;
 }
+const PASSWORD = 'correct horse battery staple';
 async function typeName(value: string): Promise<void> {
-  const input = document.querySelector<HTMLInputElement>('#token-name')!;
+  await type('#token-name', value);
+}
+async function typePassword(value = PASSWORD): Promise<void> {
+  await type('#token-password', value);
+}
+async function type(selector: string, value: string): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>(selector)!;
   input.value = value;
   input.dispatchEvent(new Event('input'));
   await nextTick();
@@ -151,6 +158,7 @@ describe('creating a token', () => {
     await mount(client);
 
     await typeName('  Integrasi Slack ');
+    await typePassword();
     const expiry = document.querySelector<HTMLSelectElement>('#token-expiry')!;
     expect([...expiry.options].at(-1)?.textContent?.trim()).toBe('Tidak pernah');
     expect(byTestId('never-expires-warning')).toBeNull();
@@ -161,12 +169,13 @@ describe('creating a token', () => {
     button('Baca + tulis').click();
     await submit();
 
-    expect(client.createToken).toHaveBeenCalledWith({ name: 'Integrasi Slack', scope: 'write', expiresInDays: null });
+    expect(client.createToken).toHaveBeenCalledWith({ name: 'Integrasi Slack', scope: 'write', expiresInDays: null, password: PASSWORD });
     expect(byTestId('secret-value')?.textContent).toBe(SECRET);
     expect(byTestId('new-secret')?.textContent).toContain('tidak bisa dilihat lagi');
     expect(rows()[0]!.dataset.tokenId).toBe('k9');
     expect(rows()[0]!.textContent).not.toContain(SECRET);
     expect((document.querySelector<HTMLInputElement>('#token-name')!).value).toBe('');
+    expect((document.querySelector<HTMLInputElement>('#token-password')!).value).toBe('');
 
     byTestId('copy-secret')!.click();
     await settle();
@@ -186,9 +195,10 @@ describe('creating a token', () => {
     expect(byTestId('never-expires-warning')).toBeNull();
 
     await typeName('Zapier');
+    await typePassword();
     await submit();
 
-    expect(client.createToken).toHaveBeenCalledWith({ name: 'Zapier', scope: 'read', expiresInDays: 90 });
+    expect(client.createToken).toHaveBeenCalledWith({ name: 'Zapier', scope: 'read', expiresInDays: 90, password: PASSWORD });
   });
 
   it('asks for a name before calling the API', async () => {
@@ -208,6 +218,7 @@ describe('creating a token', () => {
     await mount(client);
 
     await typeName('Satu lagi');
+    await typePassword();
     await submit();
 
     expect(text()).toContain('Token API kamu sudah mencapai batas. Cabut salah satu dulu.');
@@ -222,11 +233,105 @@ describe('creating a token', () => {
     await mount(client);
 
     await typeName('Nama');
+    await typePassword();
     await submit();
 
     expect(text()).toContain('Ada isian yang belum pas. Cek lagi ya.');
     expect(text()).toContain('Nama token wajib diisi, maksimal 80 karakter.');
     expect(text()).toContain('Masa berlaku 1–365 hari, atau tanpa batas.');
+  });
+});
+
+describe('confirming who creates a token', () => {
+  it('shows the current-password field unless the session says the account has no password', async () => {
+    expect(accountHasPassword({ hasPassword: false })).toBe(false);
+    expect(accountHasPassword({ hasPassword: true })).toBe(true);
+    expect(accountHasPassword({})).toBe(true);
+    expect(accountHasPassword(null)).toBe(true);
+
+    await mount(fakeClient());
+    const field = document.querySelector<HTMLInputElement>('#token-password')!;
+    expect(field.type).toBe('password');
+    expect(field.autocomplete).toBe('current-password');
+    expect(document.querySelector('label[for="token-password"]')?.textContent).toBe('Password saat ini');
+  });
+
+  it('hides the field and sends no password for an account without one', async () => {
+    const client = fakeClient();
+    await mount(client, { hasPassword: false });
+
+    expect(document.querySelector('#token-password')).toBeNull();
+    await typeName('Integrasi Google');
+    await submit();
+
+    expect(client.createToken).toHaveBeenCalledWith({ name: 'Integrasi Google', scope: 'read', expiresInDays: 90 });
+  });
+
+  it('asks for the current password before calling the API', async () => {
+    const client = fakeClient();
+    await mount(client);
+
+    await typeName('Zapier');
+    await submit();
+
+    expect(client.createToken).not.toHaveBeenCalled();
+    expect(text()).toContain('Masukkan password kamu saat ini.');
+  });
+
+  it('says Password salah. on the field on 400 INVALID_PASSWORD', async () => {
+    const client = fakeClient();
+    client.createToken.mockResolvedValueOnce(refusal('INVALID_PASSWORD'));
+    await mount(client);
+
+    await typeName('Zapier');
+    await typePassword('wrong one');
+    await submit();
+
+    expect(document.querySelector('#token-password-error')?.textContent).toBe('Password salah.');
+    expect(byTestId('create-error')).toBeNull();
+    expect(byTestId('new-secret')).toBeNull();
+  });
+
+  it('words a refused password field on 422 VALIDATION_ERROR', async () => {
+    const client = fakeClient();
+    client.createToken.mockResolvedValueOnce(refusal('VALIDATION_ERROR', { password: ['Password is required'] }));
+    await mount(client);
+
+    await typeName('Zapier');
+    await typePassword();
+    await submit();
+
+    expect(document.querySelector('#token-password-error')?.textContent).toBe('Password 8–100 karakter.');
+    expect(byTestId('create-error')?.textContent).toContain('Ada isian yang belum pas. Cek lagi ya.');
+  });
+
+  it('asks to sign in again on 403 REAUTH_REQUIRED and signs out to the login page', async () => {
+    const client = fakeClient();
+    client.createToken.mockResolvedValueOnce(refusal('REAUTH_REQUIRED'));
+    const signInAgain = vi.fn(async () => undefined);
+    await mount(client, { hasPassword: false, signInAgain });
+
+    await typeName('Integrasi Google');
+    await submit();
+
+    expect(byTestId('create-error')?.textContent).toContain('Masuk ulang dulu, lalu buat token');
+    byTestId('sign-in-again')!.click();
+    await settle();
+    expect(signInAgain).toHaveBeenCalledOnce();
+  });
+
+  it('clears the password when the secret is closed', async () => {
+    const client = fakeClient();
+    await mount(client);
+
+    await typeName('Zapier');
+    await typePassword();
+    await submit();
+    await typePassword('typed while the secret was open');
+    byTestId('close-secret')!.click();
+    await settle();
+
+    expect(document.querySelector<HTMLInputElement>('#token-password')!.value).toBe('');
   });
 });
 
