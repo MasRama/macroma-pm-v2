@@ -570,6 +570,83 @@ gets `notifications.changed`. Its `data` (`TaskMovedNotificationData`, schema
 | `actor_id` | string | the account that moved it |
 | `actor_name` | string | that account's name, or its email when the name is empty |
 
+## Public API (v1)
+
+`/api/v1` is the API for outside tools: scripts, Zapier, a server of your own.
+"v1" is the version of this API, not Macroma V1. The browser screens never
+call it; they keep the session routes above. Its OpenAPI 3.1 document is
+`GET /api/v1/openapi.json`, which anyone may read without a token. It is built
+from the operations the Workspaces and Projects contracts declare
+(`workspacesApiV1()`, `projectsApiV1()`), and a test checks it against the
+routes actually mounted, so it lists exactly what the server answers.
+
+- **Authentication.** Send a personal access token (see
+  [API tokens](#api-tokens)) as `Authorization: Bearer mcr_…`. The token acts
+  as the account that made it, with that account's access: the same
+  membership and ownership rules as the screens, and the same 403/404
+  answers. `/api/v1` reads no cookie and sets none, and needs no CSRF token.
+- **Scopes.** A `read` token may only use `GET` (and `HEAD`); anything else
+  answers `403 TOKEN_SCOPE_INSUFFICIENT`. A `write` token may use every
+  method.
+- **Refusals.** The envelope and codes of the [conventions](#conventions)
+  apply, plus the bearer pipeline's own (`API_TOKEN_REFUSAL_CODES`):
+  - `401 TOKEN_INVALID`: no `Authorization` header, not a Bearer token, or a
+    token Macroma does not know. Every 401 carries `WWW-Authenticate: Bearer`.
+  - `401 TOKEN_REVOKED`, `401 TOKEN_EXPIRED`: the token was revoked or ran out.
+    A new password (changed, reset by email or by an administrator) revokes
+    every token of the account.
+  - `403 TOKEN_SCOPE_INSUFFICIENT`: a `read` token tried to change something.
+  - `403 PASSWORD_CHANGE_REQUIRED`: the account must still replace a
+    temporary password.
+- **Rate limit.** `API_RATE_LIMIT_MAX` requests per `API_RATE_LIMIT_WINDOW_MS`
+  per token (120 a minute by default), counted per client address before a
+  token resolves; over it, `429 RATE_LIMITED`.
+- **Caching.** Answers carry `Cache-Control: no-store`; only the OpenAPI
+  document may be cached, for five minutes.
+- **Pagination.** Lists take `limit` (1–100, default 50) and `cursor`, and
+  answer `{ <items>, next_cursor }`. `next_cursor` is `null` on the last page;
+  otherwise send it back as `cursor` for the next one. A cursor is opaque:
+  one the list did not return answers `422 VALIDATION_ERROR` with
+  `errors.cursor`. Pages resume after the last item returned, so items written
+  between requests neither repeat nor go missing.
+- **Shapes.** The same `snake_case` records as the screens' routes above:
+  workspace summaries, project summaries, batches, members, tasks, task detail
+  and comments.
+
+| Method and path | `data` |
+|---|---|
+| `GET /api/v1/workspaces?cursor&limit` | `{ workspaces: WorkspaceSummary[], next_cursor }`: the account's workspaces, newest first |
+| `GET /api/v1/workspaces/:id` | `{ workspace: WorkspaceSummary }` |
+| `GET /api/v1/workspaces/:id/members` | `{ members: { user, role, joined_at }[] }`: the owner first, then by joining |
+| `GET /api/v1/projects?workspace_id&cursor&limit` | `{ projects: ProjectSummary[], next_cursor }`: the projects the account can open, newest first |
+| `GET /api/v1/projects/:id` | `{ project: ProjectSummary, active_batch: Batch \| null }` |
+| `GET /api/v1/projects/:id/columns` | `{ columns: { id, name, position, task_count }[] }`: the five board columns in order (`position` from 0), with the project's task count in each |
+| `GET /api/v1/projects/:id/batches` | `{ batches: Batch[] }`, newest version first |
+| `GET /api/v1/projects/:id/members` | `{ members: { user, role, source }[] }`: direct members, then those who reach the project through its workspace |
+| `GET /api/v1/projects/:id/tasks?batch_id&column_id&assignee_id&updated_since&cursor&limit` | `{ tasks: Task[], next_cursor }` |
+| `GET /api/v1/tasks/:id` | `{ task: TaskDetail }`, as `GET /api/tasks/:id` answers it |
+| `GET /api/v1/tasks/:id/comments?cursor&limit` | `{ comments: Comment[], next_cursor }`, oldest first |
+
+**Syncing tasks.** `GET …/tasks` is ordered by `updated_at`, then `id`, oldest
+first. `updated_since` (epoch ms) keeps only the tasks changed at or after that
+moment; it is inclusive, so a change in the same millisecond as the last sync
+is not missed. To sync, page through with `cursor`, remember the largest
+`updated_at` seen, and next time start with `updated_since` set to it. A task
+that changes while you page moves to the end and comes again on a later page.
+Deleted tasks never appear, so reconcile with a full listing now and then.
+`batch_id` must be a batch of the project (`404 BATCH_NOT_FOUND` otherwise);
+`column_id` is one of `backlog`, `ongoing`, `revisi`, `review`, `done`.
+
+Codes: `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`,
+`TOKEN_SCOPE_INSUFFICIENT`, and the resources' own: `WORKSPACE_NOT_FOUND`,
+`PROJECT_NOT_FOUND`, `BATCH_NOT_FOUND`, `TASK_NOT_FOUND`.
+
+```sh
+# The tasks of a project changed since a moment, 100 per page.
+curl -s "https://macroma.example/api/v1/projects/$PROJECT_ID/tasks?updated_since=1763510400000&limit=100" \
+  -H "Authorization: Bearer $MACROMA_TOKEN"
+```
+
 ## V1 pages → V2 endpoints
 
 | V1 page | V2 calls |

@@ -3,10 +3,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Context, Hono } from 'hono';
 
 /**
- * The public API's bearer pipeline through the composed application. No
- * `/api/v1` route exists yet, so the application is loaded afresh with a
- * throwaway `/api/v1/_probe` router mounted where Feature routers mount, and
- * with the logger captured to prove a secret never reaches it.
+ * The public API's bearer pipeline through the composed application, apart
+ * from any Feature's routes: the application is loaded afresh with a
+ * throwaway `/api/v1/_probe` router that answers every method, mounted where
+ * Feature routers mount, and with the logger captured to prove a secret never
+ * reaches it.
  */
 const logged: string[] = [];
 

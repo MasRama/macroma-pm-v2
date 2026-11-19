@@ -1,6 +1,5 @@
 import { getCookie } from 'hono/cookie';
 import { Hono } from 'hono';
-import type { Context, MiddlewareHandler } from 'hono';
 import {
   addProjectMemberInputSchema,
   boardQuerySchema,
@@ -24,15 +23,11 @@ import {
   type CommentsSuccess,
   type DashboardSuccess,
   type MemberAddedSuccess,
-  type Project,
   type ProjectActivitySuccess,
   type ProjectDetailSuccess,
-  type ProjectMember,
   type ProjectsDone,
   type ProjectSavedSuccess,
-  type ProjectsRefusalCode,
   type ProjectsSuccess,
-  type ProjectSummary,
   type ReleaseDetailSuccess,
   type ReleasesSuccess,
   type TaskDetailSuccess,
@@ -45,28 +40,41 @@ import { getDatabase } from '../../../shared/database';
 import { createGuard, forbidden, jsonInput, queryInput, type RoutePolicy } from '../../../shared/security';
 import {
   activeReleaseView,
+  assignable,
   attachmentView,
-  batchRef,
+  batchesOf,
   batchView,
   canOpenProject,
   changelogView,
   commentView,
   logView,
+  membersOf,
   personRefs,
   projectAudience,
-  projectAudiences,
   closedReleases,
   releaseBatchView,
   releaseStatsView,
   upcomingReleases,
+  summaries,
+  taskDetailView,
   taskView,
   taskViews,
 } from './access';
+import { projectLoader, taskLoader } from './access-loaders';
 import { removeStoredImages, storeImages, uploadedFiles } from './attachments';
 import { dashboardData } from './dashboard';
 import type { ProjectsServerHost } from './host';
 import { announceBoardChange, announceProjectChange, projectsBoardChangedTopic, projectsChangedTopic } from './live';
 import { noticeTaskMoved } from './notices';
+import {
+  assigneeRefused,
+  attachmentNotFound,
+  batchNotFound,
+  commentNotFound,
+  projectNotFound,
+  refuse,
+  taskNotFound,
+} from './refusals';
 import {
   activateBatch,
   activeBatches,
@@ -84,7 +92,6 @@ import {
   deleteProject,
   deleteTask,
   directMemberRole,
-  directMembers,
   findAttachment,
   findBatch,
   findComment,
@@ -92,7 +99,6 @@ import {
   findTask,
   listActivity,
   listAttachments,
-  listBatches,
   listComments,
   listLogs,
   listProjectsFor,
@@ -101,80 +107,14 @@ import {
   moveTask,
   removeProjectMember,
   revisiTaskCount,
-  taskCountsByProject,
   unassignTasks,
   updateProject,
   updateTask,
   type BatchRow,
-  type TaskRow,
 } from './repository';
-
-type Actor = { id: string; name: string; email: string };
-
-function refuse<C extends ProjectsRefusalCode>(context: Context, status: 404 | 409, code: C, message: string) {
-  return context.json({ success: false as const, message, code }, status);
-}
-
-function assigneeRefused(context: Context) {
-  return context.json(
-    {
-      success: false as const,
-      message: 'Validation failed',
-      code: 'VALIDATION_ERROR' as const,
-      errors: { assignee_id: ['The assignee must be able to open the project'] },
-    },
-    422,
-  );
-}
-
-const projectNotFound = (context: Context) => refuse(context, 404, 'PROJECT_NOT_FOUND', 'Project not found');
-const batchNotFound = (context: Context) => refuse(context, 404, 'BATCH_NOT_FOUND', 'Batch not found');
-const taskNotFound = (context: Context) => refuse(context, 404, 'TASK_NOT_FOUND', 'Task not found');
-const commentNotFound = (context: Context) => refuse(context, 404, 'COMMENT_NOT_FOUND', 'Comment not found');
-const attachmentNotFound = (context: Context) => refuse(context, 404, 'ATTACHMENT_NOT_FOUND', 'Attachment not found');
 
 function guardFor(host: ProjectsServerHost) {
   return createGuard((context) => host.resolveActor(getCookie(context, host.sessionCookieName)));
-}
-
-/** Whether the account may be assigned tasks of the project. */
-function assignable(host: ProjectsServerHost, project: Project, userId: string): boolean {
-  return host.findAccountsByIds([userId]).length > 0 && canOpenProject(host, project, userId);
-}
-
-function summaries(host: ProjectsServerHost, projects: readonly Project[], actor: Actor): ProjectSummary[] {
-  const ids = projects.map((project) => project.id);
-  const active = activeBatches(ids);
-  const counts = taskCountsByProject(ids);
-  const audiences = projectAudiences(host, projects);
-  return projects.map((project) => {
-    const batch = active.get(project.id);
-    return {
-      ...project,
-      role: project.owner_id === actor.id ? 'owner' : 'member',
-      active_batch: batch ? batchRef(batch) : null,
-      task_counts: counts.get(project.id) ?? { backlog: 0, ongoing: 0, revisi: 0, review: 0, done: 0 },
-      member_count: audiences.get(project.id)?.size ?? 0,
-    };
-  });
-}
-
-/** Direct members first, in joining order, then the accounts that reach the project through its workspace. */
-function membersOf(host: ProjectsServerHost, project: Project): ProjectMember[] {
-  const direct = directMembers(project.id);
-  const directIds = new Set(direct.map((member) => member.user_id));
-  const viaWorkspace = project.workspace_id ? host.workspaceMemberIds(project.workspace_id).filter((id) => !directIds.has(id)) : [];
-  const accounts = new Map(host.findAccountsByIds([...directIds, ...viaWorkspace]).map((person) => [person.id, person]));
-  const members: ProjectMember[] = [];
-  for (const member of direct) {
-    const user = accounts.get(member.user_id);
-    if (user) members.push({ user, role: member.role, source: 'project' });
-  }
-  for (const userId of viaWorkspace) {
-    const user = accounts.get(userId);
-    if (user) members.push({ user, role: 'member', source: 'workspace' });
-  }
-  return members;
 }
 
 export function createProjectRoutes(host: ProjectsServerHost) {
@@ -183,32 +123,7 @@ export function createProjectRoutes(host: ProjectsServerHost) {
   projectsBoardChangedTopic();
   const guard = guardFor(host);
 
-  /**
-   * Loads the `:id` project ahead of input validation: 404 when it does not
-   * exist, 403 unless the caller can open it (or owns it, for `owner`).
-   */
-  const loaded = new WeakMap<Context, Project>();
-  const projectAccess =
-    (need: 'member' | 'owner'): MiddlewareHandler =>
-    async (context, next) => {
-      const actor = guard.actor(context);
-      const project = findProject(context.req.param('id') ?? '');
-      if (!project) return projectNotFound(context);
-      if (!canOpenProject(host, project, actor.id)) return forbidden(context, 'You cannot open this project');
-      if (need === 'owner' && project.owner_id !== actor.id) return forbidden(context, 'Only the project owner can do this');
-      loaded.set(context, project);
-      await next();
-    };
-  const current = (context: Context): Project => {
-    const project = loaded.get(context);
-    if (!project) throw new Error('Route reads the project without loading it');
-    return project;
-  };
-
-  function batchesOf(projectId: string) {
-    const counts = countsByBatch(projectId);
-    return listBatches(projectId).map((row) => batchView(row, counts.get(row.id)));
-  }
+  const { projectAccess, current } = projectLoader(host, guard.actor);
 
   function savedBatch(row: BatchRow) {
     return batchView(row, countsByBatch(row.project_id).get(row.id));
@@ -483,49 +398,15 @@ export function createProjectRoutes(host: ProjectsServerHost) {
 export function createTaskRoutes(host: ProjectsServerHost) {
   const guard = guardFor(host);
 
-  /**
-   * Loads the `:id` task and its project ahead of input validation: 404 when
-   * the task does not exist, 403 unless the caller can open its project (or
-   * owns it, for `owner`).
-   */
-  const loaded = new WeakMap<Context, { task: TaskRow; project: Project }>();
-  const taskAccess =
-    (need: 'member' | 'owner'): MiddlewareHandler =>
-    async (context, next) => {
-      const actor = guard.actor(context);
-      const task = findTask(context.req.param('id') ?? '');
-      const project = task ? findProject(task.project_id) : undefined;
-      if (!task || !project) return taskNotFound(context);
-      if (!canOpenProject(host, project, actor.id)) return forbidden(context, 'You cannot open this project');
-      if (need === 'owner' && project.owner_id !== actor.id) return forbidden(context, 'Only the project owner can do this');
-      loaded.set(context, { task, project });
-      await next();
-    };
-  const current = (context: Context) => {
-    const found = loaded.get(context);
-    if (!found) throw new Error('Route reads the task without loading it');
-    return found;
-  };
+  const { taskAccess, current } = taskLoader(host, guard.actor);
 
   return new Hono()
     .get('/:id', guard.signedIn, taskAccess('member'), (context) => {
       const { task, project } = current(context);
-      const logs = listLogs(task.id);
-      const creatorId = logs[0]?.created_by ?? null;
-      const people = personRefs(host, [task.assignee_id, creatorId, ...logs.map((log) => log.created_by)]);
-      const batch = task.batch_id ? findBatch(task.batch_id) : undefined;
       return context.json({
         success: true as const,
         message: 'OK',
-        data: {
-          task: {
-            ...taskView(task, people),
-            project: { id: project.id, name: project.name },
-            batch: batch ? batchRef(batch) : null,
-            created_by: creatorId ? (people.get(creatorId) ?? null) : null,
-            logs: logs.map((log) => logView(log, people)),
-          },
-        },
+        data: { task: taskDetailView(host, task, project) },
       } satisfies TaskDetailSuccess);
     })
     .patch('/:id', guard.signedIn, taskAccess('member'), jsonInput(updateTaskInputSchema), (context) => {

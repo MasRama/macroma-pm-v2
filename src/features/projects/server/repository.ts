@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { getDatabase } from '../../../shared/database';
+import type { PageCursor } from '../../../shared/security';
 import {
   PROJECT_ACTIVITY_LIMIT,
+  TASK_COLUMN_NAMES,
   type ColumnCounts,
   type Project,
   type ProjectActivityEvent,
@@ -750,6 +752,43 @@ export function listTasks(projectId: string, batchId?: string): TaskRow[] {
     .all(projectId, ...(batchId === undefined ? [] : [batchId])) as TaskRow[];
 }
 
+/**
+ * The public API's task list: by `updated_at`, then `id`, after `after`, and
+ * `limit + 1` rows so the caller knows whether another page follows.
+ */
+export function pageTasks(
+  projectId: string,
+  filter: { batchId?: string; columnId?: TaskColumn; assigneeId?: string; updatedSince?: number; after?: PageCursor },
+  limit: number,
+): TaskRow[] {
+  // Only these fixed conditions are joined; every value is bound.
+  const conditions = ['t.project_id = ?'];
+  const values: Array<string | number> = [projectId];
+  if (filter.batchId !== undefined) {
+    conditions.push('t.batch_id = ?');
+    values.push(filter.batchId);
+  }
+  if (filter.columnId !== undefined) {
+    conditions.push('t.column_id = ?');
+    values.push(filter.columnId);
+  }
+  if (filter.assigneeId !== undefined) {
+    conditions.push('t.assignee_id = ?');
+    values.push(filter.assigneeId);
+  }
+  if (filter.updatedSince !== undefined) {
+    conditions.push('t.updated_at >= ?');
+    values.push(filter.updatedSince);
+  }
+  if (filter.after) {
+    conditions.push('(t.updated_at > ? OR (t.updated_at = ? AND t.id > ?))');
+    values.push(filter.after.at, filter.after.at, filter.after.id);
+  }
+  return getDatabase()
+    .prepare(`${TASK_SELECT} WHERE ${conditions.join(' AND ')} ORDER BY t.updated_at, t.id LIMIT ?`)
+    .all(...values, limit + 1) as TaskRow[];
+}
+
 function nextSortOrder(projectId: string, column: TaskColumn): number {
   const row = getDatabase()
     .prepare('SELECT MAX(sort_order) AS max FROM tasks WHERE project_id = ? AND column_id = ?')
@@ -889,14 +928,6 @@ export function updateTask(
   })();
 }
 
-const COLUMN_NAMES: Record<TaskColumn, string> = {
-  backlog: 'Backlog',
-  ongoing: 'On Going',
-  revisi: 'Revisi',
-  review: 'Review',
-  done: 'Done',
-};
-
 /** Moves the task to another column under its batch's next version, and logs it. */
 export function moveTask(
   task: TaskRow,
@@ -936,7 +967,7 @@ export function moveTask(
     logActivity({
       projectId: task.project_id,
       eventType: 'task.moved',
-      description: `Task "${task.title}" moved from ${COLUMN_NAMES[task.column_id]} to ${COLUMN_NAMES[input.column]} (${label})`,
+      description: `Task "${task.title}" moved from ${TASK_COLUMN_NAMES[task.column_id]} to ${TASK_COLUMN_NAMES[input.column]} (${label})`,
       actorId,
       taskId: task.id,
       taskTitle: task.title,
@@ -1046,6 +1077,14 @@ export function listComments(taskId: string): CommentRow[] {
   return getDatabase()
     .prepare(`SELECT ${COMMENT_COLUMNS} FROM task_comments WHERE task_id = ? ORDER BY created_at, rowid`)
     .all(taskId) as CommentRow[];
+}
+
+/** The public API's comment list: oldest first, after `after`, and `limit + 1` rows. */
+export function pageComments(taskId: string, after: PageCursor | undefined, limit: number): CommentRow[] {
+  const resume = after ? 'AND (created_at > ? OR (created_at = ? AND id > ?))' : '';
+  return getDatabase()
+    .prepare(`SELECT ${COMMENT_COLUMNS} FROM task_comments WHERE task_id = ? ${resume} ORDER BY created_at, id LIMIT ?`)
+    .all(taskId, ...(after ? [after.at, after.at, after.id] : []), limit + 1) as CommentRow[];
 }
 
 export function findComment(id: string): CommentRow | undefined {

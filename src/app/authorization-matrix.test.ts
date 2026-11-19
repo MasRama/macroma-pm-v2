@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { app, resetSecurityState } from './server';
+import { app, PUBLIC_API_PREFIX, resetSecurityState } from './server';
 import { TEMPORARY_PASSWORD_PATHS } from '../features/auth';
 import { closeEventStreams } from '../shared/realtime';
 import { apiRoutes, type ApiRoute } from '../shared/security';
 import { csrfHeaders, issueCsrf } from '../shared/security/tests/helpers';
-import { grantAdmin, grantPermissions, requirePasswordChange, signUp, type Persona } from './tests/personas';
+import { grantAdmin, grantPermissions, issueApiToken, requirePasswordChange, signUp, type Persona } from './tests/personas';
 
 /**
  * Who may reach which API endpoint, derived from the routes the application
@@ -24,10 +24,28 @@ const routes = apiRoutes(app);
 const label = (route: ApiRoute) => `${route.method} ${route.path}`;
 const target = (route: ApiRoute) => route.path.replace(/:[^/]+/g, UNKNOWN_ID);
 
+const isPublicApi = (route: ApiRoute) => route.path.startsWith(`${PUBLIC_API_PREFIX}/`);
+// Other cases revoke a persona's tokens (`POST /api/auth/tokens/revoke-all`),
+// so each public API call gets a fresh one. A persona that must replace its
+// temporary password cannot create tokens, so it keeps one made beforehand,
+// which the administrator's reset revoked.
+const keptTokens = new Map<string, string>();
+
+async function keepToken(persona: Persona): Promise<Persona> {
+  keptTokens.set(persona.id, await issueApiToken(persona, 'write'));
+  return persona;
+}
+
 async function call(route: ApiRoute, persona?: Persona): Promise<{ status: number; code?: string }> {
   const headers: Record<string, string> = {};
   let body: string | undefined;
-  if (route.method === 'GET') {
+  if (isPublicApi(route)) {
+    if (persona) headers.Authorization = `Bearer ${keptTokens.get(persona.id) ?? (await issueApiToken(persona, 'write'))}`;
+    if (route.method !== 'GET') {
+      headers['Content-Type'] = 'application/json';
+      body = '{}';
+    }
+  } else if (route.method === 'GET') {
     if (persona) headers.Cookie = persona.cookie;
   } else {
     Object.assign(headers, csrfHeaders(await issueCsrf(app, persona?.cookie)), { 'Content-Type': 'application/json' });
@@ -58,7 +76,7 @@ describe('API authorization matrix', () => {
     member = await signUp('Matrix Member');
     admin = await signUp('Matrix Admin');
     grantAdmin(admin.id);
-    temporary = await signUp('Matrix Temporary');
+    temporary = await keepToken(await signUp('Matrix Temporary'));
     grantAdmin(temporary.id);
     temporary = await requirePasswordChange(temporary);
   });
@@ -90,7 +108,7 @@ describe('API authorization matrix', () => {
     }
 
     it(`${label(route)} rejects anonymous callers with 401`, async () => {
-      expect(await call(route)).toEqual({ status: 401, code: 'UNAUTHORIZED' });
+      expect(await call(route)).toEqual({ status: 401, code: isPublicApi(route) ? 'TOKEN_INVALID' : 'UNAUTHORIZED' });
     });
 
     if (route.access === 'signed-in') {
@@ -122,7 +140,9 @@ describe('API authorization matrix', () => {
       });
     } else {
       it(`${label(route)} is blocked until a temporary password is replaced`, async () => {
-        expect(await call(route, temporary)).toEqual({ status: 403, code: 'PASSWORD_CHANGE_REQUIRED' });
+        // The reset that set the temporary password also revoked every token of the account.
+        const blocked = isPublicApi(route) ? { status: 401, code: 'TOKEN_REVOKED' } : { status: 403, code: 'PASSWORD_CHANGE_REQUIRED' };
+        expect(await call(route, temporary)).toEqual(blocked);
       });
     }
   }
