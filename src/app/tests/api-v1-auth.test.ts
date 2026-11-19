@@ -241,7 +241,7 @@ describe('public API bearer pipeline', () => {
     const minted = await loaded.app.request('/api/auth/tokens', {
       method: 'POST',
       headers: { ...bearer, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'escalation', scope: 'write', expiresInDays: null }),
+      body: JSON.stringify({ name: 'escalation', scope: 'write', expiresInDays: null, password: loaded.personas.TEST_PASSWORD }),
     });
     expect(minted.status).toBe(403);
   });

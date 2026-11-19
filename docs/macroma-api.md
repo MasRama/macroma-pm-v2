@@ -138,7 +138,7 @@ revoke tokens. The web client is `createSecurityClient()` from
 | Method and path | Access | Body | `data` |
 |---|---|---|---|
 | `GET /api/auth/tokens` | signed in | | `{ tokens: ApiToken[] }`: working and expired tokens, never revoked ones, newest first |
-| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays: 1–365 \| null }` | `201 { token: ApiToken, secret }` |
+| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays: 1–365 \| null, password }` | `201 { token: ApiToken, secret }` |
 | `DELETE /api/auth/tokens/:id` | signed in | | `{ revoked: 1 }`; another account's or an already revoked token answers `404 NOT_FOUND` |
 | `POST /api/auth/tokens/revoke-all` | signed in, strict limit | | `{ revoked }`, the number revoked |
 
@@ -151,6 +151,13 @@ so people can tell tokens apart.
 - **The secret** (`mcr_` and 43 base64url characters) is in the create answer
   once and never again: only its SHA-256 is stored. Show it with a copy button
   and say it will not be shown again.
+- **Password confirmation.** Creating a token asks for the account's current
+  `password`, exactly like the two-factor screens, so a stolen session alone
+  cannot mint a token that outlives a password reset. A wrong one answers
+  `400 INVALID_PASSWORD` ("Password is incorrect"), an empty one
+  `422 VALIDATION_ERROR`. An account made through Google has an unusable
+  random password, so, as for two-factor, it sets a password first (forgot
+  password) and confirms with that.
 - **Scopes.** `read` calls only `GET` and `HEAD`; `write` calls every method.
 - **Limit.** An account holds at most 50 working tokens; the 51st answers
   `409 TOKEN_LIMIT_REACHED`. Expired and revoked tokens do not count.
@@ -161,7 +168,7 @@ so people can tell tokens apart.
 - **Live.** Creating or revoking tokens publishes `auth.tokens-changed` to the
   account, so its other tabs refetch `GET /api/auth/tokens`.
 
-Codes: `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
+Codes: `INVALID_PASSWORD`, `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
 
 ## Profile
 

@@ -191,8 +191,13 @@ export const confirmPasswordInputSchema = z.object({
 export const API_TOKEN_SCOPES = ['read', 'write'] as const;
 export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
 
-/** Creates a personal access token; its secret is in the answer once and never again. */
+/**
+ * Creates a personal access token; its secret is in the answer once and never
+ * again. Like two-factor changes, it re-confirms the account's password, so a
+ * stolen session alone cannot mint a token that outlives a password reset.
+ */
 export const createApiTokenInputSchema = z.object({
+  ...confirmPasswordInputSchema.shape,
   name: z
     .string()
     .trim()

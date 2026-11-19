@@ -116,7 +116,7 @@ export async function issueApiToken(
   const response = await app.request('/api/auth/tokens', {
     method: 'POST',
     headers: csrfHeaders(await issueCsrf(app, persona.cookie), { 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ name: `Test token ${randomUUID()}`, scope, expiresInDays }),
+    body: JSON.stringify({ name: `Test token ${randomUUID()}`, scope, expiresInDays, password: TEST_PASSWORD }),
   });
   if (response.status !== 201) throw new Error(`Creating an API token failed with ${response.status}`);
   return ((await response.json()) as { data: { secret: string } }).data.secret;

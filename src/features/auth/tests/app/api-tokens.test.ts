@@ -6,7 +6,7 @@ import { closeEventStreams, EVENTS_PATH } from '../../../../shared/realtime';
 import { readEvents } from '../../../../shared/realtime/tests/helpers';
 import { csrfHeaders, issueCsrf, mergeResponseCookies } from '../../../../shared/security/tests/helpers';
 import { AUTH_TOKENS_CHANGED_EVENT, authResponseSchemas } from '../../contract';
-import { AUTH_MAINTENANCE, createAuthRoutes, deleteAccounts } from '../..';
+import { AUTH_MAINTENANCE, createAuthRoutes, deleteAccounts, hashPassword } from '../..';
 import type { AuthActivityEvent } from '../../server/activity';
 import { API_TOKENS } from '../../server/config';
 import { claimUnverifiedAccount, createApiToken } from '../../server/repository';
@@ -52,7 +52,9 @@ async function signUp(): Promise<Browser> {
   return browser;
 }
 
-const create = (browser: Browser, body: unknown) => send(browser, '/api/auth/tokens', { method: 'POST', body });
+/** Creates a token, confirming with the account's password unless the body names one. */
+const create = (browser: Browser, body: Record<string, unknown>) =>
+  send(browser, '/api/auth/tokens', { method: 'POST', body: { password: PASSWORD, ...body } });
 
 function storedRows(userId: string) {
   return getDatabase().prepare('SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at, rowid').all(userId) as Array<
@@ -88,6 +90,42 @@ describe('personal access tokens', () => {
     expect(listed.status).toBe(200);
     expect(schemas.apiTokens.parse(listed.body).data.tokens).toEqual([data.token]);
     expect(JSON.stringify(listed.body)).not.toContain(data.secret);
+  });
+
+  it('re-confirms the password before creating a token, as two-factor changes do', async () => {
+    const browser = await signUp();
+
+    const wrong = await create(browser, { name: 'stolen session', scope: 'write', expiresInDays: null, password: 'not the password' });
+    expect(wrong.status).toBe(400);
+    expect(schemas.error.parse(wrong.body)).toMatchObject({ message: 'Password is incorrect', code: 'INVALID_PASSWORD' });
+    const twoFactor = await send(browser, '/api/auth/two-factor/setup', { method: 'POST', body: { password: 'not the password' } });
+    expect([twoFactor.status, twoFactor.body]).toEqual([wrong.status, wrong.body]);
+
+    resetSecurityState();
+    for (const password of [undefined, '']) {
+      const missing = await send(browser, '/api/auth/tokens', {
+        method: 'POST',
+        body: { name: 'no password', scope: 'write', expiresInDays: null, password },
+      });
+      expect(missing.status).toBe(422);
+      expect(schemas.error.parse(missing.body).code).toBe('VALIDATION_ERROR');
+    }
+    expect(storedRows(browser.id)).toEqual([]);
+  });
+
+  it('treats an account made through Google like two-factor changes do: it sets a password first', async () => {
+    const browser = await signUp();
+    // What Google sign-in stores for a new account: a random password nobody knows.
+    getDatabase()
+      .prepare('UPDATE users SET password = ? WHERE id = ?')
+      .run(await hashPassword(randomUUID()), browser.id);
+
+    const refused = await create(browser, { name: 'google', scope: 'read', expiresInDays: null });
+    expect(refused.status).toBe(400);
+    expect(schemas.error.parse(refused.body).code).toBe('INVALID_PASSWORD');
+    const twoFactor = await send(browser, '/api/auth/two-factor/setup', { method: 'POST', body: { password: PASSWORD } });
+    expect([twoFactor.status, twoFactor.body]).toEqual([refused.status, refused.body]);
+    expect(storedRows(browser.id)).toEqual([]);
   });
 
   it('stores only the SHA-256 of the secret', async () => {
@@ -180,6 +218,7 @@ describe('personal access tokens', () => {
       { name: 'ok', scope: 'read', expiresInDays: 366 },
       { name: 'ok', scope: 'read', expiresInDays: 1.5 },
       { name: 'ok', scope: 'read' },
+      { name: 'ok', scope: 'read', expiresInDays: null, password: 42 },
     ]) {
       resetSecurityState();
       const refused = await create(browser, body);
@@ -191,7 +230,10 @@ describe('personal access tokens', () => {
 
   it('needs a signed-in browser for every token endpoint', async () => {
     expect((await send(undefined, '/api/auth/tokens')).status).toBe(401);
-    expect((await send(undefined, '/api/auth/tokens', { method: 'POST', body: { name: 'x', scope: 'read', expiresInDays: null } })).status).toBe(401);
+    expect(
+      (await send(undefined, '/api/auth/tokens', { method: 'POST', body: { name: 'x', scope: 'read', expiresInDays: null, password: PASSWORD } }))
+        .status,
+    ).toBe(401);
     expect((await send(undefined, '/api/auth/tokens/revoke-all', { method: 'POST' })).status).toBe(401);
     expect((await send(undefined, `/api/auth/tokens/${randomUUID()}`, { method: 'DELETE' })).status).toBe(401);
   });
@@ -229,11 +271,11 @@ describe('personal access tokens', () => {
         body: body === undefined ? undefined : JSON.stringify(body),
       });
 
-    const created = (await (await call('/tokens', 'POST', { name: 'Reported', scope: 'write', expiresInDays: null })).json()) as {
+    const created = (await (await call('/tokens', 'POST', { name: 'Reported', scope: 'write', expiresInDays: null, password: PASSWORD })).json()) as {
       data: { token: { id: string }; secret: string };
     };
     await call(`/tokens/${created.data.token.id}`, 'DELETE');
-    await call('/tokens', 'POST', { name: 'Second', scope: 'read', expiresInDays: 3 });
+    await call('/tokens', 'POST', { name: 'Second', scope: 'read', expiresInDays: 3, password: PASSWORD });
     await call('/tokens/revoke-all', 'POST');
 
     const tokenEvents = reported.filter((event) => event.action !== 'auth.registered');

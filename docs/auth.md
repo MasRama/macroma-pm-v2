@@ -79,6 +79,10 @@ session only, so a token can never make another token. `/api/v1` in turn
 ignores session cookies, needs no CSRF token and sets no cookie, and every
 other `/api` route ignores the `Authorization` header.
 
+- Making a token re-confirms the account's password (`password` in the body),
+  with the same check as the two-factor routes: a wrong one answers
+  `400 INVALID_PASSWORD`. An account made through Google, whose password is
+  random and unknown, sets one first (forgot password), as for two-factor.
 - Only the SHA-256 of a token is stored; its secret is shown once, when it is
   made. `last_used_at` is written at most once a minute.
 - A `read` token calls `GET`/`HEAD` only; a `write` token calls every method

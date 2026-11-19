@@ -13,9 +13,11 @@ import type { AuthActivitySink } from './activity';
 import { apiTokenHash, generateApiTokenSecret } from './api-tokens';
 import { API_TOKENS } from './config';
 import { sessionGuard } from './guard';
+import { confirmPassword } from './security-routes';
 import { tokensChanged } from './live';
 import {
   createApiToken,
+  findUserById,
   listApiTokens,
   revokeAllApiTokens,
   revokeApiToken,
@@ -40,7 +42,8 @@ function tokenPayload(token: StoredApiToken, now: number): ApiTokenData {
 /**
  * Personal access tokens for the public API, managed from a signed-in browser
  * only: these routes read the session cookie, so a token can never mint or
- * revoke tokens. The secret is in the create answer once and never again.
+ * revoke tokens. Creating one also re-confirms the password. The secret is in
+ * the create answer once and never again.
  */
 export function createTokenRoutes(activity?: AuthActivitySink) {
   return new Hono()
@@ -53,9 +56,12 @@ export function createTokenRoutes(activity?: AuthActivitySink) {
         data: { tokens: listApiTokens(user.id).map((token) => tokenPayload(token, now)) },
       } satisfies ApiTokensSuccess);
     })
-    .post('/tokens', sessionGuard.signedIn, jsonInput(createApiTokenInputSchema), (context) => {
+    .post('/tokens', sessionGuard.signedIn, jsonInput(createApiTokenInputSchema), async (context) => {
       const { user } = sessionGuard.actor(context);
       const input = context.req.valid('json');
+      // The same password confirmation as two-factor changes (400 INVALID_PASSWORD).
+      const failure = await confirmPassword(context, findUserById(user.id)!, input.password);
+      if (failure) return failure;
       const now = Date.now();
       const secret = generateApiTokenSecret();
       const stored: StoredApiToken = {
