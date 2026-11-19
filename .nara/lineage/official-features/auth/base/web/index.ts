@@ -1,7 +1,10 @@
 export {
   ADMIN_ROLE_SLUG,
+  API_TOKEN_SCOPES,
   AUTH_ACCOUNT_CHANGED_EVENT,
+  AUTH_TOKENS_CHANGED_EVENT,
   changePasswordInputSchema,
+  createApiTokenInputSchema,
   forgotPasswordInputSchema,
   GOOGLE_SIGN_IN_ERRORS,
   GOOGLE_SIGN_IN_PATH,
@@ -23,6 +26,12 @@ export {
 export { createAccessClient, type AccessClient } from './access-client';
 export { createSecurityClient, type SecurityClient } from './security-client';
 export type {
+  ApiTokenData,
+  ApiTokenScope,
+  ApiTokensResponse,
+  CreateApiTokenInput,
+  CreateApiTokenResponse,
+  RevokeApiTokensResponse,
   CurrentUser,
   PermissionData,
   PermissionsResponse,

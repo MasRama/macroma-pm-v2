@@ -69,6 +69,32 @@ only from `src/features/auth/web`. Auth's internals then stay untouched, and
 `nara evolve auth` keeps working. `src/features/auth/tests/app/browser.test.ts`
 proves that a page built this way signs in.
 
+## Personal access tokens
+
+The public API (`/api/v1`) authenticates with a personal access token in an
+`Authorization: Bearer mcr_…` header. Accounts make and revoke their tokens
+from the signed-in app (`/api/auth/tokens`, see
+[`macroma-api.md`](./macroma-api.md#api-tokens)); those routes take the
+session only, so a token can never make another token. `/api/v1` in turn
+ignores session cookies, needs no CSRF token and sets no cookie, and every
+other `/api` route ignores the `Authorization` header.
+
+- Only the SHA-256 of a token is stored; its secret is shown once, when it is
+  made. `last_used_at` is written at most once a minute.
+- A `read` token calls `GET`/`HEAD` only; a `write` token calls every method
+  (`403 TOKEN_SCOPE_INSUFFICIENT` otherwise).
+- A bad, revoked or expired token answers `401` with `TOKEN_INVALID`,
+  `TOKEN_REVOKED` or `TOKEN_EXPIRED` and a `WWW-Authenticate: Bearer` header.
+  Revoked and expired tokens are deleted 30 days later, by Auth's maintenance.
+- Passwords: a token belongs to the account, not to its password, so changing
+  or resetting the password (by email, or an administrator's reset) keeps
+  every token working, as on GitHub. While an administrator's temporary
+  password is pending, every token answers `403 PASSWORD_CHANGE_REQUIRED`
+  until the account replaces it. Deleting the account deletes its tokens; an
+  unverified account claimed through Google loses them, like its sessions.
+  To cut a token off, revoke it (or all of them).
+- An account holds at most 50 working tokens (`409 TOKEN_LIMIT_REACHED`).
+
 ## Limits
 
 These are environment settings, defaults shown:
@@ -81,5 +107,7 @@ These are environment settings, defaults shown:
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `60000` | Window for that limit (1 min) |
 | `RATE_LIMIT_MAX` | `600` | Requests per client to any `/api` route per window |
 | `RATE_LIMIT_WINDOW_MS` | `900000` | Window for that limit (15 min) |
+| `API_RATE_LIMIT_MAX` | `120` | Requests per API token to `/api/v1` per window (per client address while the token does not resolve); `/api/v1` is outside the `RATE_LIMIT_MAX` budget |
+| `API_RATE_LIMIT_WINDOW_MS` | `60000` | Window for that limit (1 min) |
 
 Sessions last 60 days (`SESSION_EXPIRY_MS` in `src/features/auth/server/config.ts`).

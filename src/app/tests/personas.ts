@@ -103,3 +103,21 @@ export async function signIn(email: string, password: string): Promise<string> {
   if (response.status !== 200) throw new Error(`Sign-in failed with ${response.status}`);
   return mergeResponseCookies(bootstrap.cookie, response);
 }
+
+/**
+ * Creates a personal access token for the account through Auth's own
+ * session endpoint and answers its secret, for calls to the public API.
+ */
+export async function issueApiToken(
+  persona: Persona,
+  scope: 'read' | 'write' = 'write',
+  expiresInDays: number | null = null,
+): Promise<string> {
+  const response = await app.request('/api/auth/tokens', {
+    method: 'POST',
+    headers: csrfHeaders(await issueCsrf(app, persona.cookie), { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name: `Test token ${randomUUID()}`, scope, expiresInDays }),
+  });
+  if (response.status !== 201) throw new Error(`Creating an API token failed with ${response.status}`);
+  return ((await response.json()) as { data: { secret: string } }).data.secret;
+}

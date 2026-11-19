@@ -23,7 +23,7 @@ This document is the current architecture authority. Obsolete implementation his
 | Frontend | Vue 3 + Vite + TypeScript, `vue-router` for browser routes (sole supported stack; no React, Svelte, Nuxt, SSR) |
 | Database | SQLite via `better-sqlite3`, raw SQL in feature repositories (no ORM) |
 | Validation | Zod, feature-owned schemas |
-| Auth | Session cookies, owned by the `auth` feature (no second mechanism without explicit spec) |
+| Auth | Session cookies; personal access tokens (`Authorization: Bearer`) for the public API `/api/v1` only. Both owned by the `auth` feature (no further mechanism without explicit spec) |
 | Tests | Vitest (+ `jsdom` for browser code) |
 
 No native HTTP engine: Ultimate Express / uWebSockets.js are intentionally unsupported; portability is preferred over a custom native HTTP runtime. Other native packages (`better-sqlite3`, Sharp) are legitimate and unrelated to that contract.

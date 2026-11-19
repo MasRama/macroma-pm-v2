@@ -50,14 +50,21 @@ function tokensMatch(submitted: string, expected: string): boolean {
 
 export interface CsrfOptions {
   isProduction: boolean;
+  /**
+   * API requests this protection leaves alone entirely, cookie included: ones
+   * that authenticate with a credential a browser never attaches by itself
+   * (an `Authorization` header) and ignore cookies.
+   */
+  exempt?: (context: Context) => boolean;
 }
 
 export function csrfProtection(options: CsrfOptions) {
-  const { isProduction } = options;
+  const { isProduction, exempt } = options;
 
   return async function csrfMiddleware(context: Context, next: Next): Promise<Response | void> {
     // The decoded path Hono routes on: /%61pi/... reaches the same handlers.
     if (!context.req.path.startsWith('/api/')) return next();
+    if (exempt?.(context)) return next();
 
     const token = ensureCsrfToken(context, isProduction);
     if (SAFE_METHODS.has(context.req.method.toUpperCase())) return next();

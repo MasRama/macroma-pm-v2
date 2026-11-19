@@ -1,9 +1,13 @@
 import { hc } from 'hono/client';
 import type {
+  ApiTokensResponse,
   AuthError,
   AuthSuccess,
   ConfirmPasswordInput,
+  CreateApiTokenInput,
+  CreateApiTokenResponse,
   RecoveryCodesResponse,
+  RevokeApiTokensResponse,
   RevokeSessionsResponse,
   SessionsResponse,
   TwoFactorChallengeInput,
@@ -25,6 +29,12 @@ export interface SecurityClient {
   enableTwoFactor(input: TwoFactorCodeInput): Promise<RecoveryCodesResponse>;
   disableTwoFactor(input: ConfirmPasswordInput): Promise<AuthSuccess | AuthError>;
   regenerateRecoveryCodes(input: ConfirmPasswordInput): Promise<RecoveryCodesResponse>;
+  /** The account's API tokens that are not revoked, expired ones included, newest first. */
+  listTokens(): Promise<ApiTokensResponse>;
+  /** Creates a token; `data.secret` is the only time its secret is ever shown. */
+  createToken(input: CreateApiTokenInput): Promise<CreateApiTokenResponse>;
+  revokeToken(id: string): Promise<RevokeApiTokensResponse>;
+  revokeAllTokens(): Promise<RevokeApiTokensResponse>;
 }
 
 export function createSecurityClient(baseUrl = '/api/auth'): SecurityClient {
@@ -41,5 +51,9 @@ export function createSecurityClient(baseUrl = '/api/auth'): SecurityClient {
     enableTwoFactor: async (input) => (await twoFactor.enable.$post({ json: input })).json(),
     disableTwoFactor: async (input) => (await twoFactor.disable.$post({ json: input })).json(),
     regenerateRecoveryCodes: async (input) => (await twoFactor['recovery-codes'].$post({ json: input })).json(),
+    listTokens: async () => (await api.tokens.$get()).json(),
+    createToken: async (input) => (await api.tokens.$post({ json: input })).json(),
+    revokeToken: async (id) => (await api.tokens[':id'].$delete({ param: { id } })).json(),
+    revokeAllTokens: async () => (await api.tokens['revoke-all'].$post()).json(),
   };
 }

@@ -69,3 +69,17 @@ export const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000;
 
 /** How often the application should remove expired sessions. */
 export const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Personal access tokens for the public API. */
+export const API_TOKENS = {
+  /** Every secret starts with it, so leaked tokens are easy to spot and scan for. */
+  PREFIX: 'mcr_',
+  /** Characters of the secret kept to tell tokens apart: the prefix and six more. */
+  DISPLAY_LENGTH: 10,
+  /** Working (not revoked, not expired) tokens one account may hold. */
+  MAX_ACTIVE_PER_USER: 50,
+  /** last_used_at is written at most once per interval per token. */
+  TOUCH_INTERVAL_MS: 60 * 1000,
+  /** How long revoked and expired tokens keep answering why before they are removed. */
+  PURGE_AFTER_MS: 30 * 24 * 60 * 60 * 1000,
+} as const;

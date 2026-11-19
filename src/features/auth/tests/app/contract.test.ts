@@ -104,6 +104,23 @@ describe('auth web client contract', () => {
     expect(schemas.error.parse(await security.revokeSession('unknown-handle'))).toMatchObject({ code: 'NOT_FOUND' });
   });
 
+  it('manages API tokens in the declared shapes', async () => {
+    const security = createSecurityClient();
+    expect(schemas.error.parse(await security.listTokens())).toMatchObject({ code: 'UNAUTHORIZED' });
+
+    await browser.signUp();
+    const created = schemas.apiTokenCreated.parse(
+      await security.createToken({ name: 'Contract token', scope: 'read', expiresInDays: 30 }),
+    );
+    expect(schemas.apiTokens.parse(await security.listTokens()).data.tokens).toEqual([created.data.token]);
+    expect(schemas.error.parse(await security.createToken({ name: '', scope: 'read', expiresInDays: null }))).toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    schemas.revokeApiTokens.parse(await security.revokeToken(created.data.token.id));
+    expect(schemas.error.parse(await security.revokeToken(created.data.token.id))).toMatchObject({ code: 'NOT_FOUND' });
+    expect(schemas.revokeApiTokens.parse(await security.revokeAllTokens()).data.revoked).toBe(0);
+  });
+
   it('runs two-factor setup, sign-in, and removal in the declared shapes', async () => {
     const auth = createAuthClient();
     const security = createSecurityClient();

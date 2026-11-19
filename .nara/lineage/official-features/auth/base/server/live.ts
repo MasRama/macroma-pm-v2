@@ -4,6 +4,7 @@ import {
   AUTH_ROLES_CHANGED_EVENT,
   AUTH_ROLES_EDITING_EVENT,
   AUTH_SESSIONS_CHANGED_EVENT,
+  AUTH_TOKENS_CHANGED_EVENT,
   rolesAccess,
 } from '../contract';
 
@@ -14,6 +15,7 @@ import {
 
 const accountChangedTopic = liveTopic(AUTH_ACCOUNT_CHANGED_EVENT, { affected: true });
 const sessionsChangedTopic = liveTopic(AUTH_SESSIONS_CHANGED_EVENT, { affected: true });
+const tokensChangedTopic = liveTopic(AUTH_TOKENS_CHANGED_EVENT, { affected: true });
 const rolesChangedTopic = liveTopic(AUTH_ROLES_CHANGED_EVENT, { rule: rolesAccess('view') });
 
 /** Who has which role open, for whoever may read roles. */
@@ -28,6 +30,11 @@ export function sessionsChanged(userIds: Iterable<string>): void {
   if (affected.size === 0) return;
   revalidate((listener) => affected.has(listener.userId));
   publish(sessionsChangedTopic, affected);
+}
+
+/** The account's API tokens changed; its other tabs refetch the list. */
+export function tokensChanged(userId: string): void {
+  publish(tokensChangedTopic, new Set([userId]));
 }
 
 export function accountsChanged(userIds: Iterable<string>): void {

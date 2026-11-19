@@ -22,9 +22,11 @@ export { AUTH_MAINTENANCE } from './server/maintenance';
 export { cleanupExpiredSessions } from './server/repository';
 export {
   ADMIN_ROLE_SLUG,
+  API_TOKEN_SCOPES,
   AUTH_ACTIVITY,
   ROLES_ACTIVITY,
   changePasswordInputSchema,
+  createApiTokenInputSchema,
   createRoleInputSchema,
   forgotPasswordInputSchema,
   GOOGLE_SIGN_IN_PATH,
@@ -35,7 +37,10 @@ export {
   updateRoleInputSchema,
 } from './contract';
 export type {
+  ApiTokenData,
+  ApiTokenScope,
   ChangePasswordInput,
+  CreateApiTokenInput,
   ChangePasswordResponse,
   CreateRoleInput,
   CurrentUser,
@@ -68,6 +73,8 @@ export {
 } from './server/access';
 export { createAccessRoutes } from './server/access-routes';
 export { passwordChangeGate, TEMPORARY_PASSWORD_PATHS } from './server/password-change-gate';
+export { apiTokenAccount, apiTokenRateKey, requireApiToken, resolveApiToken } from './server/api-tokens';
+export type { ApiTokenAccount } from './server/api-tokens';
 export type { AuthActivitySink, RolesActivitySink } from './server/activity';
 export { declarePermissions, syncDeclaredPermissions } from './server/permissions';
 export type { PermissionSyncResult } from './server/permissions';
