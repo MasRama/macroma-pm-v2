@@ -1,3 +1,4 @@
+import type { Context } from 'hono';
 import type { WorkspacePerson } from '../contract';
 
 export type WorkspaceNotificationData = Record<string, string | number | boolean | null>;
@@ -10,6 +11,11 @@ export type WorkspaceNotificationData = Record<string, string | number | boolean
 export interface WorkspacesServerHost {
   readonly sessionCookieName: string;
   resolveActor(sessionToken: string | undefined): { id: string; name: string; email: string } | undefined;
+  /**
+   * The account a public API (`/api/v1`) request acts as, from its bearer
+   * token once the application's token pipeline admitted it; never a cookie.
+   */
+  apiActor(context: Context): { id: string; name: string; email: string } | undefined;
   /** The accounts that exist among the ids; one call for any number of them. */
   findAccountsByIds(userIds: readonly string[]): WorkspacePerson[];
   /** The account using the email, ignoring case. */

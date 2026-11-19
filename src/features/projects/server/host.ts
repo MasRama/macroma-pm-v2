@@ -1,3 +1,4 @@
+import type { Context } from 'hono';
 import type { AssetStorage } from '../../../shared/storage';
 import type { PROJECTS_NOTIFICATION_TYPES, ProjectPerson, TaskMovedNotificationData } from '../contract';
 
@@ -9,6 +10,11 @@ import type { PROJECTS_NOTIFICATION_TYPES, ProjectPerson, TaskMovedNotificationD
 export interface ProjectsServerHost {
   readonly sessionCookieName: string;
   resolveActor(sessionToken: string | undefined): { id: string; name: string; email: string } | undefined;
+  /**
+   * The account a public API (`/api/v1`) request acts as, from its bearer
+   * token once the application's token pipeline admitted it; never a cookie.
+   */
+  apiActor(context: Context): { id: string; name: string; email: string } | undefined;
   /** The accounts that exist among the ids; one call for any number of them. */
   findAccountsByIds(userIds: readonly string[]): ProjectPerson[];
   /** The account using the email, ignoring case. */

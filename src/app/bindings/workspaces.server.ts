@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 import {
+  apiTokenAccount,
   findAccountByEmail,
   findAccountsByIds,
   getCurrentUser,
@@ -12,6 +13,7 @@ import { projectsServerHost } from './projects.server';
 import {
   createInvitationRoutes,
   createWorkspaceRoutes,
+  createWorkspacesApiRoutes,
   forgetAccounts,
   type WorkspacePerson,
   type WorkspacesServerHost,
@@ -28,6 +30,7 @@ export const workspacesServerHost: WorkspacesServerHost = {
     const user = getCurrentUser(sessionToken);
     return user ? { id: user.id, name: user.name, email: user.email } : undefined;
   },
+  apiActor: (context) => apiTokenAccount(context),
   findAccountsByIds: (userIds) => findAccountsByIds(userIds).map(person),
   findAccountByEmail: (email) => {
     const account = findAccountByEmail(email);
@@ -54,4 +57,6 @@ onAccountsDeleted((userIds) => {
 export default function composeWorkspacesServer(app: Hono): void {
   app.route('/api/workspaces', createWorkspaceRoutes(workspacesServerHost));
   app.route('/api/invitations', createInvitationRoutes(workspacesServerHost));
+  // The public API: bearer tokens only, behind the application's token pipeline.
+  app.route('/api/v1/workspaces', createWorkspacesApiRoutes(workspacesServerHost));
 }

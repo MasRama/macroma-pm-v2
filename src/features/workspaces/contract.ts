@@ -1,6 +1,8 @@
 import { z } from 'zod';
-import { API_REFUSAL_CODES } from '../../shared/security/codes';
+import type { ApiOperation } from '../../shared/security/api-operations';
+import { API_REFUSAL_CODES, API_TOKEN_REFUSAL_CODES } from '../../shared/security/codes';
 import { CONTROL_MESSAGE, emailSchema, hasNoControlChars } from '../../shared/security/input';
+import { pageQueryShape } from '../../shared/security/pagination';
 
 export const featureName = 'workspaces' as const;
 export type FeatureName = typeof featureName;
@@ -79,6 +81,9 @@ export const respondInvitationInputSchema = z.object({ action: z.enum(['accept',
 export const postMessageInputSchema = z.object({
   message: z.string().trim().min(1, 'Message must not be empty').max(2000, 'Message must be at most 2000 characters'),
 });
+
+/** The public API's workspace list: the caller's workspaces, newest first. */
+export const apiWorkspacesQuerySchema = z.object({ ...pageQueryShape });
 
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceInputSchema>;
 export type UpdateWorkspaceInput = z.infer<typeof updateWorkspaceInputSchema>;
@@ -180,7 +185,55 @@ export function workspacesResponseSchemas() {
     invitationAnswered: success(z.strictObject({ workspace_id: z.string(), status: z.enum(['accepted', 'declined']) })),
     messages: success(z.strictObject({ messages: z.array(message) })),
     messagePosted: success(z.strictObject({ message })),
+    /** Public API (`/api/v1`) refusals: the bearer pipeline's codes join the shared and Workspaces ones. */
+    apiError: z.strictObject({
+      ...error.shape,
+      code: z.enum([...API_REFUSAL_CODES, ...API_TOKEN_REFUSAL_CODES, ...WORKSPACES_REFUSAL_CODES]),
+    }),
+    apiWorkspaces: success(
+      z.strictObject({
+        workspaces: z.array(workspaceSummary),
+        /** Send it back as `cursor` for the next page; `null` on the last page. */
+        next_cursor: z.string().nullable(),
+      }),
+    ),
+    apiWorkspace: success(z.strictObject({ workspace: workspaceSummary })),
+    /** The owner first, then members in joining order. */
+    apiMembers: success(z.strictObject({ members: z.array(member) })),
   };
+}
+
+/**
+ * The public API's workspace operations, as mounted under `/api/v1`. The
+ * application's OpenAPI document is built from them, and a test checks them
+ * against the mounted routes and their real answers.
+ */
+export function workspacesApiV1(): ApiOperation[] {
+  const schemas = workspacesResponseSchemas();
+  return [
+    {
+      method: 'get',
+      path: '/workspaces',
+      summary: 'List your workspaces',
+      description: 'The workspaces the token\'s account belongs to, newest first.',
+      query: apiWorkspacesQuerySchema,
+      responses: { 200: schemas.apiWorkspaces },
+    },
+    {
+      method: 'get',
+      path: '/workspaces/:id',
+      summary: 'Get a workspace',
+      responses: { 200: schemas.apiWorkspace },
+      refusals: { 403: ['FORBIDDEN'], 404: ['WORKSPACE_NOT_FOUND'] },
+    },
+    {
+      method: 'get',
+      path: '/workspaces/:id/members',
+      summary: 'List a workspace\'s members',
+      responses: { 200: schemas.apiMembers },
+      refusals: { 403: ['FORBIDDEN'], 404: ['WORKSPACE_NOT_FOUND'] },
+    },
+  ];
 }
 
 type WorkspacesResponseSchemas = ReturnType<typeof workspacesResponseSchemas>;
@@ -204,6 +257,10 @@ export type ReceivedInvitationsSuccess = Infer<'receivedInvitations'>;
 export type InvitationAnsweredSuccess = Infer<'invitationAnswered'>;
 export type WorkspaceMessagesSuccess = Infer<'messages'>;
 export type MessagePostedSuccess = Infer<'messagePosted'>;
+export type WorkspacesApiError = Infer<'apiError'>;
+export type ApiWorkspacesSuccess = Infer<'apiWorkspaces'>;
+export type ApiWorkspaceSuccess = Infer<'apiWorkspace'>;
+export type ApiWorkspaceMembersSuccess = Infer<'apiMembers'>;
 
 export type WorkspacesResponse = WorkspacesSuccess | WorkspacesError;
 export type WorkspaceSavedResponse = WorkspaceSavedSuccess | WorkspacesError;

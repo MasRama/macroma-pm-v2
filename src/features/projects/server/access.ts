@@ -5,21 +5,31 @@ import type {
   ChangelogEntry,
   ColumnCounts,
   Project,
+  ProjectMember,
   ProjectPersonRef,
+  ProjectSummary,
   Release,
   ReleaseBatch,
   ReleaseStats,
   Task,
   TaskAttachment,
   TaskComment,
+  TaskDetail,
   TaskLog,
   UpcomingRelease,
 } from '../contract';
 import type { ProjectsServerHost } from './host';
 import {
+  activeBatches,
+  countsByBatch,
   directMemberIdsByProject,
   directMemberRole,
+  directMembers,
   emptyCounts,
+  findBatch,
+  listBatches,
+  listLogs,
+  taskCountsByProject,
   type AttachmentRow,
   type BatchRow,
   type ChangelogRow,
@@ -231,5 +241,66 @@ export function attachmentView(row: AttachmentRow, people: Map<string, ProjectPe
     url: attachmentUrl(row),
     uploaded_by: row.uploaded_by ? (people.get(row.uploaded_by) ?? null) : null,
     created_at: row.created_at,
+  };
+}
+
+/** Whether the account may be assigned tasks of the project. */
+export function assignable(host: ProjectsServerHost, project: Project, userId: string): boolean {
+  return host.findAccountsByIds([userId]).length > 0 && canOpenProject(host, project, userId);
+}
+
+export function summaries(host: ProjectsServerHost, projects: readonly Project[], actor: { id: string }): ProjectSummary[] {
+  const ids = projects.map((project) => project.id);
+  const active = activeBatches(ids);
+  const counts = taskCountsByProject(ids);
+  const audiences = projectAudiences(host, projects);
+  return projects.map((project) => {
+    const batch = active.get(project.id);
+    return {
+      ...project,
+      role: project.owner_id === actor.id ? 'owner' : 'member',
+      active_batch: batch ? batchRef(batch) : null,
+      task_counts: counts.get(project.id) ?? { backlog: 0, ongoing: 0, revisi: 0, review: 0, done: 0 },
+      member_count: audiences.get(project.id)?.size ?? 0,
+    };
+  });
+}
+
+/** Direct members first, in joining order, then the accounts that reach the project through its workspace. */
+export function membersOf(host: ProjectsServerHost, project: Project): ProjectMember[] {
+  const direct = directMembers(project.id);
+  const directIds = new Set(direct.map((member) => member.user_id));
+  const viaWorkspace = project.workspace_id ? host.workspaceMemberIds(project.workspace_id).filter((id) => !directIds.has(id)) : [];
+  const accounts = new Map(host.findAccountsByIds([...directIds, ...viaWorkspace]).map((person) => [person.id, person]));
+  const members: ProjectMember[] = [];
+  for (const member of direct) {
+    const user = accounts.get(member.user_id);
+    if (user) members.push({ user, role: member.role, source: 'project' });
+  }
+  for (const userId of viaWorkspace) {
+    const user = accounts.get(userId);
+    if (user) members.push({ user, role: 'member', source: 'workspace' });
+  }
+  return members;
+}
+
+/** The project's batches with their task counts, newest version first. */
+export function batchesOf(projectId: string): Batch[] {
+  const counts = countsByBatch(projectId);
+  return listBatches(projectId).map((row) => batchView(row, counts.get(row.id)));
+}
+
+/** A task with its project, batch, creator and every version it went through. */
+export function taskDetailView(host: ProjectsServerHost, task: TaskRow, project: Project): TaskDetail {
+  const logs = listLogs(task.id);
+  const creatorId = logs[0]?.created_by ?? null;
+  const people = personRefs(host, [task.assignee_id, creatorId, ...logs.map((log) => log.created_by)]);
+  const batch = task.batch_id ? findBatch(task.batch_id) : undefined;
+  return {
+    ...taskView(task, people),
+    project: { id: project.id, name: project.name },
+    batch: batch ? batchRef(batch) : null,
+    created_by: creatorId ? (people.get(creatorId) ?? null) : null,
+    logs: logs.map((log) => logView(log, people)),
   };
 }

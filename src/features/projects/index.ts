@@ -6,6 +6,7 @@ export {
   PROJECTS_CHANGED_EVENT,
   PROJECTS_NOTIFICATION_TYPES,
   PROJECTS_REFUSAL_CODES,
+  projectsApiV1,
   projectsResponseSchemas,
   TASK_ATTACHMENT_ALLOWED_MIME_TYPES,
   TASK_ATTACHMENT_MAX_FILE_SIZE_BYTES,
@@ -17,6 +18,7 @@ export {
 } from './contract';
 export type { FeatureName, ProjectPerson, TaskMovedNotificationData } from './contract';
 export type { ProjectsServerHost } from './server/host';
+export { createProjectsApiRoutes, createTasksApiRoutes } from './server/api-v1';
 export {
   createDashboardRoutes,
   createProjectRoutes,

@@ -1,11 +1,20 @@
 import { resolve } from 'node:path';
 import type { Hono } from 'hono';
-import { findAccountByEmail, findAccountsByIds, getCurrentUser, onAccountsDeleted, SESSION_COOKIE_NAME } from '../../features/auth';
+import {
+  apiTokenAccount,
+  findAccountByEmail,
+  findAccountsByIds,
+  getCurrentUser,
+  onAccountsDeleted,
+  SESSION_COOKIE_NAME,
+} from '../../features/auth';
 import {
   createDashboardRoutes,
   createProjectRoutes,
+  createProjectsApiRoutes,
   createTaskAttachmentRoutes,
   createTaskRoutes,
+  createTasksApiRoutes,
   forgetAccounts,
   TASK_ATTACHMENT_ROUTE_POLICIES,
   type ProjectPerson,
@@ -27,6 +36,7 @@ export const projectsServerHost: ProjectsServerHost = {
     const user = getCurrentUser(sessionToken);
     return user ? { id: user.id, name: user.name, email: user.email } : undefined;
   },
+  apiActor: (context) => apiTokenAccount(context),
   findAccountsByIds: (userIds) => findAccountsByIds(userIds).map(person),
   findAccountByEmail: (email) => {
     const account = findAccountByEmail(email);
@@ -51,4 +61,7 @@ export default function composeProjectsServer(app: Hono): void {
   app.route('/api/dashboard', createDashboardRoutes(projectsServerHost));
   declareRoutePolicies(app, '/api/task-attachments', TASK_ATTACHMENT_ROUTE_POLICIES);
   app.route('/api/task-attachments', createTaskAttachmentRoutes(projectsServerHost));
+  // The public API: bearer tokens only, behind the application's token pipeline.
+  app.route('/api/v1/projects', createProjectsApiRoutes(projectsServerHost));
+  app.route('/api/v1/tasks', createTasksApiRoutes(projectsServerHost));
 }

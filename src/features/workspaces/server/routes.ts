@@ -1,6 +1,5 @@
 import { getCookie } from 'hono/cookie';
 import { Hono } from 'hono';
-import type { Context, MiddlewareHandler } from 'hono';
 import {
   createWorkspaceInputSchema,
   inviteMemberInputSchema,
@@ -21,7 +20,6 @@ import {
   type WorkspacePerson,
   type WorkspacesDone,
   type WorkspaceSavedSuccess,
-  type WorkspacesRefusalCode,
   type WorkspacesSuccess,
   type WorkspaceSummary,
 } from '../contract';
@@ -55,14 +53,8 @@ import {
   type WorkspaceRole,
 } from './repository';
 import { withdrawInvitationNotices } from './membership';
-
-function refuse<C extends WorkspacesRefusalCode>(context: Context, status: 404 | 409, code: C, message: string) {
-  return context.json({ success: false as const, message, code }, status);
-}
-
-function workspaceNotFound(context: Context) {
-  return refuse(context, 404, 'WORKSPACE_NOT_FOUND', 'Workspace not found');
-}
+import { workspaceLoader } from './access-loaders';
+import { refuse, workspaceNotFound } from './refusals';
 
 export function createWorkspaceRoutes(host: WorkspacesServerHost) {
   // Declared with the routes, so the application knows the topics once composed.
@@ -93,28 +85,7 @@ export function createWorkspaceRoutes(host: WorkspacesServerHost) {
     return { id: row.id, workspace_id: row.workspace_id, message: row.message, user: author ?? null, created_at: row.created_at };
   }
 
-  /**
-   * Loads the `:id` workspace ahead of input validation: 404 when it does not
-   * exist, 403 unless the caller belongs to it (or owns it, for `owner`).
-   */
-  const loaded = new WeakMap<Context, { workspace: Workspace; role: WorkspaceRole }>();
-  const workspaceAccess =
-    (need: 'member' | 'owner'): MiddlewareHandler =>
-    async (context, next) => {
-      const actor = guard.actor(context);
-      const workspace = findWorkspace(context.req.param('id') ?? '');
-      if (!workspace) return workspaceNotFound(context);
-      const role = memberRole(workspace.id, actor.id);
-      if (!role) return forbidden(context, 'You are not a member of this workspace');
-      if (need === 'owner' && workspace.owner_id !== actor.id) return forbidden(context, 'Only the workspace owner can do this');
-      loaded.set(context, { workspace, role });
-      await next();
-    };
-  const current = (context: Context) => {
-    const found = loaded.get(context);
-    if (!found) throw new Error('Route reads the workspace without loading it');
-    return found;
-  };
+  const { workspaceAccess, current } = workspaceLoader(guard.actor);
 
   return new Hono()
     .get('/', guard.signedIn, (context) => {

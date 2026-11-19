@@ -1,6 +1,8 @@
 import { z } from 'zod';
-import { API_REFUSAL_CODES } from '../../shared/security/codes';
+import type { ApiOperation } from '../../shared/security/api-operations';
+import { API_REFUSAL_CODES, API_TOKEN_REFUSAL_CODES } from '../../shared/security/codes';
 import { CONTROL_MESSAGE, emailSchema, hasNoControlChars } from '../../shared/security/input';
+import { pageQueryShape } from '../../shared/security/pagination';
 
 export const featureName = 'projects' as const;
 export type FeatureName = typeof featureName;
@@ -26,6 +28,15 @@ export const PROJECTS_NOTIFICATION_TYPES = {
 /** Kanban columns, in board order. */
 export const TASK_COLUMNS = ['backlog', 'ongoing', 'revisi', 'review', 'done'] as const;
 export type TaskColumn = (typeof TASK_COLUMNS)[number];
+
+/** How activity entries and the public API name each column. */
+export const TASK_COLUMN_NAMES: Record<TaskColumn, string> = {
+  backlog: 'Backlog',
+  ongoing: 'On Going',
+  revisi: 'Revisi',
+  review: 'Review',
+  done: 'Done',
+};
 
 export const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
@@ -190,6 +201,27 @@ export const createCommentInputSchema = z.object({
 
 /** Uploads name their task in the query: the upload path stays static so it can carry its own body budget. */
 export const uploadAttachmentsQuerySchema = z.object({ task_id: idSchema });
+
+/** The public API's project list: the projects the caller can open, newest first. */
+export const apiProjectsQuerySchema = z.object({
+  /** Only the projects of this workspace. */
+  workspace_id: idSchema.optional(),
+  ...pageQueryShape,
+});
+
+/** The public API's task list, by `updated_at` then `id`, oldest first; every filter narrows it. */
+export const apiTasksQuerySchema = z.object({
+  /** Only the tasks of this batch of the project. */
+  batch_id: idSchema.optional(),
+  column_id: z.enum(TASK_COLUMNS).optional(),
+  assignee_id: idSchema.optional(),
+  /** Only the tasks changed at or after this moment (ms epoch), for incremental sync. */
+  updated_since: z.coerce.number().int().min(0).optional(),
+  ...pageQueryShape,
+});
+
+/** The public API's comment list of a task, oldest first. */
+export const apiCommentsQuerySchema = z.object({ ...pageQueryShape });
 
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectInputSchema>;
@@ -459,6 +491,16 @@ export function projectsResponseSchemas() {
   });
   const dashboardActivity = z.strictObject({ ...activity.shape, project_id: z.string() });
   const projectLink = z.strictObject({ id: z.string(), name: z.string(), workspace_id: z.string().nullable() });
+  const boardColumn = z.strictObject({
+    id: column,
+    name: z.string(),
+    /** Board order, from 0. */
+    position: z.number(),
+    /** Every task of the project in the column. */
+    task_count: z.number(),
+  });
+  /** Send it back as `cursor` for the next page; `null` on the last page. */
+  const nextCursor = z.string().nullable();
   const error = z.strictObject({
     success: z.literal(false),
     message: z.string(),
@@ -542,6 +584,18 @@ export function projectsResponseSchemas() {
         contributors: z.array(contributor),
       }),
     ),
+    /** Public API (`/api/v1`) refusals: the bearer pipeline's codes join the shared and Projects ones. */
+    apiError: z.strictObject({
+      ...error.shape,
+      code: z.enum([...API_REFUSAL_CODES, ...API_TOKEN_REFUSAL_CODES, ...PROJECTS_REFUSAL_CODES]),
+    }),
+    apiProjects: success(z.strictObject({ projects: z.array(projectSummary), next_cursor: nextCursor })),
+    apiProject: success(z.strictObject({ project: projectSummary, active_batch: batch.nullable() })),
+    apiColumns: success(z.strictObject({ columns: z.array(boardColumn) })),
+    /** Direct members first, in joining order, then the accounts that reach the project through its workspace. */
+    apiMembers: success(z.strictObject({ members: z.array(member) })),
+    apiTasks: success(z.strictObject({ tasks: z.array(task), next_cursor: nextCursor })),
+    apiComments: success(z.strictObject({ comments: z.array(comment), next_cursor: nextCursor })),
     /** The flat `data` of a `task_moved` notification; `version` is the task's new one, like `v1.2.3`. */
     taskMovedNotificationData: z.strictObject({
       project_id: z.string(),
@@ -623,6 +677,14 @@ export type AttachmentsUploadedSuccess = Infer<'attachmentsUploaded'>;
 export type ReleasesSuccess = Infer<'releases'>;
 export type ReleaseDetailSuccess = Infer<'releaseDetail'>;
 export type DashboardSuccess = Infer<'dashboard'>;
+export type BoardColumn = Infer<'apiColumns'>['data']['columns'][number];
+export type ProjectsApiError = Infer<'apiError'>;
+export type ApiProjectsSuccess = Infer<'apiProjects'>;
+export type ApiProjectSuccess = Infer<'apiProject'>;
+export type ApiColumnsSuccess = Infer<'apiColumns'>;
+export type ApiProjectMembersSuccess = Infer<'apiMembers'>;
+export type ApiTasksSuccess = Infer<'apiTasks'>;
+export type ApiCommentsSuccess = Infer<'apiComments'>;
 
 export type ProjectsResponse = ProjectsSuccess | ProjectsError;
 export type ProjectSavedResponse = ProjectSavedSuccess | ProjectsError;
@@ -646,3 +708,82 @@ export type ReleasesResponse = ReleasesSuccess | ProjectsError;
 export type ReleaseDetailResponse = ReleaseDetailSuccess | ProjectsError;
 export type DashboardResponse = DashboardSuccess | ProjectsError;
 export type TaskLogsResponse = TaskLogsSuccess | ProjectsError;
+
+/**
+ * The public API's project and task operations, as mounted under `/api/v1`.
+ * The application's OpenAPI document is built from them, and a test checks
+ * them against the mounted routes and their real answers.
+ */
+export function projectsApiV1(): ApiOperation[] {
+  const schemas = projectsResponseSchemas();
+  const project = { 403: ['FORBIDDEN'], 404: ['PROJECT_NOT_FOUND'] } as const;
+  const task = { 403: ['FORBIDDEN'], 404: ['TASK_NOT_FOUND'] } as const;
+  return [
+    {
+      method: 'get',
+      path: '/projects',
+      summary: 'List the projects you can open',
+      description: 'Projects the token\'s account is a member of, directly or through their workspace, newest first.',
+      query: apiProjectsQuerySchema,
+      responses: { 200: schemas.apiProjects },
+    },
+    {
+      method: 'get',
+      path: '/projects/:id',
+      summary: 'Get a project',
+      description: 'The project with its task counts and its active batch.',
+      responses: { 200: schemas.apiProject },
+      refusals: project,
+    },
+    {
+      method: 'get',
+      path: '/projects/:id/columns',
+      summary: 'List a project\'s board columns',
+      description: 'The fixed Kanban columns in board order, with the project\'s task count in each.',
+      responses: { 200: schemas.apiColumns },
+      refusals: project,
+    },
+    {
+      method: 'get',
+      path: '/projects/:id/batches',
+      summary: 'List a project\'s batches',
+      description: 'Every batch (release version), newest version first, with its task counts.',
+      responses: { 200: schemas.batches },
+      refusals: project,
+    },
+    {
+      method: 'get',
+      path: '/projects/:id/members',
+      summary: 'List the accounts that can open a project',
+      responses: { 200: schemas.apiMembers },
+      refusals: project,
+    },
+    {
+      method: 'get',
+      path: '/projects/:id/tasks',
+      summary: 'List a project\'s tasks',
+      description:
+        'Ordered by `updated_at`, then `id`, oldest first, so `updated_since` and `cursor` sync changes incrementally. Deleted tasks do not appear: reconcile with a full listing.',
+      query: apiTasksQuerySchema,
+      responses: { 200: schemas.apiTasks },
+      refusals: { ...project, 404: ['PROJECT_NOT_FOUND', 'BATCH_NOT_FOUND'] },
+    },
+    {
+      method: 'get',
+      path: '/tasks/:id',
+      summary: 'Get a task',
+      description: 'The task with its project, batch, creator and every version it went through.',
+      responses: { 200: schemas.taskDetailFound },
+      refusals: task,
+    },
+    {
+      method: 'get',
+      path: '/tasks/:id/comments',
+      summary: 'List a task\'s comments',
+      description: 'Oldest first, as a conversation reads.',
+      query: apiCommentsQuerySchema,
+      responses: { 200: schemas.apiComments },
+      refusals: task,
+    },
+  ];
+}

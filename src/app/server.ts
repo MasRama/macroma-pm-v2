@@ -11,6 +11,7 @@ import {
   createRateLimiter,
   csrfProtection,
   declareRoutePolicies,
+  publicRoute,
   routePolicyFor,
   securityHeaders,
 } from '../shared/security';
@@ -54,6 +55,7 @@ import composeNotificationsServer from './bindings/notifications.server';
 import composeWorkspacesServer from './bindings/workspaces.server';
 import composeProjectsServer from './bindings/projects.server';
 import { healthRoutes } from '../features/health';
+import { openApiDocument } from './openapi';
 
 const frontendBuildDirectory = resolve(process.cwd(), 'build', 'client');
 const frontendIndex = join(frontendBuildDirectory, 'index.html');
@@ -133,6 +135,8 @@ function isApiRequest(context: { req: { path: string } }): boolean {
  * reads only cookies. It has its own rate limit and needs no CSRF token.
  */
 export const PUBLIC_API_PREFIX = '/api/v1';
+/** The public API's OpenAPI document: the one `/api/v1` path anyone may read without a token. */
+export const PUBLIC_API_SPEC_PATH = `${PUBLIC_API_PREFIX}/openapi.json`;
 
 function isPublicApiRequest(context: { req: { path: string } }): boolean {
   const { path } = context.req;
@@ -207,8 +211,10 @@ app.use('*', sensitiveRateLimiter.middleware);
 // request cannot be forged cross-site; the public API sets no cookie either.
 app.use('*', csrfProtection({ isProduction: isProductionServer, exempt: isPublicApiRequest }));
 // Bearer token first, then its rate limit, then the refusal: the limiter
-// already knows which token to count.
-app.use(`${PUBLIC_API_PREFIX}/*`, resolveApiToken, publicApiRateLimiter.middleware, requireApiToken);
+// already knows which token to count. Only the OpenAPI document skips the refusal.
+app.use(`${PUBLIC_API_PREFIX}/*`, resolveApiToken, publicApiRateLimiter.middleware, (context, next) =>
+  context.req.path === PUBLIC_API_SPEC_PATH ? next() : requireApiToken(context, next),
+);
 // Auth decides which of its own routes stay reachable; the prefix matches its
 // mount below. The public API checks a token's account in its own pipeline.
 const sessionPasswordGate = passwordChangeGate('/api/auth');
@@ -287,6 +293,13 @@ composeActivityServer(app);
 composeNotificationsServer(app);
 composeWorkspacesServer(app);
 composeProjectsServer(app);
+// Built once, from the operations the Features declare.
+let publicApiSpec: ReturnType<typeof openApiDocument> | undefined;
+app.get(PUBLIC_API_SPEC_PATH, publicRoute, (context) => {
+  publicApiSpec ??= openApiDocument(PUBLIC_API_PREFIX);
+  context.header('Cache-Control', 'public, max-age=300');
+  return context.json(publicApiSpec);
+});
 // Live updates for signed-in browsers; Auth decides who is listening and
 // whether they meet a topic's rule, as it does for every guarded route.
 app.get(
