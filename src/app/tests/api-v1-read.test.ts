@@ -289,6 +289,54 @@ describe('public API v1 reads', () => {
     }
   });
 
+  it('lists deleted tasks from the board and from the API, by deletion and page by page', async () => {
+    const tasksPath = `/api/projects/${project.id}/tasks`;
+    const doomed: Array<{ id: string }> = [];
+    for (const title of ['Gone by board', 'Gone by API', 'Gone too']) doomed.push((await created(owner, tasksPath, { title })).task);
+    const at = base + 20_000;
+    vi.useFakeTimers({ toFake: ['Date'], now: at });
+    try {
+      expect((await callApi(owner, 'DELETE', `/api/tasks/${doomed[0].id}`)).status).toBe(200);
+      vi.setSystemTime(at + 1000);
+      const byApi = await app.request(`${PUBLIC_API_PREFIX}/tasks/${doomed[1].id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token.ownerWrite}` },
+      });
+      expect(byApi.status).toBe(200);
+      expect((await callApi(owner, 'DELETE', `/api/tasks/${doomed[2].id}`)).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+    // Two deletions in the same millisecond are ordered by task id.
+    const expected = [
+      { id: doomed[0].id, deleted_at: at },
+      ...[doomed[1].id, doomed[2].id].sort().map((id) => ({ id, deleted_at: at + 1000 })),
+    ];
+
+    const deletedPath = `/projects/${project.id}/tasks/deleted`;
+    const all = await v1(token.owner, deletedPath);
+    expect(all.status).toBe(200);
+    expect(all.body.data).toEqual({ deleted: expected, next_cursor: null });
+    expect((await everyPage(token.owner, `/projects/${project.id}/tasks`, 'tasks', 100)).items.map((task) => task.id)).not.toContain(doomed[0].id);
+
+    // `since` is inclusive; `cursor` resumes after the last deletion a page returned.
+    expect((await v1(token.owner, `${deletedPath}?since=${at + 1000}`)).body.data.deleted).toEqual(expected.slice(1));
+    expect((await v1(token.owner, `${deletedPath}?since=${at + 1001}`)).body.data.deleted).toEqual([]);
+    expect(await everyPage(token.owner, deletedPath, 'deleted', 1)).toEqual({ items: expected, pages: 3 });
+    expect(await everyPage(token.owner, `${deletedPath}?since=${at}`, 'deleted', 2)).toEqual({ items: expected, pages: 2 });
+
+    // The same access as the task list.
+    expect((await v1(token.teammate, deletedPath)).body.data.deleted).toEqual(expected);
+    expect(await v1(token.outsider, deletedPath)).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
+    expect(await v1(token.owner, `/projects/${foreign.id}/tasks/deleted`)).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
+    expect(await v1(token.owner, '/projects/f2a1c7de-0000-4000-8000-000000000000/tasks/deleted')).toMatchObject({
+      status: 404,
+      body: { code: 'PROJECT_NOT_FOUND' },
+    });
+    expect(await v1(token.owner, `${deletedPath}?since=-1`)).toMatchObject({ status: 422, body: { errors: { since: expect.anything() } } });
+    expect((await v1(token.owner, `/projects/${personal.id}/tasks/deleted`)).body.data).toEqual({ deleted: [], next_cursor: null });
+  });
+
   it('answered every documented read in its documented shape', () => {
     const reads = operations.filter((operation) => operation.method === 'get');
     expect(reads.filter((operation) => !answered.has(operation)).map((operation) => operation.path)).toEqual([]);

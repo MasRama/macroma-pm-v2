@@ -220,6 +220,13 @@ export const apiTasksQuerySchema = z.object({
   ...pageQueryShape,
 });
 
+/** The public API's deleted tasks of a project, by `deleted_at` then task id, oldest first. */
+export const apiDeletedTasksQuerySchema = z.object({
+  /** Only the tasks deleted at or after this moment (ms epoch), for incremental sync. */
+  since: z.coerce.number().int().min(0).optional(),
+  ...pageQueryShape,
+});
+
 /** The public API's comment list of a task, oldest first. */
 export const apiCommentsQuerySchema = z.object({ ...pageQueryShape });
 
@@ -595,6 +602,10 @@ export function projectsResponseSchemas() {
     /** Direct members first, in joining order, then the accounts that reach the project through its workspace. */
     apiMembers: success(z.strictObject({ members: z.array(member) })),
     apiTasks: success(z.strictObject({ tasks: z.array(task), next_cursor: nextCursor })),
+    /** Each deleted task's id and when it was deleted (ms epoch). */
+    apiDeletedTasks: success(
+      z.strictObject({ deleted: z.array(z.strictObject({ id: z.string(), deleted_at: z.number() })), next_cursor: nextCursor }),
+    ),
     apiComments: success(z.strictObject({ comments: z.array(comment), next_cursor: nextCursor })),
     /** The flat `data` of a `task_moved` notification; `version` is the task's new one, like `v1.2.3`. */
     taskMovedNotificationData: z.strictObject({
@@ -684,6 +695,7 @@ export type ApiProjectSuccess = Infer<'apiProject'>;
 export type ApiColumnsSuccess = Infer<'apiColumns'>;
 export type ApiProjectMembersSuccess = Infer<'apiMembers'>;
 export type ApiTasksSuccess = Infer<'apiTasks'>;
+export type ApiDeletedTasksSuccess = Infer<'apiDeletedTasks'>;
 export type ApiCommentsSuccess = Infer<'apiComments'>;
 
 export type ProjectsResponse = ProjectsSuccess | ProjectsError;
@@ -763,10 +775,20 @@ export function projectsApiV1(): ApiOperation[] {
       path: '/projects/:id/tasks',
       summary: 'List a project\'s tasks',
       description:
-        'Ordered by `updated_at`, then `id`, oldest first, so `updated_since` and `cursor` sync changes incrementally. Deleted tasks do not appear: reconcile with a full listing.',
+        'Ordered by `updated_at`, then `id`, oldest first, so `updated_since` and `cursor` sync changes incrementally. Deleted tasks are listed by `GET /projects/{id}/tasks/deleted`.',
       query: apiTasksQuerySchema,
       responses: { 200: schemas.apiTasks },
       refusals: { ...project, 404: ['PROJECT_NOT_FOUND', 'BATCH_NOT_FOUND'] },
+    },
+    {
+      method: 'get',
+      path: '/projects/:id/tasks/deleted',
+      summary: 'List a project\'s deleted tasks',
+      description:
+        'Ordered by `deleted_at`, then `id`, oldest first. Sync with `since` and `cursor` as the task list syncs with `updated_since`, and drop these tasks from your copy.',
+      query: apiDeletedTasksQuerySchema,
+      responses: { 200: schemas.apiDeletedTasks },
+      refusals: project,
     },
     {
       method: 'get',

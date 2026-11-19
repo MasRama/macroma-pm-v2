@@ -624,6 +624,7 @@ routes actually mounted, so it lists exactly what the server answers.
 | `GET /api/v1/projects/:id/batches` | `{ batches: Batch[] }`, newest version first |
 | `GET /api/v1/projects/:id/members` | `{ members: { user, role, source }[] }`: direct members, then those who reach the project through its workspace |
 | `GET /api/v1/projects/:id/tasks?batch_id&column_id&assignee_id&updated_since&cursor&limit` | `{ tasks: Task[], next_cursor }` |
+| `GET /api/v1/projects/:id/tasks/deleted?since&cursor&limit` | `{ deleted: { id, deleted_at }[], next_cursor }`: the project's deleted tasks, oldest deletion first |
 | `GET /api/v1/tasks/:id` | `{ task: TaskDetail }`, as `GET /api/tasks/:id` answers it |
 | `GET /api/v1/tasks/:id/comments?cursor&limit` | `{ comments: Comment[], next_cursor }`, oldest first |
 
@@ -657,7 +658,15 @@ moment; it is inclusive, so a change in the same millisecond as the last sync
 is not missed. To sync, page through with `cursor`, remember the largest
 `updated_at` seen, and next time start with `updated_since` set to it. A task
 that changes while you page moves to the end and comes again on a later page.
-Deleted tasks never appear, so reconcile with a full listing now and then.
+A deleted task leaves the list; `GET …/tasks/deleted` names it instead, with
+its `id` and `deleted_at`, ordered by `deleted_at`, then `id`. It pages the
+same way, and `since` (epoch ms, inclusive) keeps only the deletions at or
+after that moment. So a sync is two lists, each with its own mark: the tasks
+with `updated_since`, which you upsert by `id`, and the deleted tasks with
+`since`, which you drop from your copy (an `id` you never had was created and
+deleted between two syncs). Deletions are kept for as long as the project
+exists; deleting the project removes them, and its routes then answer
+`404 PROJECT_NOT_FOUND`.
 `batch_id` must be a batch of the project (`404 BATCH_NOT_FOUND` otherwise);
 `column_id` is one of `backlog`, `ongoing`, `revisi`, `review`, `done`.
 
@@ -669,6 +678,9 @@ Codes: `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`,
 ```sh
 # The tasks of a project changed since a moment, 100 per page.
 curl -s "https://macroma.example/api/v1/projects/$PROJECT_ID/tasks?updated_since=1763510400000&limit=100" \
+  -H "Authorization: Bearer $MACROMA_TOKEN"
+# ...and the tasks deleted since then.
+curl -s "https://macroma.example/api/v1/projects/$PROJECT_ID/tasks/deleted?since=1763510400000&limit=100" \
   -H "Authorization: Bearer $MACROMA_TOKEN"
 
 # Create a task, then move it to review.

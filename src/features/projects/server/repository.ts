@@ -792,6 +792,28 @@ export function pageTasks(
     .all(...values, limit + 1) as TaskRow[];
 }
 
+export interface TaskDeletionRow {
+  task_id: string;
+  deleted_at: number;
+}
+
+/** The public API's deleted tasks: by `deleted_at` then id, from `since`, after `after`, and `limit + 1` rows. */
+export function pageTaskDeletions(projectId: string, filter: { since?: number; after?: PageCursor }, limit: number): TaskDeletionRow[] {
+  const conditions = ['project_id = ?'];
+  const values: Array<string | number> = [projectId];
+  if (filter.since !== undefined) {
+    conditions.push('deleted_at >= ?');
+    values.push(filter.since);
+  }
+  if (filter.after) {
+    conditions.push('(deleted_at > ? OR (deleted_at = ? AND task_id > ?))');
+    values.push(filter.after.at, filter.after.at, filter.after.id);
+  }
+  return getDatabase()
+    .prepare(`SELECT task_id, deleted_at FROM task_deletions WHERE ${conditions.join(' AND ')} ORDER BY deleted_at, task_id LIMIT ?`)
+    .all(...values, limit + 1) as TaskDeletionRow[];
+}
+
 function nextSortOrder(projectId: string, column: TaskColumn): number {
   const row = getDatabase()
     .prepare('SELECT MAX(sort_order) AS max FROM tasks WHERE project_id = ? AND column_id = ?')
@@ -981,12 +1003,18 @@ export function moveTask(
   return { task: findTask(task.id) as TaskRow, log };
 }
 
-/** Deletes the task; returns the storage keys of its attachments. */
+/**
+ * Deletes the task and records when, so the public API can tell a syncing
+ * client it is gone; returns the storage keys of its attachments.
+ */
 export function deleteTask(task: TaskRow, actorId: string): string[] {
   const database = getDatabase();
   return database.transaction(() => {
     const keys = attachmentKeysWhere('t.id = ?', [task.id]);
     database.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+    database
+      .prepare('INSERT INTO task_deletions (task_id, project_id, deleted_at) VALUES (?, ?, ?)')
+      .run(task.id, task.project_id, Date.now());
     logActivity({
       projectId: task.project_id,
       eventType: 'task.deleted',

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import {
   apiCommentsQuerySchema,
+  apiDeletedTasksQuerySchema,
   apiProjectsQuerySchema,
   apiTasksQuerySchema,
   createCommentInputSchema,
@@ -11,6 +12,7 @@ import {
   TASK_COLUMNS,
   type ApiColumnsSuccess,
   type ApiCommentsSuccess,
+  type ApiDeletedTasksSuccess,
   type ApiProjectMembersSuccess,
   type ApiProjectsSuccess,
   type ApiProjectSuccess,
@@ -27,7 +29,7 @@ import { batchesOf, commentView, membersOf, personRefs, summaries, taskDetailVie
 import { projectLoader, taskLoader } from './access-loaders';
 import type { ProjectsServerHost } from './host';
 import { batchNotFound } from './refusals';
-import { findBatch, listProjectsFor, pageComments, pageTasks, taskCountsByProject } from './repository';
+import { findBatch, listProjectsFor, pageComments, pageTaskDeletions, pageTasks, taskCountsByProject } from './repository';
 import { addCommentAction, createTaskAction, deleteTaskAction, moveTaskAction, refuseTaskWrite, updateTaskAction } from './task-actions';
 
 /*
@@ -127,6 +129,16 @@ export function createProjectsApiRoutes(host: ProjectsServerHost) {
         message: 'OK',
         data: { tasks: taskViews(host, page.items), next_cursor: page.nextCursor },
       } satisfies ApiTasksSuccess);
+    })
+    .get('/:id/tasks/deleted', guard.signedIn, projectAccess('member'), queryInput(apiDeletedTasksQuerySchema), (context) => {
+      const { since, cursor, limit } = context.req.valid('query');
+      const rows = pageTaskDeletions(current(context).id, { since, after: cursor }, limit);
+      const page = pageOf(rows, limit, (row) => ({ at: row.deleted_at, id: row.task_id }));
+      return context.json({
+        success: true as const,
+        message: 'OK',
+        data: { deleted: page.items.map((row) => ({ id: row.task_id, deleted_at: row.deleted_at })), next_cursor: page.nextCursor },
+      } satisfies ApiDeletedTasksSuccess);
     })
     .post('/:id/tasks', guard.signedIn, projectAccess('member'), jsonInput(createTaskInputSchema), (context) => {
       const created = createTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
