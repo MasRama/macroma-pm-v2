@@ -3,7 +3,8 @@ import { createApp, defineComponent, nextTick, type App } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ApiDocsPage from '../pages/ApiDocsPage.vue';
-import { baseUrlOf, curlFor, readApiDocs, type DocOperation } from '../pages/api-docs/openapi-docs';
+import { baseUrlOf, curlFor, exampleOf, readApiDocs, type DocOperation } from '../pages/api-docs/openapi-docs';
+import { sectionAt } from '../pages/api-docs/scroll-spy';
 import fixture from './fixtures/openapi-v1.json';
 
 /**
@@ -76,7 +77,10 @@ describe('OpenAPI renderer', () => {
     ]);
     expect(create.body?.find((field) => field.name === 'priority')).toMatchObject({ values: ['low', 'medium', 'high'] });
     expect(create.bodyExample).toEqual({ title: '<title>' });
-    expect(operation('PATCH', '/tasks/{id}/move').bodyExample).toEqual({ column_id: 'backlog' });
+    // The document's own example: a new task sits in backlog, so the move names another column.
+    expect(operation('PATCH', '/tasks/{id}/move').bodyExample).toEqual({ column_id: 'review' });
+    // An edit sends a revision the schema accepts (exclusiveMinimum 0) and one field to change.
+    expect(operation('PATCH', '/tasks/{id}').bodyExample).toEqual({ revision: 1, title: '<title>' });
 
     const list = operation('GET', '/projects/{id}/tasks');
     expect(list.body).toBeNull();
@@ -104,14 +108,39 @@ describe('OpenAPI renderer', () => {
 
   it('describes pagination and the error envelope when the document has them', () => {
     expect(docs.pagination).toEqual({ limitMin: 1, limitMax: 100, limitDefault: 50 });
-    expect(docs.errorExample).toEqual({ success: false, message: '<message>', code: 'UNAUTHORIZED', errors: { field: ['<message>'] } });
+    // The code a call without a valid token really gets: the first 401 refusal, not the envelope's first enum value.
+    expect(docs.errorExample).toEqual({ success: false, message: '<message>', code: 'TOKEN_INVALID' });
+    expect(docs.rateLimit).toEqual({ requests: 120, windowSeconds: 60, code: 'RATE_LIMITED' });
     expect(docs.bearer).toBeDefined();
 
     const bare = readApiDocs({ openapi: '3.1.0', info: { title: 'Bare' }, paths: { '/ping': { get: { summary: 'Ping', responses: {} } } } });
     expect(bare.pagination).toBeNull();
     expect(bare.errorExample).toBeNull();
+    expect(bare.rateLimit).toBeNull();
     expect(bare.bearer).toBeUndefined();
     expect(bare.groups.map((group) => group.tag)).toEqual(['Lainnya']);
+  });
+
+  it('picks example values the schema accepts', () => {
+    const spec = {};
+    expect(exampleOf(spec, { type: 'integer', exclusiveMinimum: 0 })).toBe(1);
+    expect(exampleOf(spec, { type: 'integer', minimum: 5, exclusiveMinimum: 2 })).toBe(5);
+    expect(exampleOf(spec, { type: 'integer', minimum: 0 })).toBe(0);
+    expect(exampleOf(spec, { type: 'number' })).toBe(0);
+    expect(exampleOf(spec, { type: 'string', enum: ['a', 'b'], examples: ['b'] })).toBe('b');
+    expect(exampleOf(spec, { type: 'string', enum: ['a', 'b'] })).toBe('a');
+  });
+
+  it('marks the section in view, and the last one at the bottom of the page', () => {
+    const sections = [
+      { id: 'a', top: -400 },
+      { id: 'b', top: 40 },
+      { id: 'c', top: 500 },
+    ];
+    expect(sectionAt(sections, 96, false)).toBe('b');
+    expect(sectionAt(sections, 96, true)).toBe('c');
+    expect(sectionAt([{ id: 'a', top: 300 }], 96, false)).toBe('a');
+    expect(sectionAt([], 96, false)).toBeUndefined();
   });
 
   it('makes the base URL absolute against the site, or falls back to /api/v1', () => {
@@ -133,6 +162,15 @@ describe('OpenAPI renderer', () => {
         `  -d '{"title":"<title>"}'`,
       ].join('\n'),
     );
+    expect(curlFor(operation('PATCH', '/tasks/{id}'), base)).toBe(
+      [
+        'curl -s -X PATCH "https://pm.example.id/api/v1/tasks/$TASK_ID" \\',
+        '  -H "Authorization: Bearer $MACROMA_TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        `  -d '{"revision":1,"title":"<title>"}'`,
+      ].join('\n'),
+    );
+    expect(curlFor(operation('PATCH', '/tasks/{id}/move'), base)).toContain(`-d '{"column_id":"review"}'`);
     expect(curlFor(operation('DELETE', '/tasks/{id}'), base)).toBe(
       ['curl -s -X DELETE "https://pm.example.id/api/v1/tasks/$TASK_ID" \\', '  -H "Authorization: Bearer $MACROMA_TOKEN"'].join('\n'),
     );
@@ -161,11 +199,15 @@ describe('Dokumentasi API page', () => {
     }
   }
 
-  async function mount(): Promise<void> {
+  /** Mounts the page inside a scrolling shell, as the app's `.shell__main`. */
+  async function mount(): Promise<HTMLElement> {
     const topbar = document.createElement('div');
     topbar.id = 'shell-topbar';
+    const shell = document.createElement('div');
+    shell.style.overflowY = 'auto';
     const host = document.createElement('div');
-    document.body.append(topbar, host);
+    shell.append(host);
+    document.body.append(topbar, shell);
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/:any(.*)*', component: defineComponent({ render: () => null }) }],
@@ -173,6 +215,7 @@ describe('Dokumentasi API page', () => {
     await router.push('/settings/api-docs');
     app = createApp(ApiDocsPage).use(router);
     app.mount(host);
+    return shell;
   }
 
   const answer = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
@@ -207,7 +250,11 @@ describe('Dokumentasi API page', () => {
     expect(byTestId('api-docs-intro')?.textContent).toContain('Authorization: Bearer mcr_...');
     expect(byTestId('api-docs-tokens')?.getAttribute('href')).toBe('/settings/tokens');
     expect(byTestId('api-docs-pagination')?.textContent).toContain('1–100, bawaan 50');
-    expect(byTestId('api-docs-errors')?.textContent).toContain('"code": "UNAUTHORIZED"');
+    expect(byTestId('api-docs-errors')?.textContent).toContain('"code": "TOKEN_INVALID"');
+    const rate = byTestId('api-docs-rate')?.textContent?.replace(/\s+/g, ' ');
+    expect(rate).toContain('Setiap token boleh mengirim 120 permintaan per menit.');
+    expect(rate).toContain('429 RATE_LIMITED');
+    expect(rate).toContain('Retry-After');
 
     expect(allByTestId('api-docs-group').map((group) => group.querySelector('h2')?.textContent)).toEqual(['Workspaces', 'Projects', 'Tasks']);
 
@@ -238,6 +285,62 @@ describe('Dokumentasi API page', () => {
     // The phone jump list names every endpoint.
     const jump = byTestId('api-docs-jump') as HTMLSelectElement;
     expect([...jump.options].map((option) => option.value)).toEqual(['api-intro', ...docs.groups.flatMap((group) => group.operations.map((item) => item.id))]);
+  });
+
+  it('keeps the jumped-to card selected, also the last one that cannot reach the top', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => answer(fixture)));
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const shell = await mount();
+      await settle();
+
+      // Geometry jsdom lacks: where each card's top sits and how far the shell is scrolled.
+      const ids = ['api-intro', ...docs.groups.flatMap((group) => group.operations.map((item) => item.id))];
+      const [last, beforeLast] = [ids[ids.length - 1], ids[ids.length - 2]];
+      let tops: Record<string, number> = {};
+      for (const id of ids) document.getElementById(id)!.getBoundingClientRect = () => ({ top: tops[id] ?? 2000 }) as DOMRect;
+      shell.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+      const scrolled = (scrollTop: number, sectionTops: Record<string, number>) => {
+        tops = sectionTops;
+        Object.defineProperties(shell, {
+          scrollTop: { value: scrollTop, configurable: true },
+          clientHeight: { value: 800, configurable: true },
+          scrollHeight: { value: 3000, configurable: true },
+        });
+        shell.dispatchEvent(new Event('scroll'));
+      };
+      // The last card stops low in the view: the card before it still covers the top.
+      const atBottom = { [beforeLast]: -200, [last]: 320 };
+      const midway = { [beforeLast]: 40, [last]: 700 };
+      const jump = byTestId('api-docs-jump') as HTMLSelectElement;
+      const selected = async () => {
+        await settle();
+        return { select: jump.value, nav: byTestId('api-docs-nav')?.querySelector('[aria-current="true"]')?.getAttribute('href') };
+      };
+
+      jump.value = last;
+      jump.dispatchEvent(new Event('change'));
+      expect(scrollIntoView.mock.contexts[0]).toBe(document.getElementById(last));
+      scrolled(1600, midway);
+      scrolled(2200, atBottom);
+      expect(await selected()).toEqual({ select: last, nav: `#${last}` });
+
+      // Scrolling by hand follows the reader again; the bottom of the page is the last card.
+      shell.dispatchEvent(new Event('wheel'));
+      scrolled(1600, midway);
+      expect(await selected()).toEqual({ select: beforeLast, nav: `#${beforeLast}` });
+      scrolled(2200, atBottom);
+      expect(await selected()).toEqual({ select: last, nav: `#${last}` });
+
+      // A card near the bottom that is jumped to stays selected too.
+      jump.value = beforeLast;
+      jump.dispatchEvent(new Event('change'));
+      scrolled(2200, atBottom);
+      expect(await selected()).toEqual({ select: beforeLast, nav: `#${beforeLast}` });
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it('copies a curl example and says so', async () => {

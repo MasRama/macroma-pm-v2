@@ -59,7 +59,7 @@ export interface DocOperation {
   status: number;
   response: DocField[];
   refusals: DocRefusal[];
-  /** Body a curl example sends: the required fields with placeholder values. */
+  /** Body a curl example sends: the required fields with values the schema accepts, and a change when an edit needs one. */
   bodyExample: unknown;
 }
 
@@ -76,6 +76,14 @@ export interface DocPagination {
   limitDefault?: number;
 }
 
+/** How many requests a token may make in a window (`info.x-rate-limit`), and the code past it. */
+export interface DocRateLimit {
+  requests: number;
+  windowSeconds: number;
+  /** The 429 refusal's code. */
+  code?: string;
+}
+
 export interface ApiDocs {
   title: string;
   description?: string;
@@ -86,8 +94,9 @@ export interface ApiDocs {
   groups: DocGroup[];
   /** Set when lists take `cursor` and `limit`. */
   pagination: DocPagination | null;
-  /** An example refusal built from `components.schemas.Error`. */
+  /** An example refusal built from `components.schemas.Error`, with the code a request without a valid token gets. */
   errorExample: unknown;
+  rateLimit: DocRateLimit | null;
 }
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -270,10 +279,22 @@ function scopeOf(method: HttpMethod, refusals: DocRefusal[]): TokenScope {
   return method === 'GET' ? 'read' : 'write';
 }
 
-/** A placeholder value for a schema: a const, the default, the first allowed value, or `<name>`. */
+/** The smallest number the schema accepts: its `minimum`, just above its `exclusiveMinimum`, or 0. */
+function lowestOf(schema: Schema, integer: boolean): number {
+  const bounds: number[] = [];
+  if (typeof schema.minimum === 'number') bounds.push(integer ? Math.ceil(schema.minimum) : schema.minimum);
+  if (typeof schema.exclusiveMinimum === 'number') bounds.push(integer ? Math.floor(schema.exclusiveMinimum) + 1 : schema.exclusiveMinimum + 1);
+  return bounds.length ? Math.max(...bounds) : 0;
+}
+
+/**
+ * A value the schema accepts: a const, the document's own example, the
+ * default, the first allowed value, the smallest number, or `<name>`.
+ */
 export function exampleOf(spec: Schema, raw: unknown, name = 'value', depth = 0, onlyRequired = false): unknown {
   const schema = nonNull(spec, flatten(spec, raw));
   if (schema.const !== undefined) return schema.const;
+  if (Array.isArray(schema.examples) && schema.examples.length > 0) return schema.examples[0];
   if (schema.default !== undefined) return schema.default;
   const values = Array.isArray(schema.enum) ? schema.enum : null;
   if (values?.length) return values[0];
@@ -283,7 +304,7 @@ export function exampleOf(spec: Schema, raw: unknown, name = 'value', depth = 0,
   switch (type) {
     case 'integer':
     case 'number':
-      return typeof schema.minimum === 'number' ? schema.minimum : 0;
+      return lowestOf(schema, type === 'integer');
     case 'boolean':
       return false;
     case 'array':
@@ -301,6 +322,19 @@ export function exampleOf(spec: Schema, raw: unknown, name = 'value', depth = 0,
     default:
       return `<${name}>`;
   }
+}
+
+/**
+ * The body a curl example sends: the required fields. An edit whose only
+ * required field is the `revision` it is based on would change nothing, so it
+ * also sends the first optional field.
+ */
+function bodyExampleOf(spec: Schema, body: Schema): unknown {
+  const example = exampleOf(spec, body, 'body', 0, true);
+  if (!isRecord(example) || Object.keys(example).some((key) => key !== 'revision')) return example;
+  const properties = isRecord(body.properties) ? body.properties : {};
+  const change = Object.keys(properties).find((key) => !(key in example));
+  return change ? { ...example, [change]: exampleOf(spec, properties[change], change, 1) } : example;
 }
 
 function operationOf(spec: Schema, method: HttpMethod, path: string, operation: Schema): DocOperation {
@@ -324,7 +358,7 @@ function operationOf(spec: Schema, method: HttpMethod, path: string, operation: 
     status: success ?? 200,
     response: success === undefined ? [] : responseFields(spec, jsonSchemaOf(spec, responses[String(success)])),
     refusals,
-    bodyExample: body ? exampleOf(spec, body, 'body', 0, true) : undefined,
+    bodyExample: body ? bodyExampleOf(spec, body) : undefined,
   };
 }
 
@@ -332,6 +366,21 @@ function paginationOf(groups: DocGroup[]): DocPagination | null {
   const params = groups.flatMap((group) => group.operations.flatMap((operation) => operation.params));
   if (!params.some((param) => param.in === 'query' && param.name === 'cursor')) return null;
   return { ...limitOf(params.find((param) => param.in === 'query' && param.name === 'limit')) };
+}
+
+function rateLimitOf(info: Schema, groups: DocGroup[]): DocRateLimit | null {
+  const limit = isRecord(info['x-rate-limit']) ? info['x-rate-limit'] : null;
+  if (!limit || typeof limit.requests !== 'number' || typeof limit.window_seconds !== 'number') return null;
+  const code = groups.flatMap((group) => group.operations.flatMap((operation) => operation.refusals)).find((refusal) => refusal.status === 429)?.codes[0];
+  return { requests: limit.requests, windowSeconds: limit.window_seconds, ...(code ? { code } : {}) };
+}
+
+/** The example refusal: the envelope's required fields, with the code a missing or wrong token gets (the first 401). */
+function errorExampleOf(spec: Schema, schema: unknown, groups: DocGroup[]): unknown {
+  if (schema === undefined) return null;
+  const example = exampleOf(spec, schema, 'error', 0, true);
+  const code = groups.flatMap((group) => group.operations.flatMap((operation) => operation.refusals)).find((refusal) => refusal.status === 401)?.codes[0];
+  return code && isRecord(example) && 'code' in example ? { ...example, code } : example;
 }
 
 function limitOf(param: DocParam | undefined): DocPagination {
@@ -389,7 +438,8 @@ export function readApiDocs(value: unknown): ApiDocs {
     ...(bearer ? { bearer: asString(bearer.description) ? { description: bearer.description as string } : {} } : {}),
     groups: filled,
     pagination: paginationOf(filled),
-    errorExample: errorSchema ? exampleOf(spec, errorSchema, 'error') : null,
+    errorExample: errorExampleOf(spec, errorSchema, filled),
+    rateLimit: rateLimitOf(info, filled),
   };
 }
 

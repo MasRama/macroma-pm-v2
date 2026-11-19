@@ -6,6 +6,7 @@ import ApiCode from './api-docs/ApiCode.vue';
 import ApiFields from './api-docs/ApiFields.vue';
 import ApiText from './api-docs/ApiText.vue';
 import { baseUrlOf, curlFor, readApiDocs, type ApiDocs, type DocParam } from './api-docs/openapi-docs';
+import { scrollerOf, sectionAt } from './api-docs/scroll-spy';
 
 /**
  * Dokumentasi API: the public API drawn from its own OpenAPI document, so
@@ -17,6 +18,8 @@ const SCOPES = [
   { scope: 'write', text: 'Membaca dan mengubah: semua endpoint, termasuk POST, PATCH, dan DELETE.' },
 ] as const;
 const PARAM_PLACE = { path: 'path', query: 'query' } as const;
+/** Where a section counts as reached: below the sticky top bar and the anchors' 72px scroll margin. */
+const SPY_LINE = 96;
 
 const docs = ref<ApiDocs | null>(null);
 const failed = ref(false);
@@ -26,6 +29,12 @@ const activeId = ref('api-intro');
 const baseUrl = computed(() => (docs.value ? baseUrlOf(docs.value, window.location.origin) : ''));
 /** The base URL's path, shown muted in front of each endpoint path. */
 const basePath = computed(() => (baseUrl.value ? new URL(baseUrl.value).pathname.replace(/\/$/, '') : ''));
+const rateWindow = computed(() => {
+  const seconds = docs.value?.rateLimit?.windowSeconds;
+  if (seconds === 60) return 'per menit';
+  if (seconds === 3600) return 'per jam';
+  return seconds ? `per ${seconds} detik` : '';
+});
 const errorJson = computed(() => (docs.value?.errorExample ? JSON.stringify(docs.value.errorExample, null, 2) : ''));
 const pageNote = computed(() => {
   const pagination = docs.value?.pagination;
@@ -50,46 +59,70 @@ async function load(): Promise<void> {
     loading.value = false;
   }
   await nextTick();
-  watchSections();
+  watchScroll();
 }
 
 function paramNote(param: DocParam): string {
   return [param.limits, param.fallback !== undefined ? `bawaan ${param.fallback}` : ''].filter(Boolean).join(' · ');
 }
 
+// Scroll-spy: the nav and the jump select mark the section in view. A jump
+// pins its section until the reader scrolls by hand, so a card near the bottom
+// stays selected though it cannot reach the top of the view.
+let scroller: HTMLElement | null = null;
+let pinned: string | null = null;
+const HAND_SCROLL = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+function sectionIds(): string[] {
+  return docs.value ? ['api-intro', ...docs.value.groups.flatMap((group) => group.operations.map((operation) => operation.id))] : [];
+}
+
 /** Scrolls the shell to a section; the URL keeps no hash, so the router never re-navigates. */
 function jump(id: string): void {
   activeId.value = id;
+  pinned = id;
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Scroll-spy: the nav marks the first section still in the upper part of the viewport.
-let observer: IntersectionObserver | null = null;
-const visible = new Set<string>();
-function watchSections(): void {
-  observer?.disconnect();
-  visible.clear();
-  if (typeof IntersectionObserver === 'undefined' || !docs.value) return;
-  const order = ['api-intro', ...docs.value.groups.flatMap((group) => group.operations.map((operation) => operation.id))];
-  observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) visible.add(entry.target.id);
-        else visible.delete(entry.target.id);
-      }
-      const first = order.find((id) => visible.has(id));
-      if (first) activeId.value = first;
-    },
-    { rootMargin: '-72px 0px -55% 0px' },
-  );
-  for (const id of order) {
+function spy(): void {
+  if (pinned || !scroller) return;
+  const top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+  const sections = sectionIds().flatMap((id) => {
     const element = document.getElementById(id);
-    if (element) observer.observe(element);
-  }
+    return element ? [{ id, top: element.getBoundingClientRect().top - top }] : [];
+  });
+  const atBottom = scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+  const current = sectionAt(sections, SPY_LINE, atBottom);
+  if (current) activeId.value = current;
+}
+
+function release(): void {
+  pinned = null;
+}
+
+/** The page's own scrolling element fires its scroll events on the window. */
+function scrollEventsOf(element: HTMLElement): EventTarget {
+  return element === document.scrollingElement ? window : element;
+}
+
+function unwatchScroll(): void {
+  if (scroller) scrollEventsOf(scroller).removeEventListener('scroll', spy);
+  for (const type of HAND_SCROLL) scroller?.removeEventListener(type, release);
+  scroller = null;
+}
+
+function watchScroll(): void {
+  unwatchScroll();
+  const intro = document.getElementById('api-intro');
+  if (!intro) return;
+  scroller = scrollerOf(intro);
+  scrollEventsOf(scroller).addEventListener('scroll', spy, { passive: true });
+  for (const type of HAND_SCROLL) scroller.addEventListener(type, release, { passive: true });
+  spy();
 }
 
 onMounted(() => void load());
-onUnmounted(() => observer?.disconnect());
+onUnmounted(unwatchScroll);
 </script>
 
 <template>
@@ -182,6 +215,15 @@ onUnmounted(() => observer?.disconnect());
               <code class="docs__code">cursor</code>. Jawabannya membawa <code class="docs__code">next_cursor</code>: kosong
               (<code class="docs__code">null</code>) di halaman terakhir, selain itu kirim balik sebagai
               <code class="docs__code">cursor</code> untuk halaman berikutnya.
+            </p>
+          </div>
+
+          <div v-if="docs.rateLimit" class="docs__fact" data-testid="api-docs-rate">
+            <h3 class="docs__h3">Batas permintaan</h3>
+            <p class="docs__text">
+              Setiap token boleh mengirim {{ docs.rateLimit.requests }} permintaan {{ rateWindow }}. Lebih dari itu dijawab
+              <code class="docs__code">429{{ docs.rateLimit.code ? ` ${docs.rateLimit.code}` : '' }}</code>;
+              tunggu sebanyak detik di header <code class="docs__code">Retry-After</code>, lalu coba lagi.
             </p>
           </div>
 
