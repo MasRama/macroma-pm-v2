@@ -312,6 +312,7 @@ describe('browser authentication lifecycle', () => {
       roles: ['admin'],
       permissions: ['users.view'],
       mustChangePassword: false,
+      hasPassword: true,
     };
     const me = vi
       .fn()

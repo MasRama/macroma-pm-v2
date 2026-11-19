@@ -108,12 +108,15 @@ describe('auth web client contract', () => {
     const security = createSecurityClient();
     expect(schemas.error.parse(await security.listTokens())).toMatchObject({ code: 'UNAUTHORIZED' });
 
-    await browser.signUp();
+    const account = await browser.signUp();
+    expect(
+      schemas.error.parse(await security.createToken({ name: 'Contract token', scope: 'read', expiresInDays: 30, password: 'not the password' })),
+    ).toMatchObject({ code: 'INVALID_PASSWORD' });
     const created = schemas.apiTokenCreated.parse(
-      await security.createToken({ name: 'Contract token', scope: 'read', expiresInDays: 30 }),
+      await security.createToken({ name: 'Contract token', scope: 'read', expiresInDays: 30, password: account.password }),
     );
     expect(schemas.apiTokens.parse(await security.listTokens()).data.tokens).toEqual([created.data.token]);
-    expect(schemas.error.parse(await security.createToken({ name: '', scope: 'read', expiresInDays: null }))).toMatchObject({
+    expect(schemas.error.parse(await security.createToken({ name: '', scope: 'read', expiresInDays: null, password: account.password }))).toMatchObject({
       code: 'VALIDATION_ERROR',
     });
     schemas.revokeApiTokens.parse(await security.revokeToken(created.data.token.id));

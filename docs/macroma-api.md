@@ -92,10 +92,10 @@ registration policy and limits.
 | `POST /api/auth/login` | public, strict limit | `{ email, password }` | `{ twoFactorRequired }`; when `true`, finish with the challenge |
 | `POST /api/auth/two-factor/challenge` | public, strict limit | `{ code }` (6 digits) or `{ recovery_code }` | signs in |
 | `POST /api/auth/logout` | public | | |
-| `GET /api/auth/me` | signed in | | `{ user: { id, name, email, avatar, phone, verified, roles[], permissions[], mustChangePassword } }` |
-| `POST /api/auth/change-password` | signed in | `{ current_password, new_password }` | |
+| `GET /api/auth/me` | signed in | | `{ user: { id, name, email, avatar, phone, verified, roles[], permissions[], mustChangePassword, hasPassword } }`; `hasPassword` is `false` while an account made through Google has only its random password |
+| `POST /api/auth/change-password` | signed in | `{ current_password, new_password }` | revokes every API token of the account |
 | `POST /api/auth/forgot-password` | public, strict limit | `{ email }` | always 200 with the same message, whether or not an account uses the email |
-| `POST /api/auth/reset-password` | public, strict limit | `{ token, password }` | |
+| `POST /api/auth/reset-password` | public, strict limit | `{ token, password }` | revokes every API token of the account |
 | `GET /api/auth/google/redirect` | public | | a browser navigation, not a fetch |
 | `GET /api/auth/google/callback` | public | | Google's return address |
 
@@ -138,7 +138,7 @@ revoke tokens. The web client is `createSecurityClient()` from
 | Method and path | Access | Body | `data` |
 |---|---|---|---|
 | `GET /api/auth/tokens` | signed in | | `{ tokens: ApiToken[] }`: working and expired tokens, never revoked ones, newest first |
-| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays: 1–365 \| null }` | `201 { token: ApiToken, secret }` |
+| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays?: 1–365 \| null, password? }` | `201 { token: ApiToken, secret }` |
 | `DELETE /api/auth/tokens/:id` | signed in | | `{ revoked: 1 }`; another account's or an already revoked token answers `404 NOT_FOUND` |
 | `POST /api/auth/tokens/revoke-all` | signed in, strict limit | | `{ revoked }`, the number revoked |
 
@@ -151,17 +151,32 @@ so people can tell tokens apart.
 - **The secret** (`mcr_` and 43 base64url characters) is in the create answer
   once and never again: only its SHA-256 is stored. Show it with a copy button
   and say it will not be shown again.
+- **Confirming the owner.** A stolen session alone cannot mint a token.
+  When `GET /api/auth/me` says `hasPassword: true`, creating a token needs the
+  account's current `password`, checked exactly like the two-factor screens:
+  a wrong one answers `400 INVALID_PASSWORD` ("Password is incorrect"), a
+  missing or empty one `422 VALIDATION_ERROR` (`errors.password`). An account
+  made through Google (`hasPassword: false`) has no password to type, so
+  `password` is not checked and it must have signed in within the last
+  5 minutes instead; an older sign-in answers `403 REAUTH_REQUIRED`: send the
+  person through Google sign-in again, then retry.
+- **Expiry.** Leaving `expiresInDays` out makes a 90-day token; a token that
+  never expires needs `expiresInDays: null`. At most 365 days.
 - **Scopes.** `read` calls only `GET` and `HEAD`; `write` calls every method.
 - **Limit.** An account holds at most 50 working tokens; the 51st answers
   `409 TOKEN_LIMIT_REACHED`. Expired and revoked tokens do not count.
-- **Passwords.** Tokens keep working when the account changes or resets its
-  password. While an administrator's temporary password is pending, every
-  token answers `403 PASSWORD_CHANGE_REQUIRED` until it is replaced. Deleting
-  the account deletes its tokens.
+- **Passwords.** Changing the password, a reset by email and an
+  administrator's reset each revoke every token of the account (they then
+  answer `401 TOKEN_REVOKED`) and record `auth.tokens-revoked` in the
+  activity feed (an administrator's reset shows as `users.password-reset`).
+  `auth.tokens-changed` is published too, though the change signs every
+  other session out anyway. While an administrator's temporary password is
+  pending, any token answers `403 PASSWORD_CHANGE_REQUIRED`. Deleting the
+  account deletes its tokens.
 - **Live.** Creating or revoking tokens publishes `auth.tokens-changed` to the
   account, so its other tabs refetch `GET /api/auth/tokens`.
 
-Codes: `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
+Codes: `INVALID_PASSWORD`, `REAUTH_REQUIRED`, `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
 
 ## Profile
 

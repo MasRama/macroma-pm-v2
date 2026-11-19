@@ -161,8 +161,12 @@ const accountGuard = createGuard((context): Authenticated | undefined => {
 const invalidPassword = (context: Context) =>
   context.json({ success: false as const, message: 'Password is incorrect', code: 'INVALID_PASSWORD' as const }, 400);
 
-/** Re-authenticates with the current password; returns an error response or undefined. */
-async function confirmPassword(context: Context, user: StoredUser, password: string) {
+/**
+ * Re-authenticates with the current password; returns an error response or
+ * undefined. Also guards creating API tokens. An account made through Google
+ * has a random password nobody knows, so it sets one (forgot password) first.
+ */
+export async function confirmPassword(context: Context, user: StoredUser, password: string) {
   if (!(await checkPassword(password, user))) {
     Logger.logSecurity('security_password_confirmation_failed', { userId: user.id });
     return invalidPassword(context);

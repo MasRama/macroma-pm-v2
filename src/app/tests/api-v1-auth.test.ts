@@ -169,23 +169,36 @@ describe('public API bearer pipeline', () => {
     }
   });
 
-  it('pauses every token while a temporary password is pending, and resumes once it is replaced', async () => {
+  it('revokes every token when an administrator resets the password', async () => {
     let persona = await loaded.personas.signUp();
     const token = await loaded.personas.issueApiToken(persona, 'write');
 
     persona = await loaded.personas.requirePasswordChange(persona);
-    expectRefusal(await v1(token), 403, 'PASSWORD_CHANGE_REQUIRED');
-    expectRefusal(await v1(token, 'POST'), 403, 'PASSWORD_CHANGE_REQUIRED');
+    expectRefusal(await v1(token), 401, 'TOKEN_REVOKED');
 
+    // Replacing the temporary password does not bring it back.
     const changed = await sessionCall(persona.cookie, 'POST', '/api/auth/change-password', {
       current_password: loaded.personas.TEST_PASSWORD,
       new_password: 'a different long passphrase',
     });
     expect(changed.status).toBe(200);
-    expect((await v1(token)).status).toBe(200);
+    expectRefusal(await v1(token), 401, 'TOKEN_REVOKED');
   });
 
-  it('keeps tokens working after the account changes its password', async () => {
+  it('leaves a session cookie’s pending temporary password to the session routes', async () => {
+    // The session gate would refuse this cookie; the public API answers by the token alone.
+    const holder = await loaded.personas.signUp();
+    const token = await loaded.personas.issueApiToken(holder, 'write');
+    const temporary = await loaded.personas.requirePasswordChange(await loaded.personas.signUp());
+    const gated = await sessionCall(temporary.cookie, 'GET', '/api/auth/tokens');
+    expect([gated.status, gated.body.code]).toEqual([403, 'PASSWORD_CHANGE_REQUIRED']);
+
+    const answer = await v1(token, 'POST', { Cookie: temporary.cookie });
+    expect(answer.status).toBe(200);
+    expect(answer.body.data.account.id).toBe(holder.id);
+  });
+
+  it('revokes every token when the account changes its password', async () => {
     const persona = await loaded.personas.signUp();
     const token = await loaded.personas.issueApiToken(persona, 'write');
 
@@ -195,7 +208,7 @@ describe('public API bearer pipeline', () => {
     });
     expect(changed.status).toBe(200);
 
-    expect((await v1(token, 'POST')).status).toBe(200);
+    expectRefusal(await v1(token, 'POST'), 401, 'TOKEN_REVOKED');
   });
 
   it('stops answering for a deleted account', async () => {
@@ -228,7 +241,7 @@ describe('public API bearer pipeline', () => {
     const minted = await loaded.app.request('/api/auth/tokens', {
       method: 'POST',
       headers: { ...bearer, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'escalation', scope: 'write', expiresInDays: null }),
+      body: JSON.stringify({ name: 'escalation', scope: 'write', expiresInDays: null, password: loaded.personas.TEST_PASSWORD }),
     });
     expect(minted.status).toBe(403);
   });
@@ -259,6 +272,30 @@ describe('public API bearer pipeline', () => {
     }
     expectRefusal(await v1(`mcr_${'y'.repeat(43)}`, 'GET', fromOne), 429, 'RATE_LIMITED');
     expectRefusal(await v1(`mcr_${'y'.repeat(43)}`, 'GET', { 'x-test-ip': '203.0.113.8' }), 401, 'TOKEN_INVALID');
+  });
+
+  it('keeps public API traffic out of the browser’s RATE_LIMIT_MAX budget', async () => {
+    const shared = loaded;
+    vi.stubEnv('RATE_LIMIT_MAX', '5');
+    try {
+      loaded = await loadApplication();
+      expect(loaded.env.RATE_LIMIT_MAX).toBe(5);
+      const persona = await loaded.personas.signUp();
+      const token = await loaded.personas.issueApiToken(persona, 'read');
+      loaded.resetSecurityState();
+
+      // Twice the browser budget through the public API, from the same address.
+      for (let request = 0; request < 10; request += 1) expect((await v1(token)).status).toBe(200);
+
+      for (let request = 0; request < 5; request += 1) {
+        expect((await sessionCall(persona.cookie, 'GET', '/api/auth/me')).status).toBe(200);
+      }
+      const spent = await sessionCall(persona.cookie, 'GET', '/api/auth/me');
+      expect([spent.status, spent.body.code]).toEqual([429, 'RATE_LIMITED']);
+    } finally {
+      vi.unstubAllEnvs();
+      loaded = shared;
+    }
   });
 
   it('records when a token was last used, at most once a minute', async () => {

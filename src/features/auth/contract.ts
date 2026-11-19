@@ -37,6 +37,7 @@ export const AUTH_REFUSAL_CODES = [
   'MAIL_DISABLED',
   'NOT_FOUND',
   'PROTECTED_ROLE',
+  'REAUTH_REQUIRED',
   'RESET_TOKEN_INVALID',
   STALE_REVISION,
   'TOKEN_LIMIT_REACHED',
@@ -191,8 +192,19 @@ export const confirmPasswordInputSchema = z.object({
 export const API_TOKEN_SCOPES = ['read', 'write'] as const;
 export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
 
-/** Creates a personal access token; its secret is in the answer once and never again. */
+/** Days a new token works when the request names no expiry. */
+export const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
+
+/**
+ * Creates a personal access token; its secret is in the answer once and never
+ * again. The account's owner confirms it: with the current `password`, like
+ * two-factor changes, or, for an account without a usable password (made
+ * through Google; `hasPassword` false), by having signed in within the last
+ * 5 minutes. A stolen session alone cannot mint a token.
+ */
 export const createApiTokenInputSchema = z.object({
+  /** Required when the account has a usable password; ignored otherwise. */
+  password: confirmPasswordInputSchema.shape.password.optional(),
   name: z
     .string()
     .trim()
@@ -200,8 +212,14 @@ export const createApiTokenInputSchema = z.object({
     .max(80, 'Token name must be at most 80 characters')
     .refine(hasNoControlChars, { message: `Token name ${CONTROL_MESSAGE}` }),
   scope: z.enum(API_TOKEN_SCOPES),
-  /** Days until it stops working, or null for a token that never expires. */
-  expiresInDays: z.number().int().min(1, 'Expiry is 1 to 365 days').max(365, 'Expiry is 1 to 365 days').nullable(),
+  /** Days until it stops working (90 when left out), or null for a token that never expires. */
+  expiresInDays: z
+    .number()
+    .int()
+    .min(1, 'Expiry is 1 to 365 days')
+    .max(365, 'Expiry is 1 to 365 days')
+    .nullable()
+    .default(API_TOKEN_DEFAULT_EXPIRY_DAYS),
 });
 
 export type CreateApiTokenInput = z.infer<typeof createApiTokenInputSchema>;
@@ -265,6 +283,8 @@ export function authResponseSchemas() {
     roles: z.array(z.string()).readonly(),
     permissions: z.array(z.string()).readonly(),
     mustChangePassword: z.boolean(),
+    /** False while the account only has the random password Google sign-in gave it. */
+    hasPassword: z.boolean(),
   });
   const session = z.strictObject({
     /** Public session handle; never the cookie token. */
