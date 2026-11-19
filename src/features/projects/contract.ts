@@ -785,5 +785,51 @@ export function projectsApiV1(): ApiOperation[] {
       responses: { 200: schemas.apiComments },
       refusals: task,
     },
+    {
+      method: 'post',
+      path: '/projects/:id/tasks',
+      summary: 'Create a task',
+      description: 'Goes to the backlog of the given batch, or of the active batch when `batch_id` is left out. Members of the project see it live.',
+      body: createTaskInputSchema,
+      responses: { 201: schemas.taskSaved },
+      refusals: { ...project, 404: ['PROJECT_NOT_FOUND', 'BATCH_NOT_FOUND'] },
+    },
+    {
+      method: 'patch',
+      path: '/tasks/:id',
+      summary: 'Edit a task',
+      description:
+        'Send the `revision` you last read. When the task changed since, the answer is 409 `STALE_REVISION` with the task as it is now in `current`: merge, then retry with its revision.',
+      body: updateTaskInputSchema,
+      responses: { 200: schemas.taskSaved },
+      refusals: { ...task, 409: [STALE_REVISION] },
+      stale: schemas.staleTask,
+    },
+    {
+      method: 'patch',
+      path: '/tasks/:id/move',
+      summary: 'Move a task to another column',
+      description:
+        'Records a new version of the task and notifies its assignee and creator, as a move on the board does. Moving to `revisi` needs a `note`.',
+      body: moveTaskInputSchema,
+      responses: { 200: schemas.taskMoved },
+      refusals: { ...task, 409: ['TASK_ALREADY_IN_COLUMN'] },
+    },
+    {
+      method: 'delete',
+      path: '/tasks/:id',
+      summary: 'Delete a task',
+      description: 'Only the project owner may delete a task. Its comments, history and images go with it.',
+      responses: { 200: schemas.done },
+      refusals: task,
+    },
+    {
+      method: 'post',
+      path: '/tasks/:id/comments',
+      summary: 'Comment on a task',
+      body: createCommentInputSchema,
+      responses: { 201: schemas.commentAdded },
+      refusals: task,
+    },
   ];
 }

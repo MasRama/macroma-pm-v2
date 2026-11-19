@@ -3,6 +3,10 @@ import {
   apiCommentsQuerySchema,
   apiProjectsQuerySchema,
   apiTasksQuerySchema,
+  createCommentInputSchema,
+  createTaskInputSchema,
+  moveTaskInputSchema,
+  updateTaskInputSchema,
   TASK_COLUMN_NAMES,
   TASK_COLUMNS,
   type ApiColumnsSuccess,
@@ -12,20 +16,26 @@ import {
   type ApiProjectSuccess,
   type ApiTasksSuccess,
   type BatchesSuccess,
+  type CommentAddedSuccess,
+  type ProjectsDone,
   type TaskDetailSuccess,
+  type TaskMovedSuccess,
+  type TaskSavedSuccess,
 } from '../contract';
-import { createGuard, newestFirstAfter, pageAfter, pageOf, queryInput } from '../../../shared/security';
+import { createGuard, jsonInput, newestFirstAfter, pageAfter, pageOf, queryInput } from '../../../shared/security';
 import { batchesOf, commentView, membersOf, personRefs, summaries, taskDetailView, taskViews } from './access';
 import { projectLoader, taskLoader } from './access-loaders';
 import type { ProjectsServerHost } from './host';
 import { batchNotFound } from './refusals';
 import { findBatch, listProjectsFor, pageComments, pageTasks, taskCountsByProject } from './repository';
+import { addCommentAction, createTaskAction, deleteTaskAction, moveTaskAction, refuseTaskWrite, updateTaskAction } from './task-actions';
 
 /*
- * Projects and tasks in the public API (`/api/v1`), read-only. The caller is
- * the account of the request's bearer token, never a session cookie; the
- * same loaders and views as the browser routes answer, so access and shapes
- * cannot fork.
+ * Projects and tasks in the public API (`/api/v1`). The caller is the account
+ * of the request's bearer token, never a session cookie; writes need a
+ * `write` token, which the application's token pipeline checks. The same
+ * loaders, views and task actions as the browser routes answer, so access,
+ * shapes, logs, notifications and live events cannot fork.
  */
 
 function apiGuard(host: ProjectsServerHost) {
@@ -117,6 +127,11 @@ export function createProjectsApiRoutes(host: ProjectsServerHost) {
         message: 'OK',
         data: { tasks: taskViews(host, page.items), next_cursor: page.nextCursor },
       } satisfies ApiTasksSuccess);
+    })
+    .post('/:id/tasks', guard.signedIn, projectAccess('member'), jsonInput(createTaskInputSchema), (context) => {
+      const created = createTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      if (created.status !== 'ok') return refuseTaskWrite(context, created);
+      return context.json({ success: true as const, message: 'Task created', data: { task: created.task } } satisfies TaskSavedSuccess, 201);
     });
 }
 
@@ -149,5 +164,23 @@ export function createTasksApiRoutes(host: ProjectsServerHost) {
         message: 'OK',
         data: { comments: page.items.map((comment) => commentView(comment, people)), next_cursor: page.nextCursor },
       } satisfies ApiCommentsSuccess);
+    })
+    .patch('/:id', guard.signedIn, taskAccess('member'), jsonInput(updateTaskInputSchema), (context) => {
+      const updated = updateTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      if (updated.status !== 'ok') return refuseTaskWrite(context, updated);
+      return context.json({ success: true as const, message: 'Task updated', data: { task: updated.task } } satisfies TaskSavedSuccess);
+    })
+    .patch('/:id/move', guard.signedIn, taskAccess('member'), jsonInput(moveTaskInputSchema), (context) => {
+      const moved = moveTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      if (moved.status !== 'ok') return refuseTaskWrite(context, moved);
+      return context.json({ success: true as const, message: 'Task moved', data: { task: moved.task, log: moved.log } } satisfies TaskMovedSuccess);
+    })
+    .delete('/:id', guard.signedIn, taskAccess('owner'), async (context) => {
+      await deleteTaskAction(host, guard.actor(context), current(context));
+      return context.json({ success: true as const, message: 'Task deleted' } satisfies ProjectsDone);
+    })
+    .post('/:id/comments', guard.signedIn, taskAccess('member'), jsonInput(createCommentInputSchema), (context) => {
+      const { comment } = addCommentAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      return context.json({ success: true as const, message: 'Comment added', data: { comment } } satisfies CommentAddedSuccess, 201);
     });
 }

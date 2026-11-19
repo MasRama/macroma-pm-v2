@@ -627,6 +627,30 @@ routes actually mounted, so it lists exactly what the server answers.
 | `GET /api/v1/tasks/:id` | `{ task: TaskDetail }`, as `GET /api/tasks/:id` answers it |
 | `GET /api/v1/tasks/:id/comments?cursor&limit` | `{ comments: Comment[], next_cursor }`, oldest first |
 
+**Writing.** A `write` token changes tasks the way the board does. Each write
+runs the same code as its screen route (`/api/projects/:id/tasks`,
+`/api/tasks/:id`, …), so it takes the same body, keeps the same history and
+project activity with the token's account as the actor, notifies the same
+people, and the board updates live for everyone who has the project open.
+
+| Method and path | Body | `data` |
+|---|---|---|
+| `POST /api/v1/projects/:id/tasks` | `{ title, description?, priority?, assignee_id?, batch_id? }` | `201 { task: Task }`, in the backlog of `batch_id` or of the active batch |
+| `PATCH /api/v1/tasks/:id` | `{ revision, title?, description?, priority?, assignee_id? }` | `{ task: Task }` |
+| `PATCH /api/v1/tasks/:id/move` | `{ column_id, note?, sort_order? }`, `note` required for `revisi` | `{ task: Task, log: TaskLog }`; the task's assignee and creator get a `task_moved` notification |
+| `DELETE /api/v1/tasks/:id` | none | none; the project owner only, as on the board |
+| `POST /api/v1/tasks/:id/comments` | `{ content }` | `201 { comment: Comment }` |
+
+- **Conflicts.** `PATCH /tasks/:id` needs the `revision` you last read. If the
+  task changed since, it answers `409 STALE_REVISION` with the task as it is
+  now in `current`: merge your change into it and send it again with that
+  revision. Moving a task to the column it is in answers
+  `409 TASK_ALREADY_IN_COLUMN`.
+- **Refusals.** An assignee who cannot open the project answers
+  `422 VALIDATION_ERROR` with `errors.assignee_id`; a `batch_id` from another
+  project, `404 BATCH_NOT_FOUND`; deleting a task of a project you do not own,
+  `403 FORBIDDEN`.
+
 **Syncing tasks.** `GET …/tasks` is ordered by `updated_at`, then `id`, oldest
 first. `updated_since` (epoch ms) keeps only the tasks changed at or after that
 moment; it is inclusive, so a change in the same millisecond as the last sync
@@ -639,12 +663,21 @@ Deleted tasks never appear, so reconcile with a full listing now and then.
 
 Codes: `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`,
 `TOKEN_SCOPE_INSUFFICIENT`, and the resources' own: `WORKSPACE_NOT_FOUND`,
-`PROJECT_NOT_FOUND`, `BATCH_NOT_FOUND`, `TASK_NOT_FOUND`.
+`PROJECT_NOT_FOUND`, `BATCH_NOT_FOUND`, `TASK_NOT_FOUND`, `STALE_REVISION`,
+`TASK_ALREADY_IN_COLUMN`.
 
 ```sh
 # The tasks of a project changed since a moment, 100 per page.
 curl -s "https://macroma.example/api/v1/projects/$PROJECT_ID/tasks?updated_since=1763510400000&limit=100" \
   -H "Authorization: Bearer $MACROMA_TOKEN"
+
+# Create a task, then move it to review.
+curl -s -X POST "https://macroma.example/api/v1/projects/$PROJECT_ID/tasks" \
+  -H "Authorization: Bearer $MACROMA_TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"Publish the release notes","priority":"high"}'
+curl -s -X PATCH "https://macroma.example/api/v1/tasks/$TASK_ID/move" \
+  -H "Authorization: Bearer $MACROMA_TOKEN" -H "Content-Type: application/json" \
+  -d '{"column_id":"review"}'
 ```
 
 ## V1 pages → V2 endpoints

@@ -77,12 +77,15 @@ function operationObject(operation: PublicApiOperation): JsonSchema {
     responses[status] = { description: 'OK', content: { 'application/json': { schema: jsonSchema(schema, 'output') } } };
   }
   for (const [status, codes] of refusalsOf(operation)) {
-    responses[String(status)] = {
-      description: `Refused: ${codes.join(', ')}`,
-      content: {
-        'application/json': { schema: { allOf: [ERROR_REFERENCE, { properties: { code: { enum: codes } } }] } },
-      },
-    };
+    const refused = (enumerated: string[]) => ({ allOf: [ERROR_REFERENCE, { properties: { code: { enum: enumerated } } }] });
+    let schema: JsonSchema = refused(codes);
+    // A stale edit answers with the record as it is now, which the plain error does not carry.
+    if (status === 409 && operation.stale) {
+      const stale = jsonSchema(operation.stale, 'output');
+      const others = codes.filter((code) => code !== 'STALE_REVISION');
+      schema = others.length > 0 ? { oneOf: [refused(others), stale] } : stale;
+    }
+    responses[String(status)] = { description: `Refused: ${codes.join(', ')}`, content: { 'application/json': { schema } } };
   }
   return {
     operationId: `${operation.method}${operation.path.replace(/\/:?([A-Za-z_]+)/g, (_match, part: string) => part.charAt(0).toUpperCase() + part.slice(1))}`,

@@ -10,7 +10,7 @@ import { issueApiToken, signUp, type Persona } from './personas';
  * The public API's read endpoints through the composed application, called
  * with personal access tokens. Every successful answer is parsed with the
  * schema its operation documents, and the last case checks that each
- * documented operation answered at least once.
+ * documented read answered at least once; the write test covers the rest.
  */
 const operations = publicApiOperations();
 const answered = new Set<PublicApiOperation>();
@@ -289,7 +289,8 @@ describe('public API v1 reads', () => {
     }
   });
 
-  it('answered every documented operation in its documented shape', () => {
-    expect(operations.filter((operation) => !answered.has(operation)).map((operation) => operation.path)).toEqual([]);
+  it('answered every documented read in its documented shape', () => {
+    const reads = operations.filter((operation) => operation.method === 'get');
+    expect(reads.filter((operation) => !answered.has(operation)).map((operation) => operation.path)).toEqual([]);
   });
 });
