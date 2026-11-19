@@ -340,7 +340,6 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 1100px;
   padding: 0 28px;
 }
 .tokens__grid {
