@@ -40,7 +40,6 @@ import { getDatabase } from '../../../shared/database';
 import { createGuard, forbidden, jsonInput, queryInput, type RoutePolicy } from '../../../shared/security';
 import {
   activeReleaseView,
-  assignable,
   attachmentView,
   batchesOf,
   batchView,
@@ -57,7 +56,6 @@ import {
   upcomingReleases,
   summaries,
   taskDetailView,
-  taskView,
   taskViews,
 } from './access';
 import { projectLoader, taskLoader } from './access-loaders';
@@ -65,9 +63,8 @@ import { removeStoredImages, storeImages, uploadedFiles } from './attachments';
 import { dashboardData } from './dashboard';
 import type { ProjectsServerHost } from './host';
 import { announceBoardChange, announceProjectChange, projectsBoardChangedTopic, projectsChangedTopic } from './live';
-import { noticeTaskMoved } from './notices';
+import { addCommentAction, createTaskAction, deleteTaskAction, moveTaskAction, refuseTaskWrite, updateTaskAction } from './task-actions';
 import {
-  assigneeRefused,
   attachmentNotFound,
   batchNotFound,
   commentNotFound,
@@ -77,20 +74,16 @@ import {
 } from './refusals';
 import {
   activateBatch,
-  activeBatches,
   addAttachments,
   addProjectMember,
   changelogRows,
   contributorCounts,
   countsByBatch,
   createBatch,
-  createComment,
   createProject,
-  createTask,
   deleteAttachment,
   deleteComment,
   deleteProject,
-  deleteTask,
   directMemberRole,
   findAttachment,
   findBatch,
@@ -104,12 +97,10 @@ import {
   listProjectsFor,
   listReleases,
   listTasks,
-  moveTask,
   removeProjectMember,
   revisiTaskCount,
   unassignTasks,
   updateProject,
-  updateTask,
   type BatchRow,
 } from './repository';
 
@@ -365,33 +356,9 @@ export function createProjectRoutes(host: ProjectsServerHost) {
       } satisfies TasksSuccess);
     })
     .post('/:id/tasks', guard.signedIn, projectAccess('member'), jsonInput(createTaskInputSchema), (context) => {
-      const actor = guard.actor(context);
-      const project = current(context);
-      const input = context.req.valid('json');
-      const assigneeId = input.assignee_id ?? null;
-      if (assigneeId !== null && !assignable(host, project, assigneeId)) return assigneeRefused(context);
-      let batchId: string | null;
-      if (input.batch_id) {
-        const batch = findBatch(input.batch_id);
-        if (!batch || batch.project_id !== project.id) return batchNotFound(context);
-        batchId = batch.id;
-      } else {
-        batchId = activeBatches([project.id]).get(project.id)?.id ?? null;
-      }
-      const task = createTask({
-        projectId: project.id,
-        batchId,
-        title: input.title,
-        description: input.description ?? null,
-        priority: input.priority ?? 'medium',
-        assigneeId,
-        actorId: actor.id,
-      });
-      announceBoardChange(projectAudience(host, project));
-      return context.json(
-        { success: true as const, message: 'Task created', data: { task: taskViews(host, [task])[0] } } satisfies TaskSavedSuccess,
-        201,
-      );
+      const created = createTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      if (created.status !== 'ok') return refuseTaskWrite(context, created);
+      return context.json({ success: true as const, message: 'Task created', data: { task: created.task } } satisfies TaskSavedSuccess, 201);
     });
 }
 
@@ -410,56 +377,21 @@ export function createTaskRoutes(host: ProjectsServerHost) {
       } satisfies TaskDetailSuccess);
     })
     .patch('/:id', guard.signedIn, taskAccess('member'), jsonInput(updateTaskInputSchema), (context) => {
-      const actor = guard.actor(context);
-      const { task, project } = current(context);
-      const { revision, assignee_id, ...patch } = context.req.valid('json');
-      if (assignee_id && assignee_id !== task.assignee_id && !assignable(host, project, assignee_id)) return assigneeRefused(context);
-      const update = updateTask(task.id, { ...patch, assigneeId: assignee_id }, revision, actor.id);
-      if (update.status === 'missing') return taskNotFound(context);
-      if (update.status === 'stale') {
-        return context.json(
-          {
-            success: false as const,
-            message: 'This task changed elsewhere since you opened it',
-            code: STALE_REVISION,
-            current: taskViews(host, [update.task])[0],
-          },
-          409,
-        );
-      }
-      announceBoardChange(projectAudience(host, project));
-      return context.json({
-        success: true as const,
-        message: 'Task updated',
-        data: { task: taskViews(host, [update.task])[0] },
-      } satisfies TaskSavedSuccess);
+      const updated = updateTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      if (updated.status !== 'ok') return refuseTaskWrite(context, updated);
+      return context.json({ success: true as const, message: 'Task updated', data: { task: updated.task } } satisfies TaskSavedSuccess);
     })
     .patch('/:id/move', guard.signedIn, taskAccess('member'), jsonInput(moveTaskInputSchema), (context) => {
-      const actor = guard.actor(context);
-      const { task, project } = current(context);
-      const input = context.req.valid('json');
-      if (input.column_id === task.column_id) {
-        return refuse(context, 409, 'TASK_ALREADY_IN_COLUMN', 'The task is already in this column');
-      }
-      const moved = getDatabase().transaction(() => {
-        const result = moveTask(task, { column: input.column_id, note: input.note ?? '', sortOrder: input.sort_order }, actor.id);
-        noticeTaskMoved(host, project, task, result.log, actor);
-        return result;
-      })();
-      const people = personRefs(host, [moved.task.assignee_id, actor.id]);
-      announceBoardChange(projectAudience(host, project));
+      const moved = moveTaskAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      if (moved.status !== 'ok') return refuseTaskWrite(context, moved);
       return context.json({
         success: true as const,
         message: 'Task moved',
-        data: { task: taskView(moved.task, people), log: logView(moved.log, people) },
+        data: { task: moved.task, log: moved.log },
       } satisfies TaskMovedSuccess);
     })
     .delete('/:id', guard.signedIn, taskAccess('owner'), async (context) => {
-      const actor = guard.actor(context);
-      const { task, project } = current(context);
-      const images = deleteTask(task, actor.id);
-      announceBoardChange(projectAudience(host, project));
-      await removeStoredImages(host, images);
+      await deleteTaskAction(host, guard.actor(context), current(context));
       return context.json({ success: true as const, message: 'Task deleted' } satisfies ProjectsDone);
     })
     .get('/:id/logs', guard.signedIn, taskAccess('member'), (context) => {
@@ -487,18 +419,8 @@ export function createTaskRoutes(host: ProjectsServerHost) {
       } satisfies CommentsSuccess);
     })
     .post('/:id/comments', guard.signedIn, taskAccess('member'), jsonInput(createCommentInputSchema), (context) => {
-      const actor = guard.actor(context);
-      const { task, project } = current(context);
-      const comment = createComment({ taskId: task.id, userId: actor.id, content: context.req.valid('json').content });
-      announceBoardChange(projectAudience(host, project));
-      return context.json(
-        {
-          success: true as const,
-          message: 'Comment added',
-          data: { comment: commentView(comment, personRefs(host, [actor.id])) },
-        } satisfies CommentAddedSuccess,
-        201,
-      );
+      const { comment } = addCommentAction(host, guard.actor(context), current(context), context.req.valid('json'));
+      return context.json({ success: true as const, message: 'Comment added', data: { comment } } satisfies CommentAddedSuccess, 201);
     })
     .delete('/:id/comments/:commentId', guard.signedIn, taskAccess('member'), (context) => {
       const actor = guard.actor(context);
