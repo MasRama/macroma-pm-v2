@@ -209,7 +209,7 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
 <template>
   <div class="tokens">
     <ShellTopBar><TopCrumb :trail="['Profil']" current="Token API" /></ShellTopBar>
-    <PageHead title="Token API" description="Hubungkan script dan aplikasi lain ke Macroma lewat API publik.">
+    <PageHead class="tokens__head" title="Token API" description="Hubungkan script dan aplikasi lain ke Macroma lewat API publik.">
       <template v-if="tokens.length" #actions>
         <UiButton variant="ghost" data-testid="revoke-all" @click="revokingAll = true">Cabut semua</UiButton>
       </template>
@@ -336,10 +336,15 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
 .tokens {
   padding-bottom: 28px;
 }
+/* Head and content share the 08-profile 1100px column, so Cabut semua lines up with the cards. */
+.tokens__head {
+  max-width: 1100px;
+}
 .tokens__body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  max-width: 1100px;
   padding: 0 28px;
 }
 .tokens__grid {
