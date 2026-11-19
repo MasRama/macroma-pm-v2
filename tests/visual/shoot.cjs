@@ -51,7 +51,8 @@ const SCREENS = [
     },
   ],
   ['tokens-revoke', (page) => page.getByTestId('token-row').first().getByRole('button', { name: 'Cabut' }).click()],
-  ['tokens-empty'],
+  // Empty list, with Tidak pernah picked so its warning line shows.
+  ['tokens-empty', (page) => page.locator('#token-expiry').selectOption('never')],
   ['users'],
   ['users-edit', (page) => page.locator('[data-testid^="edit-user-"]').nth(1).click()],
   ['not-found'],

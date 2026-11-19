@@ -117,12 +117,13 @@ describe('the Token API list', () => {
     expect(first).toContain('Berlaku sampai 14 Des 2026');
     expect(first).toContain('Terakhir dipakai 2 jam lalu');
     expect(second).toContain('Baca');
-    expect(second).toContain('Tanpa kedaluwarsa');
+    expect(second).toContain('Tidak pernah kedaluwarsa');
     expect(second).toContain('Belum pernah dipakai');
     expect(third).toContain('Kedaluwarsa 31 Okt 2026');
     expect(rows()[2]!.classList.contains('row--expired')).toBe(true);
     expect(byTestId('token-count')?.textContent).toBe('3');
     expect(byTestId('new-secret')).toBeNull();
+    expect(byTestId('password-note')?.textContent).toBe('Ganti atau reset password akan mencabut semua token.');
   });
 
   it('shows the empty state and no Cabut semua when the account has no token', async () => {
@@ -130,6 +131,7 @@ describe('the Token API list', () => {
 
     expect(byTestId('tokens-empty')?.textContent).toContain('Belum ada token');
     expect(byTestId('revoke-all')).toBeNull();
+    expect(byTestId('password-note')).not.toBeNull();
   });
 
   it('says in Indonesian why the list could not load', async () => {
@@ -150,8 +152,12 @@ describe('creating a token', () => {
 
     await typeName('  Integrasi Slack ');
     const expiry = document.querySelector<HTMLSelectElement>('#token-expiry')!;
+    expect([...expiry.options].at(-1)?.textContent?.trim()).toBe('Tidak pernah');
+    expect(byTestId('never-expires-warning')).toBeNull();
     expiry.value = 'never';
     expiry.dispatchEvent(new Event('change'));
+    await nextTick();
+    expect(byTestId('never-expires-warning')?.textContent).toContain('aktif terus sampai kamu mencabutnya');
     button('Baca + tulis').click();
     await submit();
 
@@ -173,9 +179,11 @@ describe('creating a token', () => {
     expect(text()).not.toContain(SECRET);
   });
 
-  it('defaults to 90 days and read access', async () => {
+  it('defaults to 90 days and read access, with no never-expires warning', async () => {
     const client = fakeClient();
     await mount(client);
+    expect(document.querySelector<HTMLSelectElement>('#token-expiry')!.value).toBe('90');
+    expect(byTestId('never-expires-warning')).toBeNull();
 
     await typeName('Zapier');
     await submit();

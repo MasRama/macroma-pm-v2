@@ -28,7 +28,8 @@ const EXPIRY_OPTIONS = [
   { value: '30', label: '30 hari' },
   { value: '90', label: '90 hari' },
   { value: '365', label: '365 hari' },
-  { value: 'never', label: 'Tanpa kedaluwarsa' },
+  // Last on purpose: a token that never expires is a choice, never the default.
+  { value: 'never', label: 'Tidak pernah' },
 ];
 const SCOPE_OPTIONS = [
   { value: 'read', label: 'Baca' },
@@ -40,6 +41,7 @@ const SCOPE_HINT: Record<ApiTokenScope, string> = {
   write: 'Melihat sekaligus membuat dan mengubah data.',
 };
 const NAME_TEXT = 'Nama token wajib diisi, maksimal 80 karakter.';
+const NEVER_EXPIRES_WARNING = 'Token ini aktif terus sampai kamu mencabutnya. Pilih ini hanya kalau memang perlu.';
 
 const tokens = ref<ApiTokenView[]>([]);
 const loading = ref(true);
@@ -72,7 +74,7 @@ function longDay(iso: string): string {
 }
 
 function expiryText(token: ApiTokenView): string {
-  if (token.expiresAt === null) return 'Tanpa kedaluwarsa';
+  if (token.expiresAt === null) return 'Tidak pernah kedaluwarsa';
   return `${token.expired ? 'Kedaluwarsa' : 'Berlaku sampai'} ${longDay(token.expiresAt)}`;
 }
 
@@ -247,7 +249,12 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
               autocomplete="off"
               :error="fieldErrors.name"
             />
-            <SelectField id="token-expiry" v-model="expiry" label="Masa berlaku" :options="EXPIRY_OPTIONS" :error="fieldErrors.expiresInDays" />
+            <div>
+              <SelectField id="token-expiry" v-model="expiry" label="Masa berlaku" :options="EXPIRY_OPTIONS" :error="fieldErrors.expiresInDays" />
+              <p v-if="expiry === 'never' && !fieldErrors.expiresInDays" class="tokens__warn" data-testid="never-expires-warning">
+                {{ NEVER_EXPIRES_WARNING }}
+              </p>
+            </div>
             <div>
               <span class="tokens__label">Akses</span>
               <SegmentedControl v-model="scope" :options="SCOPE_OPTIONS" label="Akses" variant="field" />
@@ -265,6 +272,7 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
             <h2 id="tokens-list" class="h2 tokens__h">Token kamu</h2>
             <span v-if="tokens.length" class="tokens__count mono" data-testid="token-count">{{ tokens.length }}</span>
           </div>
+          <p class="tokens__note" data-testid="password-note">Ganti atau reset password akan mencabut semua token.</p>
           <p v-if="listError" role="alert" class="tokens__err">{{ listError }}</p>
           <p v-if="listNotice" role="status" class="tokens__ok">{{ listNotice }}</p>
           <p v-if="loadError" role="alert" class="tokens__err" data-testid="load-error">{{ loadError }}</p>
@@ -364,6 +372,17 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
 .tokens__hint {
   margin: 6px 0 0;
   font-size: 12px;
+  color: var(--mute);
+}
+.tokens__warn {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-revisi);
+}
+.tokens__note {
+  margin: 6px 0 0;
+  font-size: 12.5px;
   color: var(--mute);
 }
 .tokens__foot {

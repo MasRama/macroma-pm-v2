@@ -136,7 +136,8 @@ revoke tokens. The web client is `createSecurityClient()` from
 `revokeToken(id)`, `revokeAllTokens()`. The screen is Token API
 (`/settings/tokens`, `src/app/pages/TokensPage.vue`), linked from Profil and
 the key button next to Keluar in the sidebar; it renders rows through
-`toApiTokenView` (`src/features/auth/web/view.ts`).
+`toApiTokenView` (`src/features/auth/web/view.ts`). Expiry defaults to 90 days; "Tidak pernah"
+(`expiresInDays: null`) is the last option and shows a warning when picked.
 
 | Method and path | Access | Body | `data` |
 |---|---|---|---|
