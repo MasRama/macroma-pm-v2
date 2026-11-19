@@ -133,7 +133,10 @@ account manages its tokens from the signed-in app only: these routes take the
 session cookie and CSRF token, never a bearer token, so a token cannot make or
 revoke tokens. The web client is `createSecurityClient()` from
 `src/features/auth/web`: `listTokens()`, `createToken(input)`,
-`revokeToken(id)`, `revokeAllTokens()`.
+`revokeToken(id)`, `revokeAllTokens()`. The screen is Token API
+(`/settings/tokens`, `src/app/pages/TokensPage.vue`), linked from Profil and
+the key button next to Keluar in the sidebar; it renders rows through
+`toApiTokenView` (`src/features/auth/web/view.ts`).
 
 | Method and path | Access | Body | `data` |
 |---|---|---|---|

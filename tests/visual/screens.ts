@@ -20,6 +20,10 @@ export const SCREENS = [
   'forgot-password',
   'reset-password',
   'profile',
+  'tokens',
+  'tokens-secret',
+  'tokens-revoke',
+  'tokens-empty',
   'users',
   'users-edit',
   'not-found',
@@ -55,6 +59,11 @@ export function pathFor(screen: Screen): string {
       return '/reset-password?token=preview';
     case 'profile':
       return '/profile';
+    case 'tokens':
+    case 'tokens-secret':
+    case 'tokens-revoke':
+    case 'tokens-empty':
+      return '/settings/tokens';
     case 'users':
     case 'users-edit':
       return '/users';

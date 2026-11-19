@@ -41,6 +41,17 @@ const SCREENS = [
   ['forgot-password'],
   ['reset-password'],
   ['profile'],
+  ['tokens'],
+  [
+    'tokens-secret',
+    async (page) => {
+      await page.getByLabel('Nama token').fill('Integrasi Slack');
+      await page.getByRole('button', { name: 'Buat token' }).click();
+      await page.getByTestId('new-secret').waitFor();
+    },
+  ],
+  ['tokens-revoke', (page) => page.getByTestId('token-row').first().getByRole('button', { name: 'Cabut' }).click()],
+  ['tokens-empty'],
   ['users'],
   ['users-edit', (page) => page.locator('[data-testid^="edit-user-"]').nth(1).click()],
   ['not-found'],
@@ -65,6 +76,25 @@ const ROLES = [
   { id: 'r1', name: 'Administrator', slug: 'admin', description: null, permissions: [] },
   { id: 'r2', name: 'User', slug: 'user', description: null, permissions: [] },
 ];
+const day = (iso) => new Date(iso).getTime();
+const token = (id, name, prefix, scope, created, expires, lastUsed) => ({
+  id,
+  name,
+  prefix,
+  scope,
+  createdAt: day(created),
+  expiresAt: expires ? day(expires) : null,
+  lastUsedAt: lastUsed ? day(lastUsed) : null,
+  expired: expires ? day(expires) < NOW.getTime() : false,
+});
+const TOKENS = [
+  token('k3', 'Zapier', 'mcr_c3VtPq', 'read', '2026-11-16T09:00:00', '2026-12-16T09:00:00', null),
+  token('k2', 'Script deploy', 'mcr_7Kq2xA', 'write', '2026-11-04T14:10:00', '2027-02-02T14:10:00', '2026-11-17T08:12:00'),
+  token('k1', 'Laporan mingguan', 'mcr_Rb91Lm', 'read', '2026-10-20T11:00:00', null, '2026-11-16T07:00:00'),
+  token('k0', 'CI lama', 'mcr_Hd04Nw', 'write', '2026-08-02T10:00:00', '2026-10-31T10:00:00', '2026-10-30T22:40:00'),
+];
+const NEW_TOKEN = token('k4', 'Integrasi Slack', 'mcr_Vx8pQ2', 'write', '2026-11-17T10:20:00', '2027-02-15T10:20:00', null);
+const NEW_SECRET = 'mcr_Vx8pQ2nT4kLw9sRb7HcJ3mZd6FyA1uGe5XqP0oVi';
 const json = (data) => (route) => route.fulfill({ json: { success: true, message: 'OK', data } });
 
 (async () => {
@@ -93,6 +123,14 @@ const json = (data) => (route) => route.fulfill({ json: { success: true, message
       await page.route('**/api/users/editing', json({ editing: { 4: [{ id: '2', name: 'Ayu Lestari' }] } }));
       await page.route('**/api/users/*/editing', json(undefined));
       await page.route('**/api/roles', json({ roles: ROLES }));
+    }
+    if (screen.startsWith('tokens')) {
+      const list = screen === 'tokens-empty' ? [] : screen === 'tokens-secret' ? TOKENS.slice(1) : TOKENS;
+      await page.route('**/api/auth/tokens', (route) =>
+        route.request().method() === 'POST'
+          ? route.fulfill({ status: 201, json: { success: true, message: 'Token created', data: { token: NEW_TOKEN, secret: NEW_SECRET } } })
+          : json({ tokens: list })(route),
+      );
     }
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));

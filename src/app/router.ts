@@ -20,6 +20,7 @@ import ResetPasswordPage from './pages/auth/ResetPasswordPage.vue';
 import UsersAdminPage from './pages/admin/UsersAdminPage.vue';
 import NotFoundPage from './pages/NotFoundPage.vue';
 import ProfilePage from './pages/ProfilePage.vue';
+import TokensPage from './pages/TokensPage.vue';
 
 const authSession = useAuthSession();
 const signedIn = { requiresAuth: true } as const;
@@ -102,6 +103,7 @@ export const appRoutes = [
     meta: signedIn,
   },
   { path: '/profile', name: 'profile', component: ProfilePage, meta: signedIn },
+  { path: '/settings/tokens', name: 'api-tokens', component: TokensPage, meta: signedIn },
   {
     path: '/change-password',
     name: 'change-password',
