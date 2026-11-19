@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import {
   accountHasPassword,
   AUTH_TOKENS_CHANGED_EVENT,
@@ -38,7 +38,12 @@ const props = withDefaults(
 );
 const client: TokensClient = props.client ?? createSecurityClient();
 const authSession = useAuthSession();
-const hasPassword = computed(() => props.hasPassword ?? accountHasPassword(authSession.user.value));
+/**
+ * Set when the API asks for a password the session said the account lacks:
+ * `hasPassword` from /me can be stale, e.g. a password just set in another tab.
+ */
+const passwordAsked = ref(false);
+const hasPassword = computed(() => passwordAsked.value || (props.hasPassword ?? accountHasPassword(authSession.user.value)));
 
 const EXPIRY_OPTIONS = [
   { value: '7', label: '7 hari' },
@@ -154,6 +159,11 @@ async function createToken(): Promise<void> {
       const texts = authFieldTexts(response.errors);
       fieldErrors.value = { ...texts, ...(texts.name ? { name: NAME_TEXT } : {}) };
       createError.value = authRefusalText(response.code);
+      if (texts.password && !hasPassword.value) {
+        passwordAsked.value = true;
+        await nextTick();
+        document.getElementById('token-password')?.focus();
+      }
       return;
     }
     const token = toApiTokenView(response.data.token);
