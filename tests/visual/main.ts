@@ -21,6 +21,7 @@ const names = [
   ['/projects/:projectId/releases', 'project-releases'],
   ['/projects/:projectId/activity', 'project-activity'],
   ['/profile', 'profile'],
+  ['/settings/tokens', 'api-tokens'],
   ['/change-password', 'change-password'],
   ['/users', 'users'],
   ['/roles', 'roles'],

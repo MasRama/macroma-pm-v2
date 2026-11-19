@@ -8,6 +8,7 @@ import RegisterPage from '../../src/app/pages/auth/RegisterPage.vue';
 import ResetPasswordPage from '../../src/app/pages/auth/ResetPasswordPage.vue';
 import NotFoundPage from '../../src/app/pages/NotFoundPage.vue';
 import ProfilePage from '../../src/app/pages/ProfilePage.vue';
+import TokensPage from '../../src/app/pages/TokensPage.vue';
 import {
   ActivityPage,
   BoardView,
@@ -98,6 +99,7 @@ const firstBump = screen === 'first-bump';
       />
       <ActivityPage v-else-if="screen === 'feed'" :entries="f.activity" :now="f.NOW" />
       <ProfilePage v-else-if="screen === 'profile'" />
+      <TokensPage v-else-if="screen.startsWith('tokens')" />
       <UsersAdminPage v-else-if="screen === 'users' || screen === 'users-edit'" />
     </AppFrame>
     <ChatDrawer

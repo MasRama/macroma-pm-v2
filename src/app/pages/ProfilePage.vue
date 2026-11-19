@@ -276,7 +276,11 @@ onUnmounted(onServerEvent(USERS_CHANGED_EVENT, () => void followChanges()));
 <template>
   <div class="profile">
     <ShellTopBar><TopCrumb current="Profil" /></ShellTopBar>
-    <PageHead title="Profil" description="Akun, keamanan, dan tampilan." />
+    <PageHead title="Profil" description="Akun, keamanan, dan tampilan.">
+      <template #actions>
+        <RouterLink class="btn btn--ghost" :to="{ name: 'api-tokens' }" data-testid="profile-tokens">Token API</RouterLink>
+      </template>
+    </PageHead>
     <p v-if="loadError" role="alert" class="profile__load-error">{{ loadError }}</p>
     <div class="profile__grid">
       <section class="panel profile__card" aria-labelledby="profile-data">

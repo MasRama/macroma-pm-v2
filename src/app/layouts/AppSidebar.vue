@@ -118,6 +118,9 @@ function isActive(path: string): boolean {
           <small v-if="user.caption">{{ user.caption }}</small>
         </span>
       </RouterLink>
+      <RouterLink to="/settings/tokens" class="me__out focus-ring" aria-label="Token API" title="Token API">
+        <UiIcon name="key" :size="16" />
+      </RouterLink>
       <button type="button" class="me__out focus-ring" aria-label="Keluar" :disabled="loggingOut" @click="emit('logout')">
         <UiIcon name="logout" :size="16" />
       </button>
