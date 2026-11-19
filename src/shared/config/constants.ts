@@ -16,6 +16,9 @@ export const RATE_LIMIT = {
   WINDOW_MS: 15 * 60 * 1000,
   AUTH_MAX_REQUESTS: 10,
   AUTH_WINDOW_MS: 60 * 1000,
+  /** Public API (`/api/v1`): per token, or per client address before a token resolves. */
+  API_MAX_REQUESTS: 120,
+  API_WINDOW_MS: 60 * 1000,
 } as const;
 export const SECURITY = {
   CSRF_COOKIE_NAME: 'csrf_token',

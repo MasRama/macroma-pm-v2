@@ -54,7 +54,9 @@ these paths by hand: each Feature ships a typed client in its
   (`RATE_LIMIT_MAX` per `RATE_LIMIT_WINDOW_MS`). Sign-in, registration,
   sign-out, password change and reset, Google, two-factor, avatar uploads and
   task image uploads also count against the strict budget
-  (`AUTH_RATE_LIMIT_MAX` per `AUTH_RATE_LIMIT_WINDOW_MS`).
+  (`AUTH_RATE_LIMIT_MAX` per `AUTH_RATE_LIMIT_WINDOW_MS`). The public API
+  (`/api/v1`) is outside both and has its own budget per API token
+  (`API_RATE_LIMIT_MAX` per `API_RATE_LIMIT_WINDOW_MS`).
 
 ## Live updates
 
@@ -74,7 +76,7 @@ session is gone.
 | `notifications.changed` | a notification is created, read or withdrawn | its recipient | `GET /api/notifications` |
 | `auth.account-changed` | the account's profile, roles or permissions changed | that account | `GET /api/auth/me` |
 
-Auth and Users also publish `auth.sessions-changed`, `auth.roles-changed`,
+Auth and Users also publish `auth.sessions-changed`, `auth.tokens-changed`, `auth.roles-changed`,
 `auth.roles-editing`, `users.changed` and `users.editing` for the account and
 admin screens.
 
@@ -122,6 +124,44 @@ Codes: `INVALID_CREDENTIALS`, `LOGIN_LOCKED`, `DUPLICATE_EMAIL`,
 `TWO_FACTOR_DISABLED`, `TWO_FACTOR_ENABLED`, `TWO_FACTOR_LOCKED` and
 `TWO_FACTOR_SETUP_REQUIRED`. Role management (`/api/roles`) adds
 `DUPLICATE_SLUG`, `PROTECTED_ROLE`, `INVALID_ID` and `STALE_REVISION`.
+
+### API tokens
+
+Personal access tokens let an outside app (a script, Zapier, a server of your
+own) call the public API (`/api/v1`) as the account that made the token. The
+account manages its tokens from the signed-in app only: these routes take the
+session cookie and CSRF token, never a bearer token, so a token cannot make or
+revoke tokens. The web client is `createSecurityClient()` from
+`src/features/auth/web`: `listTokens()`, `createToken(input)`,
+`revokeToken(id)`, `revokeAllTokens()`.
+
+| Method and path | Access | Body | `data` |
+|---|---|---|---|
+| `GET /api/auth/tokens` | signed in | | `{ tokens: ApiToken[] }`: working and expired tokens, never revoked ones, newest first |
+| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays: 1–365 \| null }` | `201 { token: ApiToken, secret }` |
+| `DELETE /api/auth/tokens/:id` | signed in | | `{ revoked: 1 }`; another account's or an already revoked token answers `404 NOT_FOUND` |
+| `POST /api/auth/tokens/revoke-all` | signed in, strict limit | | `{ revoked }`, the number revoked |
+
+`ApiToken` is `{ id, name, prefix, scope, createdAt, expiresAt, lastUsedAt,
+expired }`: times are epoch ms, `expiresAt` is `null` for a token that never
+expires, `lastUsedAt` is `null` until first use and is updated at most once a
+minute, and `prefix` is the secret's first 10 characters (`mcr_` and six more)
+so people can tell tokens apart.
+
+- **The secret** (`mcr_` and 43 base64url characters) is in the create answer
+  once and never again: only its SHA-256 is stored. Show it with a copy button
+  and say it will not be shown again.
+- **Scopes.** `read` calls only `GET` and `HEAD`; `write` calls every method.
+- **Limit.** An account holds at most 50 working tokens; the 51st answers
+  `409 TOKEN_LIMIT_REACHED`. Expired and revoked tokens do not count.
+- **Passwords.** Tokens keep working when the account changes or resets its
+  password. While an administrator's temporary password is pending, every
+  token answers `403 PASSWORD_CHANGE_REQUIRED` until it is replaced. Deleting
+  the account deletes its tokens.
+- **Live.** Creating or revoking tokens publishes `auth.tokens-changed` to the
+  account, so its other tabs refetch `GET /api/auth/tokens`.
+
+Codes: `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
 
 ## Profile
 

@@ -20,3 +20,17 @@ export const API_REFUSAL_CODES = [
 ] as const;
 
 export type ApiRefusalCode = (typeof API_REFUSAL_CODES)[number];
+
+/**
+ * Refusal codes the public API's bearer pipeline adds (`/api/v1`): the token
+ * is malformed or unknown, expired, revoked, or its scope does not allow the
+ * method. Every public API route can answer with these as well.
+ */
+export const API_TOKEN_REFUSAL_CODES = [
+  'TOKEN_INVALID',
+  'TOKEN_EXPIRED',
+  'TOKEN_REVOKED',
+  'TOKEN_SCOPE_INSUFFICIENT',
+] as const;
+
+export type ApiTokenRefusalCode = (typeof API_TOKEN_REFUSAL_CODES)[number];

@@ -49,6 +49,7 @@ import { beginTwoFactorChallenge, createSecurityRoutes } from './security-routes
 import { sessionGuard } from './guard';
 import { createGoogleRoutes } from './google';
 import { createPasswordResetRoutes } from './password-reset';
+import { createTokenRoutes } from './token-routes';
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE';
@@ -262,6 +263,9 @@ export const AUTH_ROUTE_POLICIES = [
   { path: '/google/*', sensitive: true },
   // The sign-in code step and password-confirmed two-factor management.
   { path: '/two-factor/*', sensitive: true },
+  // Minting and mass-revoking API tokens; listing and revoking one stay unlimited.
+  { path: '/tokens', method: 'POST', sensitive: true },
+  { path: '/tokens/revoke-all', method: 'POST', sensitive: true },
 ] as const satisfies readonly RoutePolicy[];
 
 export function createAuthRoutes(activity?: AuthActivitySink, options: AuthRoutesOptions = {}) {
@@ -286,6 +290,7 @@ export function createAuthRoutes(activity?: AuthActivitySink, options: AuthRoute
     .get('/me', sessionGuard.signedIn, currentUserHandler)
     .post('/logout', publicRoute, (context) => logoutHandler(context, activity))
     .route('/', createSecurityRoutes(activity))
+    .route('/', createTokenRoutes(activity))
     .route('/', createPasswordResetRoutes(activity))
     .route('/', createGoogleRoutes(activity, registration === undefined ? {} : { registration }));
 }

@@ -34,6 +34,7 @@ export const AUTH_REFUSAL_TEXT: Record<AuthRefusal, string> = {
   PROTECTED_ROLE: 'Role ini nggak bisa diubah atau dihapus.',
   RESET_TOKEN_INVALID: 'Link reset ini sudah tidak berlaku. Minta link baru.',
   STALE_REVISION: 'Data ini baru diubah orang lain. Cek lagi lalu simpan.',
+  TOKEN_LIMIT_REACHED: 'Token API kamu sudah mencapai batas. Cabut salah satu dulu.',
   TWO_FACTOR_CHALLENGE_EXPIRED: 'Waktu memasukkan kode sudah habis. Masuk lagi dari awal.',
   TWO_FACTOR_DISABLED: 'Verifikasi dua langkah belum aktif.',
   TWO_FACTOR_ENABLED: 'Verifikasi dua langkah sudah aktif.',
@@ -57,6 +58,8 @@ const FIELD_TEXT: Partial<Record<string, string>> = {
   code: 'Kode 6 digit dari aplikasi authenticator.',
   recovery_code: 'Kode pemulihan belum valid.',
   token: 'Link reset ini sudah tidak berlaku. Minta link baru.',
+  scope: 'Pilih akses token: baca saja atau baca dan tulis.',
+  expiresInDays: 'Masa berlaku 1–365 hari, atau tanpa batas.',
 };
 
 /** Indonesian text per field the API refused; fields it did not name are absent. */

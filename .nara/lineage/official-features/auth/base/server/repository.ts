@@ -66,8 +66,8 @@ export function updatePassword(userId: string, password: string): void {
 /**
  * Hands an unverified account to whoever just proved they own its email (a
  * verified Google sign-in): anyone could have registered that email first,
- * so the password becomes one nobody knows, and every session, second factor
- * and reset link set up before is dropped. All at once.
+ * so the password becomes one nobody knows, and every session, second factor,
+ * reset link and API token set up before is dropped. All at once.
  */
 export function claimUnverifiedAccount(userId: string, unusablePasswordHash: string): void {
   const database = getDatabase();
@@ -85,6 +85,7 @@ export function claimUnverifiedAccount(userId: string, unusablePasswordHash: str
     database.prepare('DELETE FROM two_factor_recovery_codes WHERE user_id = ?').run(userId);
     database.prepare('DELETE FROM two_factor_challenges WHERE user_id = ?').run(userId);
     database.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(userId);
+    database.prepare('DELETE FROM api_tokens WHERE user_id = ?').run(userId);
     database.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
   })();
 }
@@ -376,4 +377,118 @@ export function redeemPasswordResetToken(tokenHash: string, passwordHash: string
     database.prepare('DELETE FROM sessions WHERE user_id = ?').run(token.user_id);
     return token.user_id;
   })();
+}
+
+export type ApiTokenScope = 'read' | 'write';
+
+export interface StoredApiToken {
+  id: string;
+  name: string;
+  prefix: string;
+  scope: ApiTokenScope;
+  expires_at: number | null;
+  last_used_at: number | null;
+  created_at: number;
+}
+
+/** A token found by its hash, with what the bearer pipeline needs of its account. */
+export interface ApiTokenOwner {
+  id: string;
+  user_id: string;
+  scope: ApiTokenScope;
+  expires_at: number | null;
+  last_used_at: number | null;
+  revoked_at: number | null;
+  user_name: string;
+  user_email: string;
+  must_change_password: number;
+}
+
+const ACTIVE_API_TOKEN = 'revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)';
+
+/**
+ * Stores a new token unless the account already holds `maxActive` working
+ * ones (expired and revoked tokens do not count). Answers whether it stored it.
+ */
+export function createApiToken(
+  data: { id: string; userId: string; name: string; tokenHash: string; prefix: string; scope: ApiTokenScope; expiresAt: number | null },
+  maxActive: number,
+  now: number = Date.now(),
+): boolean {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const { active } = database
+      .prepare(`SELECT COUNT(*) AS active FROM api_tokens WHERE user_id = ? AND ${ACTIVE_API_TOKEN}`)
+      .get(data.userId, now) as { active: number };
+    if (active >= maxActive) return false;
+    database
+      .prepare(
+        `INSERT INTO api_tokens (id, user_id, name, token_hash, prefix, scope, expires_at, last_used_at, revoked_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+      )
+      .run(data.id, data.userId, data.name, data.tokenHash, data.prefix, data.scope, data.expiresAt, now);
+    return true;
+  })();
+}
+
+/** The account's tokens that are not revoked, expired ones included, newest first. */
+export function listApiTokens(userId: string): StoredApiToken[] {
+  return getDatabase()
+    .prepare(
+      `SELECT id, name, prefix, scope, expires_at, last_used_at, created_at
+       FROM api_tokens
+       WHERE user_id = ? AND revoked_at IS NULL
+       ORDER BY created_at DESC, rowid DESC`,
+    )
+    .all(userId) as StoredApiToken[];
+}
+
+export function findApiTokenByHash(tokenHash: string): ApiTokenOwner | undefined {
+  return getDatabase()
+    .prepare(
+      `SELECT t.id, t.user_id, t.scope, t.expires_at, t.last_used_at, t.revoked_at,
+              u.name AS user_name, u.email AS user_email, u.must_change_password
+       FROM api_tokens t
+       INNER JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = ?`,
+    )
+    .get(tokenHash) as ApiTokenOwner | undefined;
+}
+
+export function touchApiToken(id: string, now: number): void {
+  getDatabase().prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(now, id);
+}
+
+/** Revokes one of the account's own tokens that is not revoked yet; answers it, or undefined. */
+export function revokeApiToken(userId: string, id: string, now: number = Date.now()): StoredApiToken | undefined {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const token = database
+      .prepare(
+        `SELECT id, name, prefix, scope, expires_at, last_used_at, created_at
+         FROM api_tokens WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+      )
+      .get(id, userId) as StoredApiToken | undefined;
+    if (!token) return undefined;
+    database.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ?').run(now, id);
+    return token;
+  })();
+}
+
+export function revokeAllApiTokens(userId: string, now: number = Date.now()): number {
+  return Number(
+    getDatabase().prepare('UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').run(now, userId).changes,
+  );
+}
+
+/** Removes tokens revoked or expired at or before `cutoff`; until then they keep answering why they stopped working. */
+export function purgeApiTokens(cutoff: number): number {
+  return Number(
+    getDatabase()
+      .prepare(
+        `DELETE FROM api_tokens
+         WHERE (revoked_at IS NOT NULL AND revoked_at <= ?) OR (expires_at IS NOT NULL AND expires_at <= ?)`,
+      )
+      .run(cutoff, cutoff).changes,
+  );
 }

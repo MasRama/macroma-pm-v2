@@ -11,6 +11,9 @@ export const AUTH_ACCOUNT_CHANGED_EVENT = 'auth.account-changed';
 /** Live update topic: the signed-in account's list of signed-in devices changed; refetch it. */
 export const AUTH_SESSIONS_CHANGED_EVENT = 'auth.sessions-changed';
 
+/** Live update topic: the signed-in account's API tokens changed; refetch them. */
+export const AUTH_TOKENS_CHANGED_EVENT = 'auth.tokens-changed';
+
 /** Live update topic: roles, their permissions, or their member counts changed; refetch the list. */
 export const AUTH_ROLES_CHANGED_EVENT = 'auth.roles-changed';
 
@@ -36,6 +39,7 @@ export const AUTH_REFUSAL_CODES = [
   'PROTECTED_ROLE',
   'RESET_TOKEN_INVALID',
   STALE_REVISION,
+  'TOKEN_LIMIT_REACHED',
   'TWO_FACTOR_CHALLENGE_EXPIRED',
   'TWO_FACTOR_DISABLED',
   'TWO_FACTOR_ENABLED',
@@ -56,6 +60,9 @@ export const AUTH_ACTIVITY = [
   { action: 'two-factor-enabled', label: 'Two-factor turned on', kind: 'access' },
   { action: 'two-factor-disabled', label: 'Two-factor turned off', kind: 'access' },
   { action: 'recovery-codes-regenerated', label: 'Recovery codes regenerated', kind: 'access' },
+  { action: 'token-created', label: 'API token created', kind: 'access' },
+  { action: 'token-revoked', label: 'API token revoked', kind: 'access' },
+  { action: 'tokens-revoked', label: 'All API tokens revoked', kind: 'access' },
 ] as const satisfies readonly ActivityDeclaration[];
 
 /** Holders of this role are administrators: they meet every access rule and the role cannot be edited away. */
@@ -177,6 +184,28 @@ export const confirmPasswordInputSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+/**
+ * What a personal access token may do on the public API: `read` calls only
+ * GET (and HEAD), `write` calls every method.
+ */
+export const API_TOKEN_SCOPES = ['read', 'write'] as const;
+export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
+
+/** Creates a personal access token; its secret is in the answer once and never again. */
+export const createApiTokenInputSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Token name is required')
+    .max(80, 'Token name must be at most 80 characters')
+    .refine(hasNoControlChars, { message: `Token name ${CONTROL_MESSAGE}` }),
+  scope: z.enum(API_TOKEN_SCOPES),
+  /** Days until it stops working, or null for a token that never expires. */
+  expiresInDays: z.number().int().min(1, 'Expiry is 1 to 365 days').max(365, 'Expiry is 1 to 365 days').nullable(),
+});
+
+export type CreateApiTokenInput = z.infer<typeof createApiTokenInputSchema>;
+
 export type TwoFactorChallengeInput = z.infer<typeof twoFactorChallengeInputSchema>;
 export type TwoFactorCodeInput = z.infer<typeof twoFactorCodeInputSchema>;
 export type ConfirmPasswordInput = z.infer<typeof confirmPasswordInputSchema>;
@@ -270,6 +299,17 @@ export function authResponseSchemas() {
     description: z.string().nullable(),
   });
   const editor = z.strictObject({ id: z.string(), name: z.string() });
+  const apiToken = z.strictObject({
+    id: z.string(),
+    name: z.string(),
+    /** The secret's first characters (`mcr_` and six more); never the secret. */
+    prefix: z.string(),
+    scope: z.enum(API_TOKEN_SCOPES),
+    createdAt: z.number(),
+    expiresAt: z.number().nullable(),
+    lastUsedAt: z.number().nullable(),
+    expired: z.boolean(),
+  });
   const error = z.strictObject({
     success: z.literal(false),
     message: z.string(),
@@ -286,6 +326,7 @@ export function authResponseSchemas() {
     role,
     permission,
     editor,
+    apiToken,
     error,
     /** 409 for an update based on an older revision. */
     staleRole: z.strictObject({ ...error.shape, code: z.literal(STALE_REVISION), current: role }),
@@ -298,6 +339,10 @@ export function authResponseSchemas() {
     sessions: success(z.strictObject({ sessions: z.array(session) })),
     revokeSessions: success(z.strictObject({ revoked: z.number() })),
     twoFactor: success(z.strictObject({ twoFactor: twoFactorStatus })),
+    apiTokens: success(z.strictObject({ tokens: z.array(apiToken) })),
+    /** The only answer that ever carries the token's secret. */
+    apiTokenCreated: success(z.strictObject({ token: apiToken, secret: z.string() })),
+    revokeApiTokens: success(z.strictObject({ revoked: z.number() })),
     twoFactorSetupStarted: success(twoFactorSetup),
     recoveryCodes: success(z.strictObject({ recoveryCodes: z.array(z.string()) })),
     roles: success(z.strictObject({ roles: z.array(role) })),
@@ -320,6 +365,7 @@ export type TwoFactorSetup = Infer<'twoFactorSetup'>;
 export type RoleData = Infer<'role'>;
 export type PermissionData = Infer<'permission'>;
 export type Editor = Infer<'editor'>;
+export type ApiTokenData = Infer<'apiToken'>;
 export type AuthError = Infer<'error'>;
 export type StaleRoleError = Infer<'staleRole'>;
 /** `AuthSuccess` carries only a message; `AuthSuccess<T>` always carries `data`. */
@@ -336,6 +382,9 @@ export type RevokeSessionsSuccess = Infer<'revokeSessions'>;
 export type TwoFactorStatusSuccess = Infer<'twoFactor'>;
 export type TwoFactorSetupSuccess = Infer<'twoFactorSetupStarted'>;
 export type RecoveryCodesSuccess = Infer<'recoveryCodes'>;
+export type ApiTokensSuccess = Infer<'apiTokens'>;
+export type ApiTokenCreatedSuccess = Infer<'apiTokenCreated'>;
+export type RevokeApiTokensSuccess = Infer<'revokeApiTokens'>;
 export type RolesResponseSuccess = Infer<'roles'>;
 export type RoleResponseSuccess = Infer<'roleSaved'>;
 export type DeleteRolesResponseSuccess = Infer<'rolesDeleted'>;
@@ -354,6 +403,9 @@ export type RevokeSessionsResponse = RevokeSessionsSuccess | AuthError;
 export type TwoFactorStatusResponse = TwoFactorStatusSuccess | AuthError;
 export type TwoFactorSetupResponse = TwoFactorSetupSuccess | AuthError;
 export type RecoveryCodesResponse = RecoveryCodesSuccess | AuthError;
+export type ApiTokensResponse = ApiTokensSuccess | AuthError;
+export type CreateApiTokenResponse = ApiTokenCreatedSuccess | AuthError;
+export type RevokeApiTokensResponse = RevokeApiTokensSuccess | AuthError;
 export type RolesResponse = RolesResponseSuccess | AuthError;
 export type PermissionsResponse = PermissionsResponseSuccess | AuthError;
 export type RoleResponse = RoleResponseSuccess | AuthError;

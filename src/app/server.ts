@@ -19,6 +19,7 @@ import { closeEventStreams, createEventStream, EVENTS_PATH } from '../shared/rea
 import { handleError } from './error-handler';
 import { requestId, requestLifecycleLog } from './observability';
 import {
+  apiTokenRateKey,
   AUTH_ACTIVITY,
   AUTH_MAINTENANCE,
   AUTH_ROUTE_POLICIES,
@@ -27,7 +28,9 @@ import {
   isAllowed,
   liveListener,
   passwordChangeGate,
+  requireApiToken,
   resetLoginThrottle,
+  resolveApiToken,
   ROLES_ACTIVITY,
   syncDeclaredPermissions,
   syncDeclaredRoles,
@@ -124,6 +127,18 @@ function isApiRequest(context: { req: { path: string } }): boolean {
   return context.req.path.startsWith('/api/');
 }
 
+/**
+ * The public API: `/api/v1` authenticates with a personal access token in the
+ * `Authorization` header and ignores cookies, while every other `/api` route
+ * reads only cookies. It has its own rate limit and needs no CSRF token.
+ */
+export const PUBLIC_API_PREFIX = '/api/v1';
+
+function isPublicApiRequest(context: { req: { path: string } }): boolean {
+  const { path } = context.req;
+  return path === PUBLIC_API_PREFIX || path.startsWith(`${PUBLIC_API_PREFIX}/`);
+}
+
 // Auth-specific lockout lives inside the Auth Feature; everything here applies
 // uniformly. Cheap request rejection runs before any body streaming so rate-limited or CSRF-invalid
 // callers cannot make the server inspect up to the full request-body budget.
@@ -131,7 +146,16 @@ const globalRateLimiter = createRateLimiter({
   maxRequests: env.RATE_LIMIT_MAX,
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   name: 'global',
-  skip: (context) => !isApiRequest(context),
+  skip: (context) => !isApiRequest(context) || isPublicApiRequest(context),
+});
+
+// Counted per token once the token resolves, otherwise per client address, so
+// made-up tokens cannot open fresh buckets.
+const publicApiRateLimiter = createRateLimiter({
+  maxRequests: env.API_RATE_LIMIT_MAX,
+  windowMs: env.API_RATE_LIMIT_WINDOW_MS,
+  name: 'public-api',
+  keyGenerator: apiTokenRateKey,
 });
 
 // One shared bucket for every route a Feature declares sensitive.
@@ -146,6 +170,7 @@ const sensitiveRateLimiter = createRateLimiter({
 export function resetSecurityState(): void {
   globalRateLimiter.reset();
   sensitiveRateLimiter.reset();
+  publicApiRateLimiter.reset();
   resetLoginThrottle();
 }
 
@@ -178,9 +203,16 @@ app.use('*', async (context, next) => {
 
 app.use('*', globalRateLimiter.middleware);
 app.use('*', sensitiveRateLimiter.middleware);
-app.use('*', csrfProtection({ isProduction: isProductionServer }));
-// Auth decides which of its own routes stay reachable; the prefix matches its mount below.
-app.use('/api/*', passwordChangeGate('/api/auth'));
+// A browser never attaches an Authorization header on its own, so a bearer
+// request cannot be forged cross-site; the public API sets no cookie either.
+app.use('*', csrfProtection({ isProduction: isProductionServer, exempt: isPublicApiRequest }));
+// Bearer token first, then its rate limit, then the refusal: the limiter
+// already knows which token to count.
+app.use(`${PUBLIC_API_PREFIX}/*`, resolveApiToken, publicApiRateLimiter.middleware, requireApiToken);
+// Auth decides which of its own routes stay reachable; the prefix matches its
+// mount below. The public API checks a token's account in its own pipeline.
+const sessionPasswordGate = passwordChangeGate('/api/auth');
+app.use('/api/*', (context, next) => (isPublicApiRequest(context) ? next() : sessionPasswordGate(context, next)));
 // Every state-changing /api/* request is bounded by MAX_JSON_BODY_BYTES
 // regardless of declared Content-Type, unless its route declared a budget.
 app.use('*', apiBodyLimit({ jsonMaxBytes: env.MAX_JSON_BODY_BYTES, routeBudget: routePolicy.bodyBudget }));
