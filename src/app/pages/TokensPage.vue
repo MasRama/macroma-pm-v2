@@ -296,8 +296,8 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
         <section class="panel tokens__card" aria-labelledby="tokens-new">
           <h2 id="tokens-new" class="h2 tokens__h">Buat token</h2>
           <form class="tokens__form" data-testid="token-form" novalidate @submit.prevent="createToken">
-            <p v-if="createError" role="alert" class="tokens__err" data-testid="create-error">
-              {{ createError }}
+            <p v-if="createError" role="alert" class="tokens__err tokens__err--reauth" data-testid="create-error">
+              <span>{{ createError }}</span>
               <button v-if="reauthNeeded" type="button" class="link tokens__reauth" data-testid="sign-in-again" :disabled="signingIn" @click="signInAgain">
                 Masuk ulang
               </button>
@@ -460,8 +460,15 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
   font-size: 12.5px;
   color: var(--mute);
 }
+/* Flex, not inline text: the link sits after the message, or wraps to its own line unindented. */
+.tokens__err--reauth {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  row-gap: 2px;
+}
 .tokens__reauth {
-  margin-left: 4px;
   font-size: 12.5px;
 }
 .tokens__foot {

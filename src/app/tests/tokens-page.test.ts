@@ -315,6 +315,8 @@ describe('confirming who creates a token', () => {
     await submit();
 
     expect(byTestId('create-error')?.textContent).toContain('Masuk ulang dulu, lalu buat token');
+    // No text space before the link: on a narrow screen it wraps to its own line unindented.
+    expect(byTestId('sign-in-again')!.previousSibling?.nodeType).toBe(Node.ELEMENT_NODE);
     byTestId('sign-in-again')!.click();
     await settle();
     expect(signInAgain).toHaveBeenCalledOnce();
