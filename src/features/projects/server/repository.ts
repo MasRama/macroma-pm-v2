@@ -350,10 +350,11 @@ export function projectIdsWithMembers(userIds: readonly string[]): string[] {
 /**
  * Removes what deleted accounts leave behind, as V1's foreign keys did:
  * the projects they owned go with everything inside, their memberships go,
- * and their names come off tasks, logs and the activity feed.
+ * and their names come off tasks, logs and the activity feed. A task that
+ * loses its assignee counts as edited, so `updated_since` syncs see it.
+ * Returns the storage keys of the attachments that went with the deleted projects.
  */
-/** Returns the storage keys of the attachments that went with the deleted projects. */
-export function forgetAccountRows(userIds: readonly string[]): string[] {
+export function forgetAccountRows(userIds: readonly string[], now = Date.now()): string[] {
   if (userIds.length === 0) return [];
   const database = getDatabase();
   const list = placeholders(userIds);
@@ -361,7 +362,9 @@ export function forgetAccountRows(userIds: readonly string[]): string[] {
     const keys = attachmentKeysWhere(`t.project_id IN (SELECT id FROM projects WHERE owner_id IN (${list}))`, userIds);
     database.prepare(`DELETE FROM projects WHERE owner_id IN (${list})`).run(...userIds);
     database.prepare(`DELETE FROM project_members WHERE user_id IN (${list})`).run(...userIds);
-    database.prepare(`UPDATE tasks SET assignee_id = NULL WHERE assignee_id IN (${list})`).run(...userIds);
+    database
+      .prepare(`UPDATE tasks SET assignee_id = NULL, revision = revision + 1, updated_at = ? WHERE assignee_id IN (${list})`)
+      .run(now, ...userIds);
     database.prepare(`UPDATE task_logs SET created_by = NULL WHERE created_by IN (${list})`).run(...userIds);
     database.prepare(`UPDATE project_activity_logs SET actor_id = NULL WHERE actor_id IN (${list})`).run(...userIds);
     database.prepare(`UPDATE task_comments SET user_id = NULL WHERE user_id IN (${list})`).run(...userIds);

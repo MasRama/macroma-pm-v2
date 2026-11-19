@@ -4,7 +4,7 @@ import { closeEventStreams } from '../../shared/realtime';
 import { publicApiOperations, type PublicApiOperation } from '../openapi';
 import { app, PUBLIC_API_PREFIX, resetSecurityState } from '../server';
 import { callApi } from './api';
-import { issueApiToken, signUp, type Persona } from './personas';
+import { grantAdmin, issueApiToken, signUp, type Persona } from './personas';
 
 /**
  * The public API's read endpoints through the composed application, called
@@ -292,5 +292,52 @@ describe('public API v1 reads', () => {
   it('answered every documented read in its documented shape', () => {
     const reads = operations.filter((operation) => operation.method === 'get');
     expect(reads.filter((operation) => !answered.has(operation)).map((operation) => operation.path)).toEqual([]);
+  });
+});
+
+describe('public API v1 sync of changes nobody edited', () => {
+  it('lists the tasks a batch adopted, a lost member and a deleted account changed, as new revisions', async () => {
+    resetSecurityState();
+    const owner = await signUp('Sync Owner');
+    const leaving = await signUp('Leaving Member');
+    const deleted = await signUp('Deleted Account');
+    const admin = await signUp('Sync Admin');
+    grantAdmin(admin.id);
+    const { project } = await created(owner, '/api/projects', { name: 'Sync' });
+    for (const member of [leaving, deleted]) {
+      expect((await callApi(owner, 'POST', `/api/projects/${project.id}/members`, { email: member.email })).status).toBe(201);
+    }
+    const tasksPath = `/api/projects/${project.id}/tasks`;
+    const { task: left } = await created(owner, tasksPath, { title: 'Left behind', assignee_id: leaving.id });
+    const { task: orphaned } = await created(owner, tasksPath, { title: 'Orphaned', assignee_id: deleted.id });
+    const { task: adopted } = await created(owner, tasksPath, { title: 'Adopted' });
+    const token = await issueApiToken(owner, 'read');
+
+    /** A sync point after everything written so far, and what changed since it once `change` ran. */
+    async function changedBy(change: () => Promise<{ status: number }>) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const since = Date.now();
+      expect((await v1(token, `/projects/${project.id}/tasks?updated_since=${since}`)).body.data.tasks).toEqual([]);
+      expect([200, 201]).toContain((await change()).status);
+      return (await v1(token, `/projects/${project.id}/tasks?updated_since=${since}`)).body.data.tasks as Array<{
+        id: string;
+        batch_id: string | null;
+        assignee: unknown;
+        revision: number;
+      }>;
+    }
+
+    // The project's first active batch adopts its batch-less tasks.
+    const intoBatch = await changedBy(() => callApi(owner, 'POST', `/api/projects/${project.id}/batches`, { activate: true }));
+    expect(intoBatch.map((task) => task.id).sort()).toEqual([left.id, orphaned.id, adopted.id].sort());
+    expect(intoBatch.every((task) => task.batch_id !== null && task.revision === 2)).toBe(true);
+
+    // A member who can no longer open the project comes off its tasks.
+    const afterLeaving = await changedBy(() => callApi(owner, 'DELETE', `/api/projects/${project.id}/members/${leaving.id}`));
+    expect(afterLeaving).toMatchObject([{ id: left.id, assignee: null, revision: 3 }]);
+
+    // A deleted account comes off every task it was assigned.
+    const afterDeletion = await changedBy(() => callApi(admin, 'DELETE', '/api/users', { ids: [deleted.id] }));
+    expect(afterDeletion).toMatchObject([{ id: orphaned.id, assignee: null, revision: 3 }]);
   });
 });
