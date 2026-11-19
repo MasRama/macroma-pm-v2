@@ -68,6 +68,7 @@ const SCREENS = [
   ['users'],
   ['users-edit', (page) => page.locator('[data-testid^="edit-user-"]').nth(1).click()],
   ['not-found'],
+  ['api-docs'],
 ];
 const SHOTS = SCREENS.flatMap(([screen, act]) =>
   ['desk', 'phone'].flatMap((size) => ['light', 'dark'].map((theme) => [screen, theme, size, act])),
@@ -130,6 +131,12 @@ const json = (data) => (route) => route.fulfill({ json: { success: true, message
     );
     await page.route('**/api/auth/**', (route) => route.fulfill({ status: 401, json: { success: false, message: 'Not signed in.', code: 'UNAUTHENTICATED' } }));
     await page.route('**/api/events**', (route) => route.fulfill({ status: 204 }));
+    if (screen === 'api-docs') {
+      // The fixture document the page tests use: real read endpoints plus sample write ones.
+      await page.route('**/api/v1/openapi.json', (route) =>
+        route.fulfill({ path: path.join(__dirname, '../../src/app/tests/fixtures/openapi-v1.json'), contentType: 'application/json' }),
+      );
+    }
     if (screen.startsWith('users')) {
       await page.route('**/api/auth/me', json({ user: ADMIN }));
       await page.route((url) => url.pathname === '/api/users', json({ users: USERS, total: USERS.length, page: 1, limit: 10 }));
