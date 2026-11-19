@@ -210,7 +210,10 @@ describe('Dokumentasi API page', () => {
     document.body.append(topbar, shell);
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/:any(.*)*', component: defineComponent({ render: () => null }) }],
+      routes: [
+        { path: '/settings/tokens', name: 'api-tokens', component: defineComponent({ render: () => null }) },
+        { path: '/:any(.*)*', component: defineComponent({ render: () => null }) },
+      ],
     });
     await router.push('/settings/api-docs');
     app = createApp(ApiDocsPage).use(router);

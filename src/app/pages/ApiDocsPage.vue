@@ -193,7 +193,7 @@ onUnmounted(unwatchScroll);
             <h3 class="docs__h3">Autentikasi</h3>
             <p class="docs__text">
               Kirim token akses pribadi di setiap permintaan. Token dibuat di halaman
-              <RouterLink to="/settings/tokens" class="link" data-testid="api-docs-tokens">Token API</RouterLink>.
+              <RouterLink :to="{ name: 'api-tokens' }" class="link" data-testid="api-docs-tokens">Token API</RouterLink>.
             </p>
             <ApiCode code="Authorization: Bearer mcr_..." label="Header" inline />
           </div>
