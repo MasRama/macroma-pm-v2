@@ -180,7 +180,8 @@ export const updateTaskInputSchema = z
 
 export const moveTaskInputSchema = z
   .object({
-    column_id: z.enum(TASK_COLUMNS),
+    // The API docs' curl example moves a new task, which sits in `backlog`, so it names another column.
+    column_id: z.enum(TASK_COLUMNS).meta({ examples: ['review'] }),
     /** Required when moving to `revisi`: what has to change. */
     note: z.string().trim().max(2000, 'Note must be at most 2000 characters').optional(),
     /** Position in the target column; without it, the task goes last. */

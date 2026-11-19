@@ -27,6 +27,7 @@ const names = [
   ['/roles', 'roles'],
   ['/activity', 'activity'],
   ['/security', 'security'],
+  ['/settings/api-docs', 'api-docs'],
   ['/:pathMatch(.*)*', 'not-found'],
 ] as const;
 

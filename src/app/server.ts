@@ -296,7 +296,7 @@ composeProjectsServer(app);
 // Built once, from the operations the Features declare.
 let publicApiSpec: ReturnType<typeof openApiDocument> | undefined;
 app.get(PUBLIC_API_SPEC_PATH, publicRoute, (context) => {
-  publicApiSpec ??= openApiDocument(PUBLIC_API_PREFIX);
+  publicApiSpec ??= openApiDocument(PUBLIC_API_PREFIX, { requests: env.API_RATE_LIMIT_MAX, windowMs: env.API_RATE_LIMIT_WINDOW_MS });
   context.header('Cache-Control', 'public, max-age=300');
   return context.json(publicApiSpec);
 });

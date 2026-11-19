@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import {
   accountHasPassword,
   AUTH_TOKENS_CHANGED_EVENT,
@@ -285,8 +286,9 @@ onUnmounted(onServerEvent(AUTH_TOKENS_CHANGED_EVENT, () => void load()));
   <div class="tokens">
     <ShellTopBar><TopCrumb :trail="['Profil']" current="Token API" /></ShellTopBar>
     <PageHead class="tokens__head" title="Token API" description="Hubungkan script dan aplikasi lain ke Macroma lewat API publik.">
-      <template v-if="tokens.length" #actions>
-        <UiButton variant="ghost" data-testid="revoke-all" @click="revokingAll = true">Cabut semua</UiButton>
+      <template #actions>
+        <RouterLink class="btn btn--ghost" :to="{ name: 'api-docs' }" data-testid="tokens-api-docs">Dokumentasi API</RouterLink>
+        <UiButton v-if="tokens.length" variant="ghost" data-testid="revoke-all" @click="revokingAll = true">Cabut semua</UiButton>
       </template>
     </PageHead>
 

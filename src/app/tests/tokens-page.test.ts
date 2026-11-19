@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { createApp, nextTick, type App } from 'vue';
+import { createApp, defineComponent, nextTick, type App } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TokensPage from '../pages/TokensPage.vue';
 import { accountHasPassword, AUTH_TOKENS_CHANGED_EVENT, type ApiTokenData, type SecurityClient } from '../../features/auth/web';
@@ -63,7 +64,16 @@ async function mount(client: TokensClient, props: { hasPassword?: boolean; signI
   topbar.id = 'shell-topbar';
   host = document.createElement('div');
   document.body.append(topbar, host);
-  app = createApp(TokensPage, { client, ...props });
+  const stub = defineComponent({ render: () => null });
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/settings/api-docs', name: 'api-docs', component: stub },
+      { path: '/:any(.*)*', component: stub },
+    ],
+  });
+  await router.push('/settings/tokens');
+  app = createApp(TokensPage, { client, ...props }).use(router);
   app.mount(host);
   await settle();
   return host;
@@ -139,6 +149,9 @@ describe('the Token API list', () => {
     expect(byTestId('tokens-empty')?.textContent).toContain('Belum ada token');
     expect(byTestId('revoke-all')).toBeNull();
     expect(byTestId('password-note')).not.toBeNull();
+    // The API docs are one click away, with or without a token.
+    expect(byTestId('tokens-api-docs')?.getAttribute('href')).toBe('/settings/api-docs');
+    expect(byTestId('tokens-api-docs')?.textContent).toBe('Dokumentasi API');
   });
 
   it('says in Indonesian why the list could not load', async () => {

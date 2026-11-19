@@ -29,6 +29,7 @@ export const SCREENS = [
   'users',
   'users-edit',
   'not-found',
+  'api-docs',
 ] as const;
 export type Screen = (typeof SCREENS)[number];
 
@@ -73,6 +74,8 @@ export function pathFor(screen: Screen): string {
       return '/users';
     case 'not-found':
       return '/nowhere';
+    case 'api-docs':
+      return '/settings/api-docs';
     default:
       return '/projects/p1/board';
   }

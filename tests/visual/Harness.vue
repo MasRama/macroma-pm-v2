@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import AppFrame from '../../src/app/layouts/AppFrame.vue';
+import ApiDocsPage from '../../src/app/pages/ApiDocsPage.vue';
 import UsersAdminPage from '../../src/app/pages/admin/UsersAdminPage.vue';
 import ForgotPasswordPage from '../../src/app/pages/auth/ForgotPasswordPage.vue';
 import LoginPage from '../../src/app/pages/auth/LoginPage.vue';
@@ -101,6 +102,7 @@ const firstBump = screen === 'first-bump';
       <ProfilePage v-else-if="screen === 'profile'" />
       <TokensPage v-else-if="screen.startsWith('tokens')" />
       <UsersAdminPage v-else-if="screen === 'users' || screen === 'users-edit'" />
+      <ApiDocsPage v-else-if="screen === 'api-docs'" />
     </AppFrame>
     <ChatDrawer
       :open="chatOpen"

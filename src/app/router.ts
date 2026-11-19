@@ -13,6 +13,7 @@ import { currentWorkspace, newWorkspaceOpen, workspaceNameOf } from './shell-sta
 import activityWebRoutes from './bindings/activity.web';
 import usersWebRoutes from './bindings/users.web';
 import { canEnter } from './navigation';
+import ApiDocsPage from './pages/ApiDocsPage.vue';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.vue';
 import LoginPage from './pages/auth/LoginPage.vue';
 import RegisterPage from './pages/auth/RegisterPage.vue';
@@ -122,6 +123,7 @@ export const appRoutes = [
   },
   ...activityWebRoutes,
   { path: '/security', name: 'security', component: SecurityPage, meta: signedIn },
+  { path: '/settings/api-docs', name: 'api-docs', component: ApiDocsPage, meta: signedIn },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundPage },
 ] satisfies RouteRecordRaw[];
 
