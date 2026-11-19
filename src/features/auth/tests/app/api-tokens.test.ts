@@ -6,10 +6,10 @@ import { closeEventStreams, EVENTS_PATH } from '../../../../shared/realtime';
 import { readEvents } from '../../../../shared/realtime/tests/helpers';
 import { csrfHeaders, issueCsrf, mergeResponseCookies } from '../../../../shared/security/tests/helpers';
 import { AUTH_TOKENS_CHANGED_EVENT, authResponseSchemas } from '../../contract';
-import { AUTH_MAINTENANCE, createAuthRoutes, deleteAccounts, hashPassword } from '../..';
+import { AUTH_MAINTENANCE, createAuthRoutes, deleteAccounts, hashPassword, resetAccountPassword } from '../..';
 import type { AuthActivityEvent } from '../../server/activity';
 import { API_TOKENS } from '../../server/config';
-import { claimUnverifiedAccount, createApiToken } from '../../server/repository';
+import { claimUnverifiedAccount, createApiToken, createPasswordResetToken } from '../../server/repository';
 
 /**
  * Personal access tokens, managed from a signed-in browser: create, list,
@@ -145,6 +145,87 @@ describe('personal access tokens', () => {
     expect(never.expiresAt).toBeNull();
     const longest = schemas.apiTokenCreated.parse((await create(browser, { name: 'year', scope: 'read', expiresInDays: 365 })).body).data.token;
     expect(longest.expiresAt! - longest.createdAt).toBe(365 * DAY);
+  });
+
+  it('revokes every token when the account changes its password', async () => {
+    const browser = await signUp();
+    const other = await signUp();
+    await create(browser, { name: 'a', scope: 'read', expiresInDays: null });
+    resetSecurityState();
+    await create(browser, { name: 'b', scope: 'write' });
+    await create(other, { name: 'untouched', scope: 'write' });
+
+    resetSecurityState();
+    const changed = await send(browser, '/api/auth/change-password', {
+      method: 'POST',
+      body: { current_password: PASSWORD, new_password: 'a brand new passphrase' },
+    });
+    expect(changed.status).toBe(200);
+
+    expect(storedRows(browser.id).map((row) => row.revoked_at)).toEqual([expect.any(Number), expect.any(Number)]);
+    expect((await send(browser, '/api/auth/tokens')).body.data.tokens).toEqual([]);
+    expect(storedRows(other.id)[0]!.revoked_at).toBeNull();
+  });
+
+  it('revokes every token when the password is reset by email or by an administrator', async () => {
+    const byEmail = await signUp();
+    await create(byEmail, { name: 'emailed', scope: 'write' });
+    const resetToken = randomUUID();
+    createPasswordResetToken({ id: randomUUID(), userId: byEmail.id, tokenHash: sha256(resetToken), expiresAt: Date.now() + 60_000 });
+    resetSecurityState();
+    const reset = await send(undefined, '/api/auth/reset-password', {
+      method: 'POST',
+      body: { token: resetToken, password: 'a brand new passphrase' },
+    });
+    expect(reset.status).toBe(200);
+    expect(storedRows(byEmail.id)[0]!.revoked_at).toEqual(expect.any(Number));
+
+    const byAdministrator = await signUp();
+    await create(byAdministrator, { name: 'administered', scope: 'write' });
+    resetAccountPassword(byAdministrator.id, await hashPassword('a temporary passphrase'));
+    expect(storedRows(byAdministrator.id)[0]!.revoked_at).toEqual(expect.any(Number));
+  });
+
+  it('reports the tokens a new password revoked', async () => {
+    const reported: AuthActivityEvent[] = [];
+    const routes = createAuthRoutes((event) => reported.push(event));
+    const browser = await signUp();
+    await create(browser, { name: 'one', scope: 'read' });
+    resetSecurityState();
+    await create(browser, { name: 'two', scope: 'read' });
+
+    const changed = await routes.request('/change-password', {
+      method: 'POST',
+      headers: { Cookie: browser.cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: PASSWORD, new_password: 'a brand new passphrase' }),
+    });
+    expect(changed.status).toBe(200);
+    expect(reported.map((event) => [event.action, event.metadata])).toEqual([
+      ['auth.password-changed', undefined],
+      ['auth.tokens-revoked', { revoked: 2 }],
+    ]);
+
+    // A password change with nothing to revoke reports only the change.
+    reported.length = 0;
+    const cookie = mergeResponseCookies(browser.cookie, changed);
+    await routes.request('/change-password', {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: 'a brand new passphrase', new_password: 'yet another passphrase' }),
+    });
+    expect(reported.map((event) => event.action)).toEqual(['auth.password-changed']);
+  });
+
+  it('keeps every token paused while a temporary password is pending', async () => {
+    const browser = await signUp();
+    const { secret } = (await create(browser, { name: 'paused', scope: 'read' })).body.data;
+    const call = () => app.request('/api/v1/anything', { headers: { Authorization: `Bearer ${secret}` } });
+    expect((await call()).status).toBe(404);
+
+    getDatabase().prepare('UPDATE users SET must_change_password = 1 WHERE id = ?').run(browser.id);
+    const paused = await call();
+    expect(paused.status).toBe(403);
+    expect(((await paused.json()) as { code: string }).code).toBe('PASSWORD_CHANGE_REQUIRED');
   });
 
   it('stores only the SHA-256 of the secret', async () => {

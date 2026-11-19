@@ -93,9 +93,9 @@ registration policy and limits.
 | `POST /api/auth/two-factor/challenge` | public, strict limit | `{ code }` (6 digits) or `{ recovery_code }` | signs in |
 | `POST /api/auth/logout` | public | | |
 | `GET /api/auth/me` | signed in | | `{ user: { id, name, email, avatar, phone, verified, roles[], permissions[], mustChangePassword, hasPassword } }`; `hasPassword` is `false` while an account made through Google has only its random password |
-| `POST /api/auth/change-password` | signed in | `{ current_password, new_password }` | |
+| `POST /api/auth/change-password` | signed in | `{ current_password, new_password }` | revokes every API token of the account |
 | `POST /api/auth/forgot-password` | public, strict limit | `{ email }` | always 200 with the same message, whether or not an account uses the email |
-| `POST /api/auth/reset-password` | public, strict limit | `{ token, password }` | |
+| `POST /api/auth/reset-password` | public, strict limit | `{ token, password }` | revokes every API token of the account |
 | `GET /api/auth/google/redirect` | public | | a browser navigation, not a fetch |
 | `GET /api/auth/google/callback` | public | | Google's return address |
 
@@ -165,10 +165,14 @@ so people can tell tokens apart.
 - **Scopes.** `read` calls only `GET` and `HEAD`; `write` calls every method.
 - **Limit.** An account holds at most 50 working tokens; the 51st answers
   `409 TOKEN_LIMIT_REACHED`. Expired and revoked tokens do not count.
-- **Passwords.** Tokens keep working when the account changes or resets its
-  password. While an administrator's temporary password is pending, every
-  token answers `403 PASSWORD_CHANGE_REQUIRED` until it is replaced. Deleting
-  the account deletes its tokens.
+- **Passwords.** Changing the password, a reset by email and an
+  administrator's reset each revoke every token of the account (they then
+  answer `401 TOKEN_REVOKED`) and record `auth.tokens-revoked` in the
+  activity feed (an administrator's reset shows as `users.password-reset`).
+  `auth.tokens-changed` is published too, though the change signs every
+  other session out anyway. While an administrator's temporary password is
+  pending, any token answers `403 PASSWORD_CHANGE_REQUIRED`. Deleting the
+  account deletes its tokens.
 - **Live.** Creating or revoking tokens publishes `auth.tokens-changed` to the
   account, so its other tabs refetch `GET /api/auth/tokens`.
 

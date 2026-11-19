@@ -17,6 +17,7 @@ import { sessionsChanged } from './live';
 import { mailAvailable, mailTransport } from './mail';
 import { createPasswordResetToken, findUserByEmail, findUserById, redeemPasswordResetToken } from './repository';
 import { hashPassword } from './service';
+import { reportTokensRevoked } from './token-routes';
 
 function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -76,14 +77,15 @@ const forgotPasswordHandler = (context: Context, input: ForgotPasswordInput) => 
 };
 
 const resetPasswordHandler = async (context: Context, input: ResetPasswordInput, activity?: AuthActivitySink) => {
-  const userId = redeemPasswordResetToken(tokenHash(input.token), await hashPassword(input.password));
-  if (!userId) {
+  const redeemed = redeemPasswordResetToken(tokenHash(input.token), await hashPassword(input.password));
+  if (!redeemed) {
     return context.json(
       { success: false as const, message: 'This reset link is invalid or has expired', code: 'RESET_TOKEN_INVALID' as const },
       400,
     );
   }
-  // Every device was signed out with the old password.
+  const { userId, revokedTokens } = redeemed;
+  // Every device was signed out, and every API token revoked, with the old password.
   sessionsChanged([userId]);
   const user = findUserById(userId);
   Logger.logAuth('password_reset', { userId });
@@ -94,6 +96,7 @@ const resetPasswordHandler = async (context: Context, input: ResetPasswordInput,
     targetId: userId,
     targetLabel: user?.name ?? null,
   });
+  if (user) reportTokensRevoked(user, revokedTokens, activity);
   return context.json({
     success: true as const,
     message: 'Password reset. Sign in with your new password.',

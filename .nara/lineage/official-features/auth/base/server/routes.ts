@@ -49,7 +49,7 @@ import { beginTwoFactorChallenge, createSecurityRoutes } from './security-routes
 import { sessionGuard } from './guard';
 import { createGoogleRoutes } from './google';
 import { createPasswordResetRoutes } from './password-reset';
-import { createTokenRoutes } from './token-routes';
+import { createTokenRoutes, reportTokensRevoked } from './token-routes';
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE';
@@ -185,7 +185,7 @@ const changePasswordHandler = async (context: Context, input: ChangePasswordInpu
     );
   }
 
-  updatePassword(user.id, await hashPassword(input.new_password));
+  const revokedTokens = updatePassword(user.id, await hashPassword(input.new_password));
   // A credential change signs out every other device; this browser gets a fresh session.
   deleteSessionsByUserId(user.id);
   const token = startSession(user, context.req.header('user-agent'), clientIp(context));
@@ -198,6 +198,7 @@ const changePasswordHandler = async (context: Context, input: ChangePasswordInpu
     targetId: user.id,
     targetLabel: user.name,
   });
+  reportTokensRevoked(user, revokedTokens, activity);
   return context.json({ success: true as const, message: 'Password updated' } satisfies AuthSuccess);
 };
 

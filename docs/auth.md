@@ -95,13 +95,16 @@ other `/api` route ignores the `Authorization` header.
 - A bad, revoked or expired token answers `401` with `TOKEN_INVALID`,
   `TOKEN_REVOKED` or `TOKEN_EXPIRED` and a `WWW-Authenticate: Bearer` header.
   Revoked and expired tokens are deleted 30 days later, by Auth's maintenance.
-- Passwords: a token belongs to the account, not to its password, so changing
-  or resetting the password (by email, or an administrator's reset) keeps
-  every token working, as on GitHub. While an administrator's temporary
-  password is pending, every token answers `403 PASSWORD_CHANGE_REQUIRED`
-  until the account replaces it. Deleting the account deletes its tokens; an
-  unverified account claimed through Google loses them, like its sessions.
-  To cut a token off, revoke it (or all of them).
+- Passwords: a token never outlives the password it was made under.
+  Changing the password, a reset by email and an administrator's reset
+  revoke every token of the account in the same transaction (`401
+  TOKEN_REVOKED` afterwards), publish `auth.tokens-changed` and record
+  `auth.tokens-revoked` (an administrator's reset is recorded by Users as
+  `users.password-reset`). While an administrator's temporary password is
+  pending, any token answers `403 PASSWORD_CHANGE_REQUIRED`. Deleting the
+  account deletes its tokens; an unverified account claimed through Google
+  loses them, like its sessions. To cut a token off by hand, revoke it (or
+  all of them).
 - An account holds at most 50 working tokens (`409 TOKEN_LIMIT_REACHED`).
 
 ## Limits

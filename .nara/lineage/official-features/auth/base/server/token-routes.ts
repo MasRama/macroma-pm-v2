@@ -30,6 +30,24 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Tells the account's tabs and the activity feed that `revoked` tokens just
+ * stopped working: by hand (revoke all) or with a new password.
+ */
+export function reportTokensRevoked(user: { id: string; name: string }, revoked: number, activity?: AuthActivitySink): void {
+  if (revoked === 0) return;
+  tokensChanged(user.id);
+  Logger.logAuth('api_tokens_revoked', { userId: user.id, revoked });
+  activity?.({
+    action: 'auth.tokens-revoked',
+    resource: 'auth',
+    actorId: user.id,
+    targetId: user.id,
+    targetLabel: user.name,
+    metadata: { revoked },
+  });
+}
+
+/**
  * Proves the person at the keyboard owns the account before a token is made,
  * so a stolen session alone cannot mint one: the current password, checked
  * like two-factor changes do (400 INVALID_PASSWORD). An account with only the
@@ -155,18 +173,7 @@ export function createTokenRoutes(activity?: AuthActivitySink) {
     .post('/tokens/revoke-all', sessionGuard.signedIn, (context) => {
       const { user } = sessionGuard.actor(context);
       const revoked = revokeAllApiTokens(user.id);
-      if (revoked > 0) {
-        tokensChanged(user.id);
-        Logger.logAuth('api_tokens_revoked', { userId: user.id, revoked });
-        activity?.({
-          action: 'auth.tokens-revoked',
-          resource: 'auth',
-          actorId: user.id,
-          targetId: user.id,
-          targetLabel: user.name,
-          metadata: { revoked },
-        });
-      }
+      reportTokensRevoked(user, revoked, activity);
       return context.json({
         success: true as const,
         message: 'API tokens revoked',

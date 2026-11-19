@@ -169,20 +169,20 @@ describe('public API bearer pipeline', () => {
     }
   });
 
-  it('pauses every token while a temporary password is pending, and resumes once it is replaced', async () => {
+  it('revokes every token when an administrator resets the password', async () => {
     let persona = await loaded.personas.signUp();
     const token = await loaded.personas.issueApiToken(persona, 'write');
 
     persona = await loaded.personas.requirePasswordChange(persona);
-    expectRefusal(await v1(token), 403, 'PASSWORD_CHANGE_REQUIRED');
-    expectRefusal(await v1(token, 'POST'), 403, 'PASSWORD_CHANGE_REQUIRED');
+    expectRefusal(await v1(token), 401, 'TOKEN_REVOKED');
 
+    // Replacing the temporary password does not bring it back.
     const changed = await sessionCall(persona.cookie, 'POST', '/api/auth/change-password', {
       current_password: loaded.personas.TEST_PASSWORD,
       new_password: 'a different long passphrase',
     });
     expect(changed.status).toBe(200);
-    expect((await v1(token)).status).toBe(200);
+    expectRefusal(await v1(token), 401, 'TOKEN_REVOKED');
   });
 
   it('leaves a session cookie’s pending temporary password to the session routes', async () => {
@@ -198,7 +198,7 @@ describe('public API bearer pipeline', () => {
     expect(answer.body.data.account.id).toBe(holder.id);
   });
 
-  it('keeps tokens working after the account changes its password', async () => {
+  it('revokes every token when the account changes its password', async () => {
     const persona = await loaded.personas.signUp();
     const token = await loaded.personas.issueApiToken(persona, 'write');
 
@@ -208,7 +208,7 @@ describe('public API bearer pipeline', () => {
     });
     expect(changed.status).toBe(200);
 
-    expect((await v1(token, 'POST')).status).toBe(200);
+    expectRefusal(await v1(token, 'POST'), 401, 'TOKEN_REVOKED');
   });
 
   it('stops answering for a deleted account', async () => {

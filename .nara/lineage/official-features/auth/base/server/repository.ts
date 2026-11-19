@@ -73,10 +73,20 @@ export function createUser(data: {
   return findUserByEmail(data.email)!;
 }
 
-export function updatePassword(userId: string, password: string): void {
-  getDatabase()
-    .prepare('UPDATE users SET password = ?, must_change_password = 0, password_usable = 1, updated_at = ? WHERE id = ?')
-    .run(password, Date.now(), userId);
+/**
+ * Sets the account's own new password and revokes every API token it holds,
+ * at once: a token never outlives the password it was made under. Answers
+ * how many tokens were revoked.
+ */
+export function updatePassword(userId: string, password: string): number {
+  const database = getDatabase();
+  return database.transaction(() => {
+    const now = Date.now();
+    database
+      .prepare('UPDATE users SET password = ?, must_change_password = 0, password_usable = 1, updated_at = ? WHERE id = ?')
+      .run(password, now, userId);
+    return revokeAllApiTokens(userId, now);
+  })();
 }
 
 /**
@@ -382,10 +392,15 @@ export function createPasswordResetToken(data: { id: string; userId: string; tok
 
 /**
  * Spends an unused, unexpired reset token: sets the password, marks the token
- * used, and ends every session of the account, all at once. Answers the
- * account id, or undefined when the token does not work.
+ * used, ends every session and revokes every API token of the account, all at
+ * once. Answers the account and how many tokens were revoked, or undefined
+ * when the token does not work.
  */
-export function redeemPasswordResetToken(tokenHash: string, passwordHash: string, now: number = Date.now()): string | undefined {
+export function redeemPasswordResetToken(
+  tokenHash: string,
+  passwordHash: string,
+  now: number = Date.now(),
+): { userId: string; revokedTokens: number } | undefined {
   const database = getDatabase();
   return database.transaction(() => {
     const token = database
@@ -399,7 +414,7 @@ export function redeemPasswordResetToken(tokenHash: string, passwordHash: string
     database.prepare('UPDATE password_reset_tokens SET used_at = ? WHERE id = ?').run(now, token.id);
     database.prepare('DELETE FROM password_reset_tokens WHERE user_id = ? AND id <> ?').run(token.user_id, token.id);
     database.prepare('DELETE FROM sessions WHERE user_id = ?').run(token.user_id);
-    return token.user_id;
+    return { userId: token.user_id, revokedTokens: revokeAllApiTokens(token.user_id, now) };
   })();
 }
 

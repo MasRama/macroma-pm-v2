@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { getDatabase } from '../../../shared/database';
+import { Logger } from '../../../shared/logging';
 import { syncUserRoles } from './access';
-import { accountsChanged, rolesChanged, sessionsChanged } from './live';
+import { accountsChanged, rolesChanged, sessionsChanged, tokensChanged } from './live';
+import { revokeAllApiTokens } from './repository';
 
 /**
  * Auth-owned account directory. Auth owns account identity data
@@ -258,18 +260,29 @@ export function updateAccountWithRoles(
   return update;
 }
 
+/**
+ * An administrator's reset: a temporary password the account must replace,
+ * every session ended and every API token revoked, all at once.
+ */
 export function resetAccountPassword(userId: string, passwordHash: string): AccountRecord | undefined {
   const database = getDatabase();
-  const account = database.transaction(() => {
+  const reset = database.transaction(() => {
+    const now = Date.now();
     const result = database
       .prepare('UPDATE users SET password = ?, must_change_password = 1, password_usable = 1, updated_at = ? WHERE id = ?')
-      .run(passwordHash, Date.now(), userId);
+      .run(passwordHash, now, userId);
     if (result.changes === 0) return undefined;
     database.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
-    return findAccountById(userId);
+    const revokedTokens = revokeAllApiTokens(userId, now);
+    return { account: findAccountById(userId), revokedTokens };
   })();
-  if (account) sessionsChanged([userId]);
-  return account;
+  if (!reset) return undefined;
+  sessionsChanged([userId]);
+  if (reset.revokedTokens > 0) {
+    tokensChanged(userId);
+    Logger.logAuth('api_tokens_revoked', { userId, revoked: reset.revokedTokens, reason: 'password-reset-by-administrator' });
+  }
+  return reset.account;
 }
 
 type AccountsDeletedListener = (userIds: readonly string[]) => void;
