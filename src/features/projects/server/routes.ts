@@ -430,7 +430,7 @@ export function createTaskRoutes(host: ProjectsServerHost) {
       if (comment.user_id !== actor.id && project.owner_id !== actor.id) {
         return forbidden(context, 'Only the author or the project owner can delete this comment');
       }
-      deleteComment(comment.id);
+      deleteComment(comment);
       announceBoardChange(projectAudience(host, project));
       return context.json({ success: true as const, message: 'Comment deleted' } satisfies ProjectsDone);
     })

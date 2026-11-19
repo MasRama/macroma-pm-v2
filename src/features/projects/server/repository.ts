@@ -1122,17 +1122,34 @@ export function findComment(id: string): CommentRow | undefined {
   return getDatabase().prepare(`SELECT ${COMMENT_COLUMNS} FROM task_comments WHERE id = ?`).get(id) as CommentRow | undefined;
 }
 
+/**
+ * A comment or image changed the task's counts: `updated_at` moves so an
+ * `updated_since` sync sees them, `revision` stays so an open edit form of
+ * the task does not go stale.
+ */
+function touchTask(taskId: string, now: number): void {
+  getDatabase().prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(now, taskId);
+}
+
 export function createComment(input: { taskId: string; userId: string; content: string }): CommentRow {
+  const database = getDatabase();
   const now = Date.now();
   const row: CommentRow = { id: randomUUID(), task_id: input.taskId, user_id: input.userId, content: input.content, created_at: now, updated_at: now };
-  getDatabase()
-    .prepare(`INSERT INTO task_comments (${COMMENT_COLUMNS}) VALUES (@id, @task_id, @user_id, @content, @created_at, @updated_at)`)
-    .run(row);
+  database.transaction(() => {
+    database
+      .prepare(`INSERT INTO task_comments (${COMMENT_COLUMNS}) VALUES (@id, @task_id, @user_id, @content, @created_at, @updated_at)`)
+      .run(row);
+    touchTask(input.taskId, now);
+  })();
   return row;
 }
 
-export function deleteComment(id: string): void {
-  getDatabase().prepare('DELETE FROM task_comments WHERE id = ?').run(id);
+export function deleteComment(comment: Pick<CommentRow, 'id' | 'task_id'>): void {
+  const database = getDatabase();
+  database.transaction(() => {
+    database.prepare('DELETE FROM task_comments WHERE id = ?').run(comment.id);
+    touchTask(comment.task_id, Date.now());
+  })();
 }
 
 // --- Attachments ------------------------------------------------------------
@@ -1178,6 +1195,7 @@ export function addAttachments(
       insert.run(row);
       return row;
     });
+    touchTask(task.id, now);
     logActivity({
       projectId: task.project_id,
       eventType: 'task.attachment_added',
@@ -1195,6 +1213,7 @@ export function deleteAttachment(task: TaskRow, attachment: AttachmentRow, actor
   const database = getDatabase();
   database.transaction(() => {
     database.prepare('DELETE FROM task_attachments WHERE id = ?').run(attachment.id);
+    touchTask(task.id, Date.now());
     logActivity({
       projectId: task.project_id,
       eventType: 'task.attachment_removed',
