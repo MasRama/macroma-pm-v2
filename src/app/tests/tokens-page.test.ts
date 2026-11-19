@@ -292,7 +292,7 @@ describe('confirming who creates a token', () => {
     expect(byTestId('new-secret')).toBeNull();
   });
 
-  it('words a refused password field on 422 VALIDATION_ERROR', async () => {
+  it('words a refused password field on 422 VALIDATION_ERROR when the password was sent', async () => {
     const client = fakeClient();
     client.createToken.mockResolvedValueOnce(refusal('VALIDATION_ERROR', { password: ['Password is required'] }));
     await mount(client);
@@ -318,7 +318,8 @@ describe('confirming who creates a token', () => {
     const field = document.querySelector<HTMLInputElement>('#token-password')!;
     expect(field).not.toBeNull();
     expect(document.activeElement).toBe(field);
-    expect(document.querySelector('#token-password-error')?.textContent).toBe('Password 8–100 karakter.');
+    expect(document.querySelector('#token-password-error')?.textContent).toBe('Isi password kamu untuk membuat token.');
+    expect(byTestId('create-error')?.textContent?.trim()).toBe('Akun ini sudah punya password. Isi dulu, lalu buat token lagi.');
 
     await typePassword();
     await submit();

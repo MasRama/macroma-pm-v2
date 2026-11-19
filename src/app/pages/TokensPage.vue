@@ -65,6 +65,9 @@ const SCOPE_HINT: Record<ApiTokenScope, string> = {
 const NAME_TEXT = 'Nama token wajib diisi, maksimal 80 karakter.';
 const PASSWORD_REQUIRED_TEXT = 'Masukkan password kamu saat ini.';
 const PASSWORD_WRONG_TEXT = 'Password salah.';
+/** The API asked for a password the page did not know the account had, so none was sent. */
+const PASSWORD_ASKED_TEXT = 'Isi password kamu untuk membuat token.';
+const PASSWORD_ASKED_ERROR = 'Akun ini sudah punya password. Isi dulu, lalu buat token lagi.';
 const NEVER_EXPIRES_WARNING = 'Token ini aktif terus sampai kamu mencabutnya. Pilih ini hanya kalau memang perlu.';
 
 const tokens = ref<ApiTokenView[]>([]);
@@ -157,9 +160,15 @@ async function createToken(): Promise<void> {
       }
       if (response.code === 'REAUTH_REQUIRED') reauthNeeded.value = true;
       const texts = authFieldTexts(response.errors);
-      fieldErrors.value = { ...texts, ...(texts.name ? { name: NAME_TEXT } : {}) };
-      createError.value = authRefusalText(response.code);
-      if (texts.password && !hasPassword.value) {
+      // No password was sent, so the field's length text would mislead.
+      const asked = Boolean(texts.password) && !hasPassword.value;
+      fieldErrors.value = {
+        ...texts,
+        ...(texts.name ? { name: NAME_TEXT } : {}),
+        ...(asked ? { password: PASSWORD_ASKED_TEXT } : {}),
+      };
+      createError.value = asked ? PASSWORD_ASKED_ERROR : authRefusalText(response.code);
+      if (asked) {
         passwordAsked.value = true;
         await nextTick();
         document.getElementById('token-password')?.focus();
