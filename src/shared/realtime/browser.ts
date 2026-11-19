@@ -20,6 +20,7 @@ const handlers = new Map<string, Set<Handler>>();
 let source: EventSource | undefined;
 let attached = new Set<string>();
 let interrupted = false;
+let endedEarlier = false;
 
 function dispatch(topic: string, event: ServerEvent): void {
   for (const handler of handlers.get(topic) ?? []) handler(event);
@@ -33,6 +34,7 @@ function attach(topic: string): void {
 
 function end(): void {
   disconnectServerEvents();
+  endedEarlier = true;
   dispatch(STREAM_ENDED_EVENT, { resumed: false });
 }
 
@@ -41,7 +43,8 @@ export function connectServerEvents(): void {
   if (source || typeof EventSource === 'undefined') return;
   source = new EventSource(EVENTS_PATH, { withCredentials: true });
   attached = new Set();
-  interrupted = false;
+  interrupted = endedEarlier;
+  endedEarlier = false;
 
   source.addEventListener(STREAM_READY_EVENT, () => {
     if (!interrupted) return;

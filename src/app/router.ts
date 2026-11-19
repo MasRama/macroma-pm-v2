@@ -14,6 +14,7 @@ import activityWebRoutes from './bindings/activity.web';
 import usersWebRoutes from './bindings/users.web';
 import { canEnter } from './navigation';
 import ApiDocsPage from './pages/ApiDocsPage.vue';
+import { redirectTarget } from './pages/auth/redirect';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.vue';
 import LoginPage from './pages/auth/LoginPage.vue';
 import RegisterPage from './pages/auth/RegisterPage.vue';
@@ -173,7 +174,9 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta.guestOnly && authSession.isAuthenticated.value) {
-    return { name: 'dashboard' };
+    // A tab sent to sign in while another tab renewed the shared session
+    // (a password change) is signed in again by now: back to its page.
+    return redirectTarget(to);
   }
 
   return true;
