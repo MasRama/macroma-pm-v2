@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { getDatabase } from '../../../shared/database';
+import { closeEventStreams, createEventStream, STREAM_READY_EVENT } from '../../../shared/realtime';
+import { readEvents } from '../../../shared/realtime/tests/helpers';
+import { AUTH_SESSIONS_CHANGED_EVENT, AUTH_TOKENS_CHANGED_EVENT } from '../contract';
 import {
   createAccount,
   createAccountWithRoles,
@@ -17,7 +21,24 @@ import {
 } from '../server/accounts';
 import { createRole } from '../server/access';
 import { checkPassword, hashPassword, startSession } from '../server/service';
-import { findUserById } from '../server/repository';
+import { createApiToken, findUserById } from '../server/repository';
+
+/**
+ * A page of the account that stays open through a reset: the reset signs out
+ * every real session, so a stream resolved by session would end before the
+ * reset's events.
+ */
+async function watch(userId: string) {
+  const listener = { userId, sessionId: randomUUID() };
+  const events = new Hono().get('/events', createEventStream({ resolve: () => listener, allows: () => true }));
+  const reader = readEvents(await events.request('/events'));
+  expect(await reader.next()).toBe(STREAM_READY_EVENT);
+  return async () => {
+    const seen: string[] = [];
+    for (let event = await reader.next(100); event !== 'timeout' && event !== 'closed'; event = await reader.next(100)) seen.push(event);
+    return seen;
+  };
+}
 
 function uniqueEmail(): string {
   return `${randomUUID()}@example.com`;
@@ -134,6 +155,27 @@ describe('auth account directory', () => {
       must_change_password: 1,
     });
     expect(getDatabase().prepare('SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?').get(account.id)).toEqual({ count: 0 });
+  });
+
+  it('tells the account its API tokens changed when a managed password reset revoked some', async () => {
+    const withToken = createAccount({ id: randomUUID(), name: 'Token Holder', email: uniqueEmail(), passwordHash: 'old-hash' });
+    createApiToken(
+      { id: randomUUID(), userId: withToken.id, name: 'cli', tokenHash: randomUUID(), prefix: 'mcr_test', scope: 'write', expiresAt: null },
+      10,
+    );
+    const withoutToken = createAccount({ id: randomUUID(), name: 'No Tokens', email: uniqueEmail(), passwordHash: 'old-hash' });
+    const [heardWithToken, heardWithoutToken] = [await watch(withToken.id), await watch(withoutToken.id)];
+
+    resetAccountPassword(withToken.id, 'new-hash');
+    // Nothing revoked, nothing to tell.
+    resetAccountPassword(withoutToken.id, 'new-hash');
+
+    expect(getDatabase().prepare('SELECT revoked_at FROM api_tokens WHERE user_id = ?').get(withToken.id)).toEqual({
+      revoked_at: expect.any(Number),
+    });
+    expect(await heardWithToken()).toEqual([AUTH_SESSIONS_CHANGED_EVENT, AUTH_TOKENS_CHANGED_EVENT]);
+    expect(await heardWithoutToken()).toEqual([AUTH_SESSIONS_CHANGED_EVENT]);
+    closeEventStreams();
   });
 
   it('tells deletion listeners inside the deleting transaction, and rolls back when one throws', () => {
