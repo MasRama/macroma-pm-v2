@@ -251,7 +251,9 @@ function refusalsOf(spec: Schema, responses: Schema): DocRefusal[] {
     .map(([status, answer]) => {
       const schema = jsonSchemaOf(spec, answer);
       const code = isRecord(schema?.properties) ? flatten(spec, schema.properties.code) : {};
-      return { status: Number(status), codes: valuesOf(code) ?? [] };
+      // A status with one refusal names it as a const, several as an enum.
+      const codes = valuesOf(code) ?? (code.const === undefined ? [] : [String(code.const)]);
+      return { status: Number(status), codes };
     })
     .sort((left, right) => left.status - right.status);
 }

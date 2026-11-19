@@ -8,9 +8,8 @@ import fixture from './fixtures/openapi-v1.json';
 
 /**
  * The Dokumentasi API page and the renderer behind it, from a fixture
- * OpenAPI document: the public API's real read endpoints plus sample write
- * ones (create, update, delete), so bodies and the write scope are covered
- * before the write endpoints ship.
+ * OpenAPI document: a part of the server's own document with read and write
+ * endpoints (api-docs-fixture.test.ts keeps it equal to the server's).
  */
 const docs = readApiDocs(fixture);
 const operation = (method: string, path: string): DocOperation => {
@@ -25,9 +24,12 @@ describe('OpenAPI renderer', () => {
     expect(docs.groups.map((group) => [group.tag, group.operations.map((item) => `${item.method} ${item.path}`)])).toEqual([
       ['Workspaces', ['GET /workspaces', 'GET /workspaces/{id}']],
       ['Projects', ['GET /projects/{id}/tasks', 'POST /projects/{id}/tasks']],
-      ['Tasks', ['GET /tasks/{id}', 'PATCH /tasks/{id}', 'DELETE /tasks/{id}', 'GET /tasks/{id}/comments']],
+      [
+        'Tasks',
+        ['GET /tasks/{id}', 'PATCH /tasks/{id}', 'DELETE /tasks/{id}', 'GET /tasks/{id}/comments', 'POST /tasks/{id}/comments', 'PATCH /tasks/{id}/move'],
+      ],
     ]);
-    expect(new Set(docs.groups.flatMap((group) => group.operations.map((item) => item.id))).size).toBe(8);
+    expect(new Set(docs.groups.flatMap((group) => group.operations.map((item) => item.id))).size).toBe(10);
   });
 
   it('reads path and query parameters with their limits, defaults and allowed values', () => {
@@ -48,7 +50,18 @@ describe('OpenAPI renderer', () => {
 
   it('takes the scope from the refusals: TOKEN_SCOPE_INSUFFICIENT means write', () => {
     const scopes = docs.groups.flatMap((group) => group.operations.map((item) => `${item.method} ${item.scope}`));
-    expect(scopes).toEqual(['GET read', 'GET read', 'GET read', 'POST write', 'GET read', 'PATCH write', 'DELETE write', 'GET read']);
+    expect(scopes).toEqual([
+      'GET read',
+      'GET read',
+      'GET read',
+      'POST write',
+      'GET read',
+      'PATCH write',
+      'DELETE write',
+      'GET read',
+      'POST write',
+      'PATCH write',
+    ]);
   });
 
   it('lists body fields with required marks and response fields under data, nested', () => {
@@ -59,10 +72,11 @@ describe('OpenAPI renderer', () => {
       'description:string | null',
       'priority:string',
       'assignee_id:string | null',
-      'column_id:string',
+      'batch_id:string | null',
     ]);
-    expect(create.body?.find((field) => field.name === 'priority')).toMatchObject({ values: ['low', 'medium', 'high'], fallback: '"medium"' });
+    expect(create.body?.find((field) => field.name === 'priority')).toMatchObject({ values: ['low', 'medium', 'high'] });
     expect(create.bodyExample).toEqual({ title: '<title>' });
+    expect(operation('PATCH', '/tasks/{id}/move').bodyExample).toEqual({ column_id: 'backlog' });
 
     const list = operation('GET', '/projects/{id}/tasks');
     expect(list.body).toBeNull();
@@ -83,6 +97,9 @@ describe('OpenAPI renderer', () => {
       { status: 404, codes: ['TASK_NOT_FOUND'] },
       { status: 429, codes: ['RATE_LIMITED'] },
     ]);
+    // A status with a single refusal names its code as a const.
+    expect(operation('PATCH', '/tasks/{id}').refusals.find((refusal) => refusal.status === 409)?.codes).toEqual(['STALE_REVISION']);
+    expect(operation('PATCH', '/tasks/{id}/move').refusals.find((refusal) => refusal.status === 409)?.codes).toEqual(['TASK_ALREADY_IN_COLUMN']);
   });
 
   it('describes pagination and the error envelope when the document has them', () => {
@@ -177,7 +194,7 @@ describe('Dokumentasi API page', () => {
     release(new Response(JSON.stringify(fixture)));
     await settle();
     expect(byTestId('api-docs-loading')).toBeNull();
-    expect(allByTestId('api-docs-operation')).toHaveLength(8);
+    expect(allByTestId('api-docs-operation')).toHaveLength(10);
   });
 
   it('draws the intro, groups and each endpoint from the document', async () => {
@@ -199,7 +216,7 @@ describe('Dokumentasi API page', () => {
     expect(create.querySelector('[data-testid="api-docs-path"]')?.textContent).toBe('/api/v1/projects/{id}/tasks');
     expect(create.querySelector('[data-testid="api-docs-scope"]')?.textContent).toBe('write');
     const bodyFields = [...create.querySelectorAll('[data-testid="api-docs-body"] [data-testid="api-field"]')];
-    expect(bodyFields.map((field) => field.getAttribute('data-path'))).toEqual(['title', 'description', 'priority', 'assignee_id', 'column_id']);
+    expect(bodyFields.map((field) => field.getAttribute('data-path'))).toEqual(['title', 'description', 'priority', 'assignee_id', 'batch_id']);
     expect(bodyFields[0]?.textContent).toContain('wajib');
     expect(create.querySelector('[data-testid="api-docs-curl"] pre')?.textContent).toBe(curlFor(operation('POST', '/projects/{id}/tasks'), base));
 
@@ -276,7 +293,7 @@ describe('Dokumentasi API page', () => {
     await settle();
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     expect(byTestId('api-docs-error')).toBeNull();
-    expect(allByTestId('api-docs-operation')).toHaveLength(8);
+    expect(allByTestId('api-docs-operation')).toHaveLength(10);
   });
 
   it('refuses a document that is not OpenAPI', async () => {
