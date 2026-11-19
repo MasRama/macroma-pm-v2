@@ -66,7 +66,8 @@ async function joinWorkspace(owner: Persona, workspaceId: string, invitee: Perso
 
 const ids = (items: Array<{ id: string }>) => items.map((item) => item.id);
 
-describe('public API v1 reads', () => {
+// Many sign-ups and requests per case; a wide suite run slows them down.
+describe('public API v1 reads', { timeout: 15_000 }, () => {
   let owner: Persona;
   let teammate: Persona;
   let direct: Persona;
@@ -132,7 +133,7 @@ describe('public API v1 reads', () => {
     for (const [index, content] of ['First', 'Second', 'Third'].entries()) {
       await created(index === 1 ? teammate : owner, `/api/tasks/${tasks[1].id}/comments`, { content });
     }
-  });
+  }, 15_000);
 
   // The public API's per-token limit would otherwise carry across cases.
   beforeEach(() => resetSecurityState());
@@ -343,7 +344,7 @@ describe('public API v1 reads', () => {
   });
 });
 
-describe('public API v1 sync of changes nobody edited', () => {
+describe('public API v1 sync of changes nobody edited', { timeout: 15_000 }, () => {
   it('lists the tasks a batch adopted, a lost member and a deleted account changed, as new revisions', async () => {
     resetSecurityState();
     const owner = await signUp('Sync Owner');

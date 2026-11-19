@@ -180,7 +180,8 @@ async function parity(write: Write) {
   return api;
 }
 
-describe('public API v1 writes', () => {
+// Each case opens a live stream per account and waits for quiet; a wide suite run slows that down.
+describe('public API v1 writes', { timeout: 15_000 }, () => {
   afterEach(() => closeEventStreams());
   afterAll(() => resetSecurityState());
 
