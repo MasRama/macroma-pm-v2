@@ -514,7 +514,8 @@ onUnmounted(unwatchScroll);
   font-family: var(--font-mono);
   font-size: 0.88em;
   color: var(--ink);
-  overflow-wrap: anywhere;
+  /* A chip such as `429 RATE_LIMITED` stays on one line; the text breaks between chips. */
+  white-space: nowrap;
 }
 .docs__scopes {
   display: flex;
