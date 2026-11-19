@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import {
   accountHasPassword,
   AUTH_TOKENS_CHANGED_EVENT,
@@ -38,7 +38,12 @@ const props = withDefaults(
 );
 const client: TokensClient = props.client ?? createSecurityClient();
 const authSession = useAuthSession();
-const hasPassword = computed(() => props.hasPassword ?? accountHasPassword(authSession.user.value));
+/**
+ * Set when the API asks for a password the session said the account lacks:
+ * `hasPassword` from /me can be stale, e.g. a password just set in another tab.
+ */
+const passwordAsked = ref(false);
+const hasPassword = computed(() => passwordAsked.value || (props.hasPassword ?? accountHasPassword(authSession.user.value)));
 
 const EXPIRY_OPTIONS = [
   { value: '7', label: '7 hari' },
@@ -60,6 +65,9 @@ const SCOPE_HINT: Record<ApiTokenScope, string> = {
 const NAME_TEXT = 'Nama token wajib diisi, maksimal 80 karakter.';
 const PASSWORD_REQUIRED_TEXT = 'Masukkan password kamu saat ini.';
 const PASSWORD_WRONG_TEXT = 'Password salah.';
+/** The API asked for a password the page did not know the account had, so none was sent. */
+const PASSWORD_ASKED_TEXT = 'Isi password kamu untuk membuat token.';
+const PASSWORD_ASKED_ERROR = 'Akun ini sudah punya password. Isi dulu, lalu buat token lagi.';
 const NEVER_EXPIRES_WARNING = 'Token ini aktif terus sampai kamu mencabutnya. Pilih ini hanya kalau memang perlu.';
 
 const tokens = ref<ApiTokenView[]>([]);
@@ -152,8 +160,19 @@ async function createToken(): Promise<void> {
       }
       if (response.code === 'REAUTH_REQUIRED') reauthNeeded.value = true;
       const texts = authFieldTexts(response.errors);
-      fieldErrors.value = { ...texts, ...(texts.name ? { name: NAME_TEXT } : {}) };
-      createError.value = authRefusalText(response.code);
+      // No password was sent, so the field's length text would mislead.
+      const asked = Boolean(texts.password) && !hasPassword.value;
+      fieldErrors.value = {
+        ...texts,
+        ...(texts.name ? { name: NAME_TEXT } : {}),
+        ...(asked ? { password: PASSWORD_ASKED_TEXT } : {}),
+      };
+      createError.value = asked ? PASSWORD_ASKED_ERROR : authRefusalText(response.code);
+      if (asked) {
+        passwordAsked.value = true;
+        await nextTick();
+        document.getElementById('token-password')?.focus();
+      }
       return;
     }
     const token = toApiTokenView(response.data.token);
