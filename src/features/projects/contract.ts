@@ -220,6 +220,13 @@ export const apiTasksQuerySchema = z.object({
   ...pageQueryShape,
 });
 
+/** The public API's deleted tasks of a project, by `deleted_at` then task id, oldest first. */
+export const apiDeletedTasksQuerySchema = z.object({
+  /** Only the tasks deleted at or after this moment (ms epoch), for incremental sync. */
+  since: z.coerce.number().int().min(0).optional(),
+  ...pageQueryShape,
+});
+
 /** The public API's comment list of a task, oldest first. */
 export const apiCommentsQuerySchema = z.object({ ...pageQueryShape });
 
@@ -595,6 +602,10 @@ export function projectsResponseSchemas() {
     /** Direct members first, in joining order, then the accounts that reach the project through its workspace. */
     apiMembers: success(z.strictObject({ members: z.array(member) })),
     apiTasks: success(z.strictObject({ tasks: z.array(task), next_cursor: nextCursor })),
+    /** Each deleted task's id and when it was deleted (ms epoch). */
+    apiDeletedTasks: success(
+      z.strictObject({ deleted: z.array(z.strictObject({ id: z.string(), deleted_at: z.number() })), next_cursor: nextCursor }),
+    ),
     apiComments: success(z.strictObject({ comments: z.array(comment), next_cursor: nextCursor })),
     /** The flat `data` of a `task_moved` notification; `version` is the task's new one, like `v1.2.3`. */
     taskMovedNotificationData: z.strictObject({
@@ -684,6 +695,7 @@ export type ApiProjectSuccess = Infer<'apiProject'>;
 export type ApiColumnsSuccess = Infer<'apiColumns'>;
 export type ApiProjectMembersSuccess = Infer<'apiMembers'>;
 export type ApiTasksSuccess = Infer<'apiTasks'>;
+export type ApiDeletedTasksSuccess = Infer<'apiDeletedTasks'>;
 export type ApiCommentsSuccess = Infer<'apiComments'>;
 
 export type ProjectsResponse = ProjectsSuccess | ProjectsError;
@@ -763,10 +775,20 @@ export function projectsApiV1(): ApiOperation[] {
       path: '/projects/:id/tasks',
       summary: 'List a project\'s tasks',
       description:
-        'Ordered by `updated_at`, then `id`, oldest first, so `updated_since` and `cursor` sync changes incrementally. Deleted tasks do not appear: reconcile with a full listing.',
+        'Ordered by `updated_at`, then `id`, oldest first, so `updated_since` and `cursor` sync changes incrementally. Deleted tasks are listed by `GET /projects/{id}/tasks/deleted`.',
       query: apiTasksQuerySchema,
       responses: { 200: schemas.apiTasks },
       refusals: { ...project, 404: ['PROJECT_NOT_FOUND', 'BATCH_NOT_FOUND'] },
+    },
+    {
+      method: 'get',
+      path: '/projects/:id/tasks/deleted',
+      summary: 'List a project\'s deleted tasks',
+      description:
+        'Ordered by `deleted_at`, then `id`, oldest first. Sync with `since` and `cursor` as the task list syncs with `updated_since`, and drop these tasks from your copy.',
+      query: apiDeletedTasksQuerySchema,
+      responses: { 200: schemas.apiDeletedTasks },
+      refusals: project,
     },
     {
       method: 'get',
@@ -783,6 +805,52 @@ export function projectsApiV1(): ApiOperation[] {
       description: 'Oldest first, as a conversation reads.',
       query: apiCommentsQuerySchema,
       responses: { 200: schemas.apiComments },
+      refusals: task,
+    },
+    {
+      method: 'post',
+      path: '/projects/:id/tasks',
+      summary: 'Create a task',
+      description: 'Goes to the backlog of the given batch, or of the active batch when `batch_id` is left out. Members of the project see it live.',
+      body: createTaskInputSchema,
+      responses: { 201: schemas.taskSaved },
+      refusals: { ...project, 404: ['PROJECT_NOT_FOUND', 'BATCH_NOT_FOUND'] },
+    },
+    {
+      method: 'patch',
+      path: '/tasks/:id',
+      summary: 'Edit a task',
+      description:
+        'Send the `revision` you last read. When the task changed since, the answer is 409 `STALE_REVISION` with the task as it is now in `current`: merge, then retry with its revision.',
+      body: updateTaskInputSchema,
+      responses: { 200: schemas.taskSaved },
+      refusals: { ...task, 409: [STALE_REVISION] },
+      stale: schemas.staleTask,
+    },
+    {
+      method: 'patch',
+      path: '/tasks/:id/move',
+      summary: 'Move a task to another column',
+      description:
+        'Records a new version of the task and notifies its assignee and creator, as a move on the board does. Moving to `revisi` needs a `note`.',
+      body: moveTaskInputSchema,
+      responses: { 200: schemas.taskMoved },
+      refusals: { ...task, 409: ['TASK_ALREADY_IN_COLUMN'] },
+    },
+    {
+      method: 'delete',
+      path: '/tasks/:id',
+      summary: 'Delete a task',
+      description: 'Only the project owner may delete a task. Its comments, history and images go with it.',
+      responses: { 200: schemas.done },
+      refusals: task,
+    },
+    {
+      method: 'post',
+      path: '/tasks/:id/comments',
+      summary: 'Comment on a task',
+      body: createCommentInputSchema,
+      responses: { 201: schemas.commentAdded },
       refusals: task,
     },
   ];

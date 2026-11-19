@@ -18,4 +18,6 @@ export interface ApiOperation {
   responses: Readonly<Record<number, z.ZodType>>;
   /** The Feature's own refusals by status, beyond those every operation can answer. */
   refusals?: Readonly<Partial<Record<403 | 404 | 409 | 422, readonly string[]>>>;
+  /** The 409 `STALE_REVISION` answer of an edit, which carries the record as it is now in `current`. */
+  stale?: z.ZodType;
 }

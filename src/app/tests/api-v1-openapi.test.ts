@@ -58,15 +58,41 @@ describe('public API OpenAPI document', () => {
       expect(entry, `${operation.method} ${path}`).toBeDefined();
       const pathNames = [...operation.path.matchAll(/:([A-Za-z_]+)/g)].map(([, name]) => name);
       expect(entry.parameters.filter((parameter) => parameter.in === 'path').map((parameter) => parameter.name)).toEqual(pathNames);
-      expect(Object.keys(entry.responses)).toEqual(expect.arrayContaining(['200', '401', '403', '429']));
-      const answers = entry.responses as Record<string, { content: { 'application/json': { schema: { allOf: [unknown, { properties: { code: { enum: string[] } } }] } } } }>;
-      const codesOf = (status: string) => answers[status]?.content['application/json'].schema.allOf[1].properties.code.enum;
+      const successes = Object.keys(operation.responses);
+      expect(Object.keys(entry.responses)).toEqual(expect.arrayContaining([...successes, '401', '403', '429']));
+      const answers = entry.responses as Record<string, { description: string; content: { 'application/json': { schema: any } } }>;
+      // Every refusal names its codes; a stale edit's 409 also documents the record it carries back.
+      const codesOf = (status: string) => answers[status]?.description.replace(/^Refused: /, '').split(', ');
+      const refusedSchemaOf = (status: string) => answers[status]?.content['application/json'].schema;
       expect(codesOf('401')).toEqual(['TOKEN_INVALID', 'TOKEN_EXPIRED', 'TOKEN_REVOKED']);
+      expect(refusedSchemaOf('401').allOf[1].properties.code.enum).toEqual(codesOf('401'));
       expect(codesOf('403')).toContain('PASSWORD_CHANGE_REQUIRED');
+      if (operation.method === 'get') expect(codesOf('403')).not.toContain('TOKEN_SCOPE_INSUFFICIENT');
+      else expect(codesOf('403')).toContain('TOKEN_SCOPE_INSUFFICIENT');
       for (const [status, codes] of Object.entries(operation.refusals ?? {})) {
         expect(codesOf(status), `${path} ${status}`).toEqual(expect.arrayContaining([...(codes ?? [])]));
       }
-      if (operation.query) expect(codesOf('422')).toEqual(['VALIDATION_ERROR']);
+      if (operation.query || operation.body) expect(codesOf('422')).toEqual(['VALIDATION_ERROR']);
+      if (operation.stale) {
+        expect(refusedSchemaOf('409'), path).toMatchObject({ properties: { code: { const: 'STALE_REVISION' }, current: { type: 'object' } } });
+      }
+    }
+  });
+
+  it('documents each write\'s request body', async () => {
+    const { document } = await fetchDocument();
+    const writes = publicApiOperations().filter((operation) => operation.method !== 'get');
+    expect(writes.map((operation) => `${operation.method} ${operation.path}`).sort()).toEqual([
+      'delete /tasks/:id',
+      'patch /tasks/:id',
+      'patch /tasks/:id/move',
+      'post /projects/:id/tasks',
+      'post /tasks/:id/comments',
+    ]);
+    for (const operation of writes) {
+      const entry = document.paths[operation.path.replace(/:([A-Za-z_]+)/g, '{$1}')][operation.method] as { requestBody?: any };
+      if (operation.method === 'delete') expect(entry.requestBody).toBeUndefined();
+      else expect(entry.requestBody?.content['application/json'].schema.type, operation.path).toBe('object');
     }
   });
 

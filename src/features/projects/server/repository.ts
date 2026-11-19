@@ -350,10 +350,11 @@ export function projectIdsWithMembers(userIds: readonly string[]): string[] {
 /**
  * Removes what deleted accounts leave behind, as V1's foreign keys did:
  * the projects they owned go with everything inside, their memberships go,
- * and their names come off tasks, logs and the activity feed.
+ * and their names come off tasks, logs and the activity feed. A task that
+ * loses its assignee counts as edited, so `updated_since` syncs see it.
+ * Returns the storage keys of the attachments that went with the deleted projects.
  */
-/** Returns the storage keys of the attachments that went with the deleted projects. */
-export function forgetAccountRows(userIds: readonly string[]): string[] {
+export function forgetAccountRows(userIds: readonly string[], now = Date.now()): string[] {
   if (userIds.length === 0) return [];
   const database = getDatabase();
   const list = placeholders(userIds);
@@ -361,7 +362,9 @@ export function forgetAccountRows(userIds: readonly string[]): string[] {
     const keys = attachmentKeysWhere(`t.project_id IN (SELECT id FROM projects WHERE owner_id IN (${list}))`, userIds);
     database.prepare(`DELETE FROM projects WHERE owner_id IN (${list})`).run(...userIds);
     database.prepare(`DELETE FROM project_members WHERE user_id IN (${list})`).run(...userIds);
-    database.prepare(`UPDATE tasks SET assignee_id = NULL WHERE assignee_id IN (${list})`).run(...userIds);
+    database
+      .prepare(`UPDATE tasks SET assignee_id = NULL, revision = revision + 1, updated_at = ? WHERE assignee_id IN (${list})`)
+      .run(now, ...userIds);
     database.prepare(`UPDATE task_logs SET created_by = NULL WHERE created_by IN (${list})`).run(...userIds);
     database.prepare(`UPDATE project_activity_logs SET actor_id = NULL WHERE actor_id IN (${list})`).run(...userIds);
     database.prepare(`UPDATE task_comments SET user_id = NULL WHERE user_id IN (${list})`).run(...userIds);
@@ -789,6 +792,28 @@ export function pageTasks(
     .all(...values, limit + 1) as TaskRow[];
 }
 
+export interface TaskDeletionRow {
+  task_id: string;
+  deleted_at: number;
+}
+
+/** The public API's deleted tasks: by `deleted_at` then id, from `since`, after `after`, and `limit + 1` rows. */
+export function pageTaskDeletions(projectId: string, filter: { since?: number; after?: PageCursor }, limit: number): TaskDeletionRow[] {
+  const conditions = ['project_id = ?'];
+  const values: Array<string | number> = [projectId];
+  if (filter.since !== undefined) {
+    conditions.push('deleted_at >= ?');
+    values.push(filter.since);
+  }
+  if (filter.after) {
+    conditions.push('(deleted_at > ? OR (deleted_at = ? AND task_id > ?))');
+    values.push(filter.after.at, filter.after.at, filter.after.id);
+  }
+  return getDatabase()
+    .prepare(`SELECT task_id, deleted_at FROM task_deletions WHERE ${conditions.join(' AND ')} ORDER BY deleted_at, task_id LIMIT ?`)
+    .all(...values, limit + 1) as TaskDeletionRow[];
+}
+
 function nextSortOrder(projectId: string, column: TaskColumn): number {
   const row = getDatabase()
     .prepare('SELECT MAX(sort_order) AS max FROM tasks WHERE project_id = ? AND column_id = ?')
@@ -978,12 +1003,18 @@ export function moveTask(
   return { task: findTask(task.id) as TaskRow, log };
 }
 
-/** Deletes the task; returns the storage keys of its attachments. */
+/**
+ * Deletes the task and records when, so the public API can tell a syncing
+ * client it is gone; returns the storage keys of its attachments.
+ */
 export function deleteTask(task: TaskRow, actorId: string): string[] {
   const database = getDatabase();
   return database.transaction(() => {
     const keys = attachmentKeysWhere('t.id = ?', [task.id]);
     database.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+    database
+      .prepare('INSERT INTO task_deletions (task_id, project_id, deleted_at) VALUES (?, ?, ?)')
+      .run(task.id, task.project_id, Date.now());
     logActivity({
       projectId: task.project_id,
       eventType: 'task.deleted',

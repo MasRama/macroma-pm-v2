@@ -4,13 +4,13 @@ import { closeEventStreams } from '../../shared/realtime';
 import { publicApiOperations, type PublicApiOperation } from '../openapi';
 import { app, PUBLIC_API_PREFIX, resetSecurityState } from '../server';
 import { callApi } from './api';
-import { issueApiToken, signUp, type Persona } from './personas';
+import { grantAdmin, issueApiToken, signUp, type Persona } from './personas';
 
 /**
  * The public API's read endpoints through the composed application, called
  * with personal access tokens. Every successful answer is parsed with the
  * schema its operation documents, and the last case checks that each
- * documented operation answered at least once.
+ * documented read answered at least once; the write test covers the rest.
  */
 const operations = publicApiOperations();
 const answered = new Set<PublicApiOperation>();
@@ -289,7 +289,103 @@ describe('public API v1 reads', () => {
     }
   });
 
-  it('answered every documented operation in its documented shape', () => {
-    expect(operations.filter((operation) => !answered.has(operation)).map((operation) => operation.path)).toEqual([]);
+  it('lists deleted tasks from the board and from the API, by deletion and page by page', async () => {
+    const tasksPath = `/api/projects/${project.id}/tasks`;
+    const doomed: Array<{ id: string }> = [];
+    for (const title of ['Gone by board', 'Gone by API', 'Gone too']) doomed.push((await created(owner, tasksPath, { title })).task);
+    const at = base + 20_000;
+    vi.useFakeTimers({ toFake: ['Date'], now: at });
+    try {
+      expect((await callApi(owner, 'DELETE', `/api/tasks/${doomed[0].id}`)).status).toBe(200);
+      vi.setSystemTime(at + 1000);
+      const byApi = await app.request(`${PUBLIC_API_PREFIX}/tasks/${doomed[1].id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token.ownerWrite}` },
+      });
+      expect(byApi.status).toBe(200);
+      expect((await callApi(owner, 'DELETE', `/api/tasks/${doomed[2].id}`)).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+    // Two deletions in the same millisecond are ordered by task id.
+    const expected = [
+      { id: doomed[0].id, deleted_at: at },
+      ...[doomed[1].id, doomed[2].id].sort().map((id) => ({ id, deleted_at: at + 1000 })),
+    ];
+
+    const deletedPath = `/projects/${project.id}/tasks/deleted`;
+    const all = await v1(token.owner, deletedPath);
+    expect(all.status).toBe(200);
+    expect(all.body.data).toEqual({ deleted: expected, next_cursor: null });
+    expect((await everyPage(token.owner, `/projects/${project.id}/tasks`, 'tasks', 100)).items.map((task) => task.id)).not.toContain(doomed[0].id);
+
+    // `since` is inclusive; `cursor` resumes after the last deletion a page returned.
+    expect((await v1(token.owner, `${deletedPath}?since=${at + 1000}`)).body.data.deleted).toEqual(expected.slice(1));
+    expect((await v1(token.owner, `${deletedPath}?since=${at + 1001}`)).body.data.deleted).toEqual([]);
+    expect(await everyPage(token.owner, deletedPath, 'deleted', 1)).toEqual({ items: expected, pages: 3 });
+    expect(await everyPage(token.owner, `${deletedPath}?since=${at}`, 'deleted', 2)).toEqual({ items: expected, pages: 2 });
+
+    // The same access as the task list.
+    expect((await v1(token.teammate, deletedPath)).body.data.deleted).toEqual(expected);
+    expect(await v1(token.outsider, deletedPath)).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
+    expect(await v1(token.owner, `/projects/${foreign.id}/tasks/deleted`)).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
+    expect(await v1(token.owner, '/projects/f2a1c7de-0000-4000-8000-000000000000/tasks/deleted')).toMatchObject({
+      status: 404,
+      body: { code: 'PROJECT_NOT_FOUND' },
+    });
+    expect(await v1(token.owner, `${deletedPath}?since=-1`)).toMatchObject({ status: 422, body: { errors: { since: expect.anything() } } });
+    expect((await v1(token.owner, `/projects/${personal.id}/tasks/deleted`)).body.data).toEqual({ deleted: [], next_cursor: null });
+  });
+
+  it('answered every documented read in its documented shape', () => {
+    const reads = operations.filter((operation) => operation.method === 'get');
+    expect(reads.filter((operation) => !answered.has(operation)).map((operation) => operation.path)).toEqual([]);
+  });
+});
+
+describe('public API v1 sync of changes nobody edited', () => {
+  it('lists the tasks a batch adopted, a lost member and a deleted account changed, as new revisions', async () => {
+    resetSecurityState();
+    const owner = await signUp('Sync Owner');
+    const leaving = await signUp('Leaving Member');
+    const deleted = await signUp('Deleted Account');
+    const admin = await signUp('Sync Admin');
+    grantAdmin(admin.id);
+    const { project } = await created(owner, '/api/projects', { name: 'Sync' });
+    for (const member of [leaving, deleted]) {
+      expect((await callApi(owner, 'POST', `/api/projects/${project.id}/members`, { email: member.email })).status).toBe(201);
+    }
+    const tasksPath = `/api/projects/${project.id}/tasks`;
+    const { task: left } = await created(owner, tasksPath, { title: 'Left behind', assignee_id: leaving.id });
+    const { task: orphaned } = await created(owner, tasksPath, { title: 'Orphaned', assignee_id: deleted.id });
+    const { task: adopted } = await created(owner, tasksPath, { title: 'Adopted' });
+    const token = await issueApiToken(owner, 'read');
+
+    /** A sync point after everything written so far, and what changed since it once `change` ran. */
+    async function changedBy(change: () => Promise<{ status: number }>) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const since = Date.now();
+      expect((await v1(token, `/projects/${project.id}/tasks?updated_since=${since}`)).body.data.tasks).toEqual([]);
+      expect([200, 201]).toContain((await change()).status);
+      return (await v1(token, `/projects/${project.id}/tasks?updated_since=${since}`)).body.data.tasks as Array<{
+        id: string;
+        batch_id: string | null;
+        assignee: unknown;
+        revision: number;
+      }>;
+    }
+
+    // The project's first active batch adopts its batch-less tasks.
+    const intoBatch = await changedBy(() => callApi(owner, 'POST', `/api/projects/${project.id}/batches`, { activate: true }));
+    expect(intoBatch.map((task) => task.id).sort()).toEqual([left.id, orphaned.id, adopted.id].sort());
+    expect(intoBatch.every((task) => task.batch_id !== null && task.revision === 2)).toBe(true);
+
+    // A member who can no longer open the project comes off its tasks.
+    const afterLeaving = await changedBy(() => callApi(owner, 'DELETE', `/api/projects/${project.id}/members/${leaving.id}`));
+    expect(afterLeaving).toMatchObject([{ id: left.id, assignee: null, revision: 3 }]);
+
+    // A deleted account comes off every task it was assigned.
+    const afterDeletion = await changedBy(() => callApi(admin, 'DELETE', '/api/users', { ids: [deleted.id] }));
+    expect(afterDeletion).toMatchObject([{ id: orphaned.id, assignee: null, revision: 3 }]);
   });
 });
