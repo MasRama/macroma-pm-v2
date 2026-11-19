@@ -83,6 +83,8 @@ other `/api` route ignores the `Authorization` header.
   with the same check as the two-factor routes: a wrong one answers
   `400 INVALID_PASSWORD`. An account made through Google, whose password is
   random and unknown, sets one first (forgot password), as for two-factor.
+- A token expires after 90 days unless the request names 1–365 days, or
+  `null` for never.
 - Only the SHA-256 of a token is stored; its secret is shown once, when it is
   made. `last_used_at` is written at most once a minute.
 - A `read` token calls `GET`/`HEAD` only; a `write` token calls every method

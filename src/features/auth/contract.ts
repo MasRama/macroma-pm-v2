@@ -191,6 +191,9 @@ export const confirmPasswordInputSchema = z.object({
 export const API_TOKEN_SCOPES = ['read', 'write'] as const;
 export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
 
+/** Days a new token works when the request names no expiry. */
+export const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
+
 /**
  * Creates a personal access token; its secret is in the answer once and never
  * again. Like two-factor changes, it re-confirms the account's password, so a
@@ -205,8 +208,14 @@ export const createApiTokenInputSchema = z.object({
     .max(80, 'Token name must be at most 80 characters')
     .refine(hasNoControlChars, { message: `Token name ${CONTROL_MESSAGE}` }),
   scope: z.enum(API_TOKEN_SCOPES),
-  /** Days until it stops working, or null for a token that never expires. */
-  expiresInDays: z.number().int().min(1, 'Expiry is 1 to 365 days').max(365, 'Expiry is 1 to 365 days').nullable(),
+  /** Days until it stops working (90 when left out), or null for a token that never expires. */
+  expiresInDays: z
+    .number()
+    .int()
+    .min(1, 'Expiry is 1 to 365 days')
+    .max(365, 'Expiry is 1 to 365 days')
+    .nullable()
+    .default(API_TOKEN_DEFAULT_EXPIRY_DAYS),
 });
 
 export type CreateApiTokenInput = z.infer<typeof createApiTokenInputSchema>;

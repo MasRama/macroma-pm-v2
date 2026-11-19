@@ -138,7 +138,7 @@ revoke tokens. The web client is `createSecurityClient()` from
 | Method and path | Access | Body | `data` |
 |---|---|---|---|
 | `GET /api/auth/tokens` | signed in | | `{ tokens: ApiToken[] }`: working and expired tokens, never revoked ones, newest first |
-| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays: 1–365 \| null, password }` | `201 { token: ApiToken, secret }` |
+| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays?: 1–365 \| null, password }` | `201 { token: ApiToken, secret }` |
 | `DELETE /api/auth/tokens/:id` | signed in | | `{ revoked: 1 }`; another account's or an already revoked token answers `404 NOT_FOUND` |
 | `POST /api/auth/tokens/revoke-all` | signed in, strict limit | | `{ revoked }`, the number revoked |
 
@@ -158,6 +158,8 @@ so people can tell tokens apart.
   `422 VALIDATION_ERROR`. An account made through Google has an unusable
   random password, so, as for two-factor, it sets a password first (forgot
   password) and confirms with that.
+- **Expiry.** Leaving `expiresInDays` out makes a 90-day token; a token that
+  never expires needs `expiresInDays: null`. At most 365 days.
 - **Scopes.** `read` calls only `GET` and `HEAD`; `write` calls every method.
 - **Limit.** An account holds at most 50 working tokens; the 51st answers
   `409 TOKEN_LIMIT_REACHED`. Expired and revoked tokens do not count.

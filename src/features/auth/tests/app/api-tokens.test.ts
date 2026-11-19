@@ -128,6 +128,18 @@ describe('personal access tokens', () => {
     expect(storedRows(browser.id)).toEqual([]);
   });
 
+  it('expires a new token after 90 days unless the request names an expiry or null for never', async () => {
+    const browser = await signUp();
+    const DAY = 24 * 60 * 60 * 1000;
+
+    const defaulted = schemas.apiTokenCreated.parse((await create(browser, { name: 'default', scope: 'read' })).body).data.token;
+    expect(defaulted.expiresAt! - defaulted.createdAt).toBe(90 * DAY);
+    const never = schemas.apiTokenCreated.parse((await create(browser, { name: 'never', scope: 'read', expiresInDays: null })).body).data.token;
+    expect(never.expiresAt).toBeNull();
+    const longest = schemas.apiTokenCreated.parse((await create(browser, { name: 'year', scope: 'read', expiresInDays: 365 })).body).data.token;
+    expect(longest.expiresAt! - longest.createdAt).toBe(365 * DAY);
+  });
+
   it('stores only the SHA-256 of the secret', async () => {
     const browser = await signUp();
     const { secret } = (await create(browser, { name: 'CI', scope: 'read', expiresInDays: null })).body.data;
@@ -217,7 +229,7 @@ describe('personal access tokens', () => {
       { name: 'ok', scope: 'read', expiresInDays: 0 },
       { name: 'ok', scope: 'read', expiresInDays: 366 },
       { name: 'ok', scope: 'read', expiresInDays: 1.5 },
-      { name: 'ok', scope: 'read' },
+      { name: 'ok', expiresInDays: null },
       { name: 'ok', scope: 'read', expiresInDays: null, password: 42 },
     ]) {
       resetSecurityState();
