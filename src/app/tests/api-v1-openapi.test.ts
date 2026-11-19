@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { env } from '../../shared/config';
 import { apiRoutes } from '../../shared/security';
 import { API_REFUSAL_CODES, API_TOKEN_REFUSAL_CODES } from '../../shared/security/codes';
 import { PROJECTS_REFUSAL_CODES } from '../../features/projects';
@@ -13,6 +14,7 @@ import { app, PUBLIC_API_PREFIX, PUBLIC_API_SPEC_PATH } from '../server';
  */
 type Document = {
   openapi: string;
+  info: Record<string, unknown>;
   paths: Record<string, Record<string, { parameters: Array<{ name: string; in: string }>; responses: Record<string, unknown> }>>;
   components: { schemas: { Error: { properties: { code: { enum: string[] } } } }; securitySchemes: Record<string, unknown> };
   security: unknown[];
@@ -31,6 +33,8 @@ describe('public API OpenAPI document', () => {
     expect(document.openapi).toBe('3.1.0');
     expect(document.security).toEqual([{ bearerAuth: [] }]);
     expect(document.components.securitySchemes.bearerAuth).toMatchObject({ type: 'http', scheme: 'bearer' });
+    // The limit each token gets, as the public API's limiter is configured.
+    expect(document.info['x-rate-limit']).toEqual({ requests: env.API_RATE_LIMIT_MAX, window_seconds: env.API_RATE_LIMIT_WINDOW_MS / 1000 });
 
     // A token, even a made-up one, changes nothing about this one path.
     expect((await fetchDocument({ Authorization: 'Bearer nonsense' })).response.status).toBe(200);

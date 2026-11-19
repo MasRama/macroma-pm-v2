@@ -100,8 +100,14 @@ function operationObject(operation: PublicApiOperation): JsonSchema {
   };
 }
 
+/** How many requests one token may make in a window, as the public API's limiter counts them. */
+export interface PublicApiRateLimit {
+  requests: number;
+  windowMs: number;
+}
+
 /** The OpenAPI 3.1 document of the public API mounted at `prefix`. */
-export function openApiDocument(prefix: string): JsonSchema {
+export function openApiDocument(prefix: string, rateLimit: PublicApiRateLimit): JsonSchema {
   const operations = publicApiOperations();
   const paths: Record<string, Record<string, JsonSchema>> = {};
   for (const operation of operations) {
@@ -122,6 +128,8 @@ export function openApiDocument(prefix: string): JsonSchema {
       version: '1',
       description:
         'Read and change Macroma workspaces, projects and tasks from your own tools. Authenticate with a personal access token as a Bearer token; a `read` token may only use GET.',
+      // Past this, each token is answered 429 `RATE_LIMITED` with `Retry-After`.
+      'x-rate-limit': { requests: rateLimit.requests, window_seconds: Math.round(rateLimit.windowMs / 1000) },
     },
     servers: [{ url: prefix }],
     security: [{ bearerAuth: [] }],

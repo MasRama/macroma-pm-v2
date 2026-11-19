@@ -3,7 +3,11 @@
   "info": {
     "title": "Macroma public API",
     "version": "1",
-    "description": "Read and change Macroma workspaces, projects and tasks from your own tools. Authenticate with a personal access token as a Bearer token; a `read` token may only use GET."
+    "description": "Read and change Macroma workspaces, projects and tasks from your own tools. Authenticate with a personal access token as a Bearer token; a `read` token may only use GET.",
+    "x-rate-limit": {
+      "requests": 120,
+      "window_seconds": 60
+    }
   },
   "servers": [
     {
@@ -2960,6 +2964,9 @@
                       "revisi",
                       "review",
                       "done"
+                    ],
+                    "examples": [
+                      "review"
                     ]
                   },
                   "note": {
@@ -3410,7 +3417,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "A personal access token (`mcr_\u2026`), created while signed in to Macroma."
+        "description": "A personal access token (`mcr_…`), created while signed in to Macroma."
       }
     },
     "schemas": {
