@@ -135,6 +135,47 @@ describe('personal access tokens', () => {
     expect(storedRows(browser.id)).toHaveLength(2);
   });
 
+  it('asks for the password again once an account without one sets it, by changing it or by an email reset', async () => {
+    const usable = (userId: string) =>
+      (getDatabase().prepare('SELECT password_usable FROM users WHERE id = ?').get(userId) as { password_usable: number }).password_usable;
+    const noPassword = { name: 'no password', scope: 'read', password: undefined };
+
+    // An account whose password is marked unusable while its holder still knows it, to reach the change form.
+    const changing = await signUp();
+    getDatabase().prepare('UPDATE users SET password_usable = 0 WHERE id = ?').run(changing.id);
+    expect((await send(changing, '/api/auth/me')).body.data.user.hasPassword).toBe(false);
+    const changed = await send(changing, '/api/auth/change-password', {
+      method: 'POST',
+      body: { current_password: PASSWORD, new_password: 'a brand new passphrase' },
+    });
+    expect(changed.status).toBe(200);
+    expect(usable(changing.id)).toBe(1);
+    expect((await send(changing, '/api/auth/me')).body.data.user.hasPassword).toBe(true);
+    // A fresh session no longer stands in for the password.
+    expect((await create(changing, noPassword)).status).toBe(422);
+    expect((await create(changing, { ...noPassword, password: 'a brand new passphrase' })).status).toBe(201);
+
+    // An unverified account someone took back with Google, which then sets a password by email.
+    resetSecurityState();
+    const claimed = await signUp();
+    claimUnverifiedAccount(claimed.id, await hashPassword(randomUUID()));
+    expect(usable(claimed.id)).toBe(0);
+    const resetToken = randomUUID();
+    createPasswordResetToken({ id: randomUUID(), userId: claimed.id, tokenHash: sha256(resetToken), expiresAt: Date.now() + 60_000 });
+    const reset = await send(undefined, '/api/auth/reset-password', {
+      method: 'POST',
+      body: { token: resetToken, password: 'a brand new passphrase' },
+    });
+    expect(reset.status).toBe(200);
+    expect(usable(claimed.id)).toBe(1);
+    const { email } = getDatabase().prepare('SELECT email FROM users WHERE id = ?').get(claimed.id) as { email: string };
+    const signedIn = { id: claimed.id, cookie: '' };
+    expect((await send(signedIn, '/api/auth/login', { method: 'POST', body: { email, password: 'a brand new passphrase' } })).status).toBe(200);
+    expect((await send(signedIn, '/api/auth/me')).body.data.user.hasPassword).toBe(true);
+    expect((await create(signedIn, noPassword)).status).toBe(422);
+    expect((await create(signedIn, { ...noPassword, password: 'a brand new passphrase' })).status).toBe(201);
+  });
+
   it('expires a new token after 90 days unless the request names an expiry or null for never', async () => {
     const browser = await signUp();
     const DAY = 24 * 60 * 60 * 1000;
