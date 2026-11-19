@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.0](https://github.com/MasRama/macroma-pm-v2/compare/v2.0.1...v2.1.0) (2026-11-19)
+
+
+### Features
+
+* **api:** read-only public API v1 ([#40](https://github.com/MasRama/macroma-pm-v2/issues/40)) ([623bc79](https://github.com/MasRama/macroma-pm-v2/commit/623bc79dfdab3ee55c901229bedfa9a27bb66bb1))
+* **api:** write endpoints in public API v1 ([#42](https://github.com/MasRama/macroma-pm-v2/issues/42)) ([fe53a8e](https://github.com/MasRama/macroma-pm-v2/commit/fe53a8e14ee00146734def802969c14078f960ca))
+* **app:** API docs page ([#44](https://github.com/MasRama/macroma-pm-v2/issues/44)) ([6f58193](https://github.com/MasRama/macroma-pm-v2/commit/6f5819305c16efed2190be1ae9445d67395ff736))
+* **auth:** personal access tokens ([#36](https://github.com/MasRama/macroma-pm-v2/issues/36)) ([f73c77e](https://github.com/MasRama/macroma-pm-v2/commit/f73c77ec8fb51da403b0326930149646afa532ce))
+* manage API tokens from a Token API settings page ([#38](https://github.com/MasRama/macroma-pm-v2/issues/38)) ([c246e89](https://github.com/MasRama/macroma-pm-v2/commit/c246e89b55685f6a56c16f0708925c034d2b40e6))
+
+
+### Bug Fixes
+
+* **auth:** harden personal access tokens ([#39](https://github.com/MasRama/macroma-pm-v2/issues/39)) ([ea19dea](https://github.com/MasRama/macroma-pm-v2/commit/ea19dea01427c578d1506839323844bd1816a9cc))
+* **projects:** bump task updated_at on comments and attachments ([#43](https://github.com/MasRama/macroma-pm-v2/issues/43)) ([5225176](https://github.com/MasRama/macroma-pm-v2/commit/5225176344266790f0e12022125054fef4e22a7d))
+* **realtime:** report resumed after a stream ended ([#45](https://github.com/MasRama/macroma-pm-v2/issues/45)) ([e028d53](https://github.com/MasRama/macroma-pm-v2/commit/e028d53e6c3fd4eb124771b87a45ccf37735205d))
+* **tokens:** show the password field when the server asks for one ([#46](https://github.com/MasRama/macroma-pm-v2/issues/46)) ([350b6b6](https://github.com/MasRama/macroma-pm-v2/commit/350b6b690ecc61fc1494a642a0efdd22c6bf704e))
+
 ## [2.0.1](https://github.com/MasRama/macroma-pm-v2/compare/v2.0.0...v2.0.1) (2026-11-18)
 
 
