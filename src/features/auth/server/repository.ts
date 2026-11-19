@@ -10,6 +10,8 @@ export interface StoredUser {
   phone: string | null;
   verified: number;
   must_change_password: number;
+  /** 0 while the account only has the random password Google sign-in gave it. */
+  password_usable: number;
   created_at: number;
   updated_at: number;
 }
@@ -22,9 +24,11 @@ export interface SessionUser {
   phone: string | null;
   verified: number;
   must_change_password: number;
+  password_usable: number;
 }
 
-const STORED_USER_COLUMNS = 'id, name, email, password, avatar, phone, verified, must_change_password, created_at, updated_at';
+const STORED_USER_COLUMNS =
+  'id, name, email, password, avatar, phone, verified, must_change_password, password_usable, created_at, updated_at';
 
 export function findUserByEmail(email: string): StoredUser | undefined {
   return getDatabase()
@@ -45,21 +49,33 @@ export function createUser(data: {
   password: string;
   phone?: string | null;
   verified?: boolean;
+  /** False for the random password Google sign-in gives a new account. */
+  passwordUsable?: boolean;
 }): StoredUser {
   const now = Date.now();
   getDatabase()
     .prepare(
-      `INSERT INTO users (id, name, email, password, phone, verified, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, name, email, password, phone, verified, password_usable, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(data.id, data.name, data.email, data.password, data.phone ?? null, data.verified ? 1 : 0, now, now);
+    .run(
+      data.id,
+      data.name,
+      data.email,
+      data.password,
+      data.phone ?? null,
+      data.verified ? 1 : 0,
+      data.passwordUsable === false ? 0 : 1,
+      now,
+      now,
+    );
 
   return findUserByEmail(data.email)!;
 }
 
 export function updatePassword(userId: string, password: string): void {
   getDatabase()
-    .prepare('UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+    .prepare('UPDATE users SET password = ?, must_change_password = 0, password_usable = 1, updated_at = ? WHERE id = ?')
     .run(password, Date.now(), userId);
 }
 
@@ -76,7 +92,7 @@ export function claimUnverifiedAccount(userId: string, unusablePasswordHash: str
     database
       .prepare(
         `UPDATE users
-         SET password = ?, verified = 1, must_change_password = 0,
+         SET password = ?, verified = 1, must_change_password = 0, password_usable = 0,
              two_factor_secret = NULL, two_factor_pending_secret = NULL, two_factor_enabled_at = NULL,
              two_factor_last_step = NULL, revision = revision + 1, updated_at = ?
          WHERE id = ?`,
@@ -137,13 +153,21 @@ export function createSession(data: {
 export function findUserBySessionId(sessionId: string): (SessionUser & { session_last_seen_at: number | null }) | undefined {
   return getDatabase()
     .prepare(
-      `SELECT u.id, u.name, u.email, u.avatar, u.phone, u.verified, u.must_change_password,
+      `SELECT u.id, u.name, u.email, u.avatar, u.phone, u.verified, u.must_change_password, u.password_usable,
               s.last_seen_at AS session_last_seen_at
        FROM users u
        INNER JOIN sessions s ON s.user_id = u.id
        WHERE s.id = ? AND s.expires_at > ?`,
     )
     .get(sessionId, Date.now()) as (SessionUser & { session_last_seen_at: number | null }) | undefined;
+}
+
+/** When the session signed in, or undefined for an unknown one. */
+export function sessionCreatedAt(sessionId: string): number | undefined {
+  const row = getDatabase().prepare('SELECT created_at FROM sessions WHERE id = ?').get(sessionId) as
+    | { created_at: number }
+    | undefined;
+  return row?.created_at;
 }
 
 export function touchSession(sessionId: string, now: number): void {
@@ -369,7 +393,7 @@ export function redeemPasswordResetToken(tokenHash: string, passwordHash: string
       .get(tokenHash, now) as { id: string; user_id: string } | undefined;
     if (!token) return undefined;
     const updated = database
-      .prepare('UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+      .prepare('UPDATE users SET password = ?, must_change_password = 0, password_usable = 1, updated_at = ? WHERE id = ?')
       .run(passwordHash, now, token.user_id);
     if (updated.changes === 0) return undefined;
     database.prepare('UPDATE password_reset_tokens SET used_at = ? WHERE id = ?').run(now, token.id);

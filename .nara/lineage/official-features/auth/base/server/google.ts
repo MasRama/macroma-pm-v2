@@ -110,7 +110,7 @@ export function createGoogleRoutes(activity: AuthActivitySink | undefined, optio
     const password = await hashPassword(randomBytes(32).toString('hex'));
     const roleSlug = options.registration ? options.registration.role : undefined;
     return getDatabase().transaction(() => {
-      const created = createUser({ id: randomUUID(), name, email, password, verified: true });
+      const created = createUser({ id: randomUUID(), name, email, password, verified: true, passwordUsable: false });
       if (roleSlug !== undefined) {
         const role = findRoleBySlug(roleSlug);
         if (!role) throw new Error(`Registration role "${roleSlug}" does not exist; declare it with declareRoles.`);

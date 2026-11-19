@@ -32,6 +32,7 @@ export const AUTH_REFUSAL_TEXT: Record<AuthRefusal, string> = {
   MAIL_DISABLED: 'Reset password lewat email belum aktif di server ini. Minta admin untuk reset password kamu.',
   NOT_FOUND: 'Datanya sudah tidak ada.',
   PROTECTED_ROLE: 'Role ini nggak bisa diubah atau dihapus.',
+  REAUTH_REQUIRED: 'Masuk ulang dulu, lalu buat token dalam 5 menit.',
   RESET_TOKEN_INVALID: 'Link reset ini sudah tidak berlaku. Minta link baru.',
   STALE_REVISION: 'Data ini baru diubah orang lain. Cek lagi lalu simpan.',
   TOKEN_LIMIT_REACHED: 'Token API kamu sudah mencapai batas. Cabut salah satu dulu.',

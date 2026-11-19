@@ -37,6 +37,7 @@ export const AUTH_REFUSAL_CODES = [
   'MAIL_DISABLED',
   'NOT_FOUND',
   'PROTECTED_ROLE',
+  'REAUTH_REQUIRED',
   'RESET_TOKEN_INVALID',
   STALE_REVISION,
   'TOKEN_LIMIT_REACHED',
@@ -196,11 +197,14 @@ export const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
 
 /**
  * Creates a personal access token; its secret is in the answer once and never
- * again. Like two-factor changes, it re-confirms the account's password, so a
- * stolen session alone cannot mint a token that outlives a password reset.
+ * again. The account's owner confirms it: with the current `password`, like
+ * two-factor changes, or, for an account without a usable password (made
+ * through Google; `hasPassword` false), by having signed in within the last
+ * 5 minutes. A stolen session alone cannot mint a token.
  */
 export const createApiTokenInputSchema = z.object({
-  ...confirmPasswordInputSchema.shape,
+  /** Required when the account has a usable password; ignored otherwise. */
+  password: confirmPasswordInputSchema.shape.password.optional(),
   name: z
     .string()
     .trim()
@@ -279,6 +283,8 @@ export function authResponseSchemas() {
     roles: z.array(z.string()).readonly(),
     permissions: z.array(z.string()).readonly(),
     mustChangePassword: z.boolean(),
+    /** False while the account only has the random password Google sign-in gave it. */
+    hasPassword: z.boolean(),
   });
   const session = z.strictObject({
     /** Public session handle; never the cookie token. */

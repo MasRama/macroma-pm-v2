@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../../../../app/server';
 import { signIn, signUp, TEST_PASSWORD, type Persona } from '../../../../app/tests/personas';
 import { getDatabase } from '../../../../shared/database';
-import { mergeResponseCookies } from '../../../../shared/security/tests/helpers';
+import { csrfHeaders, issueCsrf, mergeResponseCookies } from '../../../../shared/security/tests/helpers';
 import { GOOGLE } from '../../server/config';
 import { GOOGLE_STATE_COOKIE_NAME } from '../../server/google';
 import { enableTwoFactor, findUserByEmail, findUserById } from '../../server/repository';
@@ -106,9 +106,20 @@ describe('Google sign-in', () => {
 
     expect(callback.headers.get('location')).toBe('/');
     const me = await app.request('/api/auth/me', { headers: { Cookie: cookie } });
-    await expect(me.json()).resolves.toMatchObject({ data: { user: { email, name: 'Grace Google', verified: true } } });
+    await expect(me.json()).resolves.toMatchObject({
+      data: { user: { email, name: 'Grace Google', verified: true, hasPassword: false } },
+    });
     // V1 used the email as the password of Google accounts.
     await expect(signIn(email, email)).rejects.toThrow('Sign-in failed with 401');
+
+    // Fresh from Google, it makes an API token without a password to type.
+    const csrf = await issueCsrf(app, cookie);
+    const created = await app.request('/api/auth/tokens', {
+      method: 'POST',
+      headers: csrfHeaders(csrf, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ name: 'From Google', scope: 'read' }),
+    });
+    expect(created.status).toBe(201);
   });
 
   it('signs in to the existing verified account with that email, keeping its password', async () => {
@@ -119,7 +130,7 @@ describe('Google sign-in', () => {
 
     expect(callback.headers.get('location')).toBe('/');
     const me = await app.request('/api/auth/me', { headers: { Cookie: cookie } });
-    await expect(me.json()).resolves.toMatchObject({ data: { user: { id: existing.id, name: 'Existing Person' } } });
+    await expect(me.json()).resolves.toMatchObject({ data: { user: { id: existing.id, name: 'Existing Person', hasPassword: true } } });
     expect((await currentUser(existing.cookie)).status).toBe(200);
     await expect(signIn(existing.email, TEST_PASSWORD)).resolves.toContain('auth_id=');
   });
@@ -135,7 +146,7 @@ describe('Google sign-in', () => {
 
     // Google proved who owns the email, so it signs in without the squatter's second factor.
     expect(callback.headers.get('location')).toBe('/');
-    expect(await currentUser(cookie)).toMatchObject({ status: 200, user: { id: squatter.id, verified: true } });
+    expect(await currentUser(cookie)).toMatchObject({ status: 200, user: { id: squatter.id, verified: true, hasPassword: false } });
     // Nothing the squatter set up still opens the account.
     expect((await currentUser(squatter.cookie)).status).toBe(401);
     await expect(signIn(squatter.email, TEST_PASSWORD)).rejects.toThrow('Sign-in failed with 401');

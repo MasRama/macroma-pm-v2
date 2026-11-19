@@ -108,24 +108,31 @@ describe('personal access tokens', () => {
         body: { name: 'no password', scope: 'write', expiresInDays: null, password },
       });
       expect(missing.status).toBe(422);
-      expect(schemas.error.parse(missing.body).code).toBe('VALIDATION_ERROR');
+      expect(schemas.error.parse(missing.body)).toMatchObject({ code: 'VALIDATION_ERROR', errors: { password: [expect.any(String)] } });
     }
     expect(storedRows(browser.id)).toEqual([]);
   });
 
-  it('treats an account made through Google like two-factor changes do: it sets a password first', async () => {
+  it('asks an account without a usable password to have signed in within the last 5 minutes instead', async () => {
     const browser = await signUp();
     // What Google sign-in stores for a new account: a random password nobody knows.
     getDatabase()
-      .prepare('UPDATE users SET password = ? WHERE id = ?')
+      .prepare('UPDATE users SET password = ?, password_usable = 0 WHERE id = ?')
       .run(await hashPassword(randomUUID()), browser.id);
+    expect((await send(browser, '/api/auth/me')).body.data.user.hasPassword).toBe(false);
 
-    const refused = await create(browser, { name: 'google', scope: 'read', expiresInDays: null });
-    expect(refused.status).toBe(400);
-    expect(schemas.error.parse(refused.body).code).toBe('INVALID_PASSWORD');
-    const twoFactor = await send(browser, '/api/auth/two-factor/setup', { method: 'POST', body: { password: PASSWORD } });
-    expect([twoFactor.status, twoFactor.body]).toEqual([refused.status, refused.body]);
-    expect(storedRows(browser.id)).toEqual([]);
+    // Just signed in: no password to type, and any sent is not checked.
+    expect((await create(browser, { name: 'fresh', scope: 'read', password: undefined })).status).toBe(201);
+    expect((await create(browser, { name: 'fresh again', scope: 'read', password: 'anything' })).status).toBe(201);
+
+    // The same session a little over 5 minutes later.
+    getDatabase()
+      .prepare('UPDATE sessions SET created_at = ? WHERE user_id = ?')
+      .run(Date.now() - API_TOKENS.REAUTH_WINDOW_MS - 1_000, browser.id);
+    const stale = await create(browser, { name: 'stale', scope: 'read', password: undefined });
+    expect(stale.status).toBe(403);
+    expect(schemas.error.parse(stale.body).code).toBe('REAUTH_REQUIRED');
+    expect(storedRows(browser.id)).toHaveLength(2);
   });
 
   it('expires a new token after 90 days unless the request names an expiry or null for never', async () => {

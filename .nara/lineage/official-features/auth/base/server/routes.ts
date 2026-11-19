@@ -212,6 +212,7 @@ function currentUserPayload(user: SessionUser): CurrentUser {
     roles: getUserRoles(user.id).map((role) => role.slug),
     permissions: getUserPermissions(user.id).map((permission) => permission.slug),
     mustChangePassword: user.must_change_password === 1,
+    hasPassword: user.password_usable === 1,
   };
 }
 

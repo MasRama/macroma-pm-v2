@@ -92,7 +92,7 @@ registration policy and limits.
 | `POST /api/auth/login` | public, strict limit | `{ email, password }` | `{ twoFactorRequired }`; when `true`, finish with the challenge |
 | `POST /api/auth/two-factor/challenge` | public, strict limit | `{ code }` (6 digits) or `{ recovery_code }` | signs in |
 | `POST /api/auth/logout` | public | | |
-| `GET /api/auth/me` | signed in | | `{ user: { id, name, email, avatar, phone, verified, roles[], permissions[], mustChangePassword } }` |
+| `GET /api/auth/me` | signed in | | `{ user: { id, name, email, avatar, phone, verified, roles[], permissions[], mustChangePassword, hasPassword } }`; `hasPassword` is `false` while an account made through Google has only its random password |
 | `POST /api/auth/change-password` | signed in | `{ current_password, new_password }` | |
 | `POST /api/auth/forgot-password` | public, strict limit | `{ email }` | always 200 with the same message, whether or not an account uses the email |
 | `POST /api/auth/reset-password` | public, strict limit | `{ token, password }` | |
@@ -138,7 +138,7 @@ revoke tokens. The web client is `createSecurityClient()` from
 | Method and path | Access | Body | `data` |
 |---|---|---|---|
 | `GET /api/auth/tokens` | signed in | | `{ tokens: ApiToken[] }`: working and expired tokens, never revoked ones, newest first |
-| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays?: 1–365 \| null, password }` | `201 { token: ApiToken, secret }` |
+| `POST /api/auth/tokens` | signed in, strict limit | `{ name (1–80), scope: 'read' \| 'write', expiresInDays?: 1–365 \| null, password? }` | `201 { token: ApiToken, secret }` |
 | `DELETE /api/auth/tokens/:id` | signed in | | `{ revoked: 1 }`; another account's or an already revoked token answers `404 NOT_FOUND` |
 | `POST /api/auth/tokens/revoke-all` | signed in, strict limit | | `{ revoked }`, the number revoked |
 
@@ -151,13 +151,15 @@ so people can tell tokens apart.
 - **The secret** (`mcr_` and 43 base64url characters) is in the create answer
   once and never again: only its SHA-256 is stored. Show it with a copy button
   and say it will not be shown again.
-- **Password confirmation.** Creating a token asks for the account's current
-  `password`, exactly like the two-factor screens, so a stolen session alone
-  cannot mint a token that outlives a password reset. A wrong one answers
-  `400 INVALID_PASSWORD` ("Password is incorrect"), an empty one
-  `422 VALIDATION_ERROR`. An account made through Google has an unusable
-  random password, so, as for two-factor, it sets a password first (forgot
-  password) and confirms with that.
+- **Confirming the owner.** A stolen session alone cannot mint a token.
+  When `GET /api/auth/me` says `hasPassword: true`, creating a token needs the
+  account's current `password`, checked exactly like the two-factor screens:
+  a wrong one answers `400 INVALID_PASSWORD` ("Password is incorrect"), a
+  missing or empty one `422 VALIDATION_ERROR` (`errors.password`). An account
+  made through Google (`hasPassword: false`) has no password to type, so
+  `password` is not checked and it must have signed in within the last
+  5 minutes instead; an older sign-in answers `403 REAUTH_REQUIRED`: send the
+  person through Google sign-in again, then retry.
 - **Expiry.** Leaving `expiresInDays` out makes a 90-day token; a token that
   never expires needs `expiresInDays: null`. At most 365 days.
 - **Scopes.** `read` calls only `GET` and `HEAD`; `write` calls every method.
@@ -170,7 +172,7 @@ so people can tell tokens apart.
 - **Live.** Creating or revoking tokens publishes `auth.tokens-changed` to the
   account, so its other tabs refetch `GET /api/auth/tokens`.
 
-Codes: `INVALID_PASSWORD`, `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
+Codes: `INVALID_PASSWORD`, `REAUTH_REQUIRED`, `TOKEN_LIMIT_REACHED`, `NOT_FOUND`.
 
 ## Profile
 

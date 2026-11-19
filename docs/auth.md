@@ -79,10 +79,13 @@ session only, so a token can never make another token. `/api/v1` in turn
 ignores session cookies, needs no CSRF token and sets no cookie, and every
 other `/api` route ignores the `Authorization` header.
 
-- Making a token re-confirms the account's password (`password` in the body),
-  with the same check as the two-factor routes: a wrong one answers
-  `400 INVALID_PASSWORD`. An account made through Google, whose password is
-  random and unknown, sets one first (forgot password), as for two-factor.
+- Making a token re-confirms its owner: the account's current `password`,
+  with the same check as the two-factor routes (`400 INVALID_PASSWORD`), or,
+  for an account without a usable password (made or claimed through Google,
+  `users.password_usable = 0`, `hasPassword: false` on `/me`), a sign-in less
+  than 5 minutes old (`403 REAUTH_REQUIRED` otherwise). Setting a password
+  makes it usable. Accounts made through Google before this flag existed
+  cannot be told apart and count as having one: they set it by email.
 - A token expires after 90 days unless the request names 1–365 days, or
   `null` for never.
 - Only the SHA-256 of a token is stored; its secret is shown once, when it is

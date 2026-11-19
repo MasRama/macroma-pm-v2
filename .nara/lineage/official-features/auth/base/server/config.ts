@@ -82,4 +82,6 @@ export const API_TOKENS = {
   TOUCH_INTERVAL_MS: 60 * 1000,
   /** How long revoked and expired tokens keep answering why before they are removed. */
   PURGE_AFTER_MS: 30 * 24 * 60 * 60 * 1000,
+  /** An account without a usable password makes tokens only this soon after signing in. */
+  REAUTH_WINDOW_MS: 5 * 60 * 1000,
 } as const;
